@@ -19,7 +19,8 @@ from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer)
 from transformers.pytorch_utils import Conv1D
 
 import tensorrt_llm
-from tensorrt_llm._utils import torch_to_numpy, release_gc, numpy_to_torch
+from tensorrt_llm._utils import torch_to_numpy, numpy_to_torch
+from tensorrt_llm.hlapi.utils import release_gc
 from tensorrt_llm.mapping import Mapping
 from tensorrt_llm.layers import MoeConfig
 
