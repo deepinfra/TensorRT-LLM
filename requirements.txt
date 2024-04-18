@@ -24,7 +24,8 @@ tensorrt==9.3.0.post12.dev1
 # https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-24-02.html#rel-24-02 uses 2.3.0a0.
 torch>=2.2.0a,<=2.3.0a
 nvidia-ammo==0.9.3
-transformers==4.38.2
+transformers==4.40.0
+tokenizers>=0.19.1
 wheel
 optimum
 evaluate
