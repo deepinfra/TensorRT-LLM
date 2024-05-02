@@ -190,6 +190,7 @@ void DecodingLayer<T>::forward(
 
     // common inputs
     auto const& endIds = params->end_ids;
+    auto const& minP = params->min_p;
     auto const localBatchSize = static_cast<std::size_t>(params->local_batch_size);
 
     // dynamic decode GPT
@@ -219,8 +220,10 @@ void DecodingLayer<T>::forward(
                     dynamic_decode_vocab_size_units_offset);
             auto const end_id_offset
                 = endIds.slice({dynamic_decode_batch_size}, dynamic_ite * dynamic_decode_batch_size);
+            auto const min_p_offset
+                = minP.slice({dynamic_decode_batch_size}, dynamic_ite * dynamic_decode_batch_size);
 
-            auto forwardParams = std::make_shared<BeamSearchInputParams>(step, ite, logits_offset, end_id_offset,
+            auto forwardParams = std::make_shared<BeamSearchInputParams>(step, ite, logits_offset, end_id_offset, min_p_offset,
                 *params->src_cache_indirection, static_cast<std::int32_t>(params->max_attention_window),
                 static_cast<std::int32_t>(params->sink_token_length), static_cast<std::int32_t>(maxSeqLen));
 
@@ -258,8 +261,9 @@ void DecodingLayer<T>::forward(
         Tensor const logits_slice{
             params->logits->slice({localBatchSize, static_cast<size_t>(beamWidth), params->logits->shape[2]}, 0)};
         Tensor const end_id_slice{endIds.slice({localBatchSize}, 0)};
+        Tensor const min_p_slice{minP.slice({localBatchSize}, 0)};
         auto decode_input_tensors = std::make_shared<SamplingInputParams>(
-            step, ite, logits_slice, end_id_slice, static_cast<SizeType32>(maxSeqLen));
+            step, ite, logits_slice, end_id_slice, min_p_slice, static_cast<SizeType32>(maxSeqLen));
 
         decode_input_tensors->finished = params->finished;
 
@@ -298,7 +302,7 @@ void DecodingLayer<T>::forward(
     {
         TLLM_CHECK_WITH_INFO(beamWidth == 1, "Decoding mode is Medusa, but beamWidth != 1 (%d != 1)", beamWidth);
 
-        auto medusaInputParams = std::make_shared<MedusaInputParams>(params->logits.value(), endIds);
+        auto medusaInputParams = std::make_shared<MedusaInputParams>(params->logits.value(), endIds, minP);
         medusaInputParams->finished = outputs->finished.value();
         medusaInputParams->batch_slots = params->batch_slots;
         medusaInputParams->paths = params->medusaInputs->medusaPaths;
