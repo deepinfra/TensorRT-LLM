@@ -137,6 +137,7 @@ void BeamSearchLayer<T>::forwardAsyncSingleRequest(
     bh.earlyStoppings = mEarlyStoppingDevice;
     bh.inputLengths = ip->input_lengths->template getPtr<int const>();
     bh.endIds = ip->end_ids.template getPtr<int const>();
+    bh.minP = ip->min_p.template getPtr<float const>();
     bh.logProbsTiled = (op->output_log_probs) ? op->output_log_probs->template getPtr<float>() : nullptr;
     bh.sequenceLengths = op->sequence_length->template getPtr<int>();
     bh.cumLogProbs = op->cum_log_probs->template getPtr<float>();
@@ -183,6 +184,7 @@ void BeamSearchLayer<T>::forwardAsync(
 
     // common inputs
     auto const& endIds = params->end_ids;
+    auto const& minP = params->min_p;
     auto const localBatchSize = static_cast<std::size_t>(params->local_batch_size);
 
     TLLM_CHECK_WITH_INFO(localDecoderDomain.getBeamWidth() > 1,
@@ -209,8 +211,10 @@ void BeamSearchLayer<T>::forwardAsync(
             = params->logits->slice({dynamic_decode_batch_size, params->logits->shape[1], params->logits->shape[2]},
                 dynamic_decode_vocab_size_units_offset);
         auto const end_id_offset = endIds.slice({dynamic_decode_batch_size}, dynamic_ite * dynamic_decode_batch_size);
+        auto const min_p_offset  = minP.slice({dynamic_decode_batch_size}, dynamic_ite * dynamic_decode_batch_size);
 
-        auto forwardParams = std::make_shared<BeamSearchInputParams>(step, ite, logits_offset, end_id_offset,
+
+        auto forwardParams = std::make_shared<BeamSearchInputParams>(step, ite, logits_offset, end_id_offset, min_p_offset,
             *params->src_cache_indirection, static_cast<std::int32_t>(params->max_attention_window),
             static_cast<std::int32_t>(params->sink_token_length), static_cast<std::int32_t>(maxSeqLen));
 

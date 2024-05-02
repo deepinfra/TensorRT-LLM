@@ -164,10 +164,11 @@ public:
 class BaseInputParams
 {
 public:
-    explicit BaseInputParams(runtime::SizeType32 step, runtime::SizeType32 ite, tc::Tensor endIds)
+    explicit BaseInputParams(runtime::SizeType32 step, runtime::SizeType32 ite, tc::Tensor endIds, tc::Tensor minPs)
         : step{step}
         , ite{ite}
         , end_ids{std::move(endIds)}
+        , min_p{std::move(minPs)}
     {
     }
 
@@ -177,6 +178,7 @@ public:
     runtime::SizeType32 step;
     runtime::SizeType32 ite;
     tc::Tensor end_ids;                    // [maxBatchSize]
+    tc::Tensor min_p;                      // [maxBatchSize]
     std::optional<tc::Tensor> batch_slots; // [forwardBatchSize], on pinned memory
     std::optional<tc::Tensor> finished;    // [maxBatchSize, maxBeamWidth]
 };
@@ -186,8 +188,8 @@ class DynamicDecodeInputParams : public BaseInputParams
 public:
     DynamicDecodeInputParams(runtime::SizeType32 step, runtime::SizeType32 ite, runtime::SizeType32 maxInputLength,
         runtime::SizeType32 maxAttentionWindow, runtime::SizeType32 sinkTokenLength, runtime::SizeType32 localBatchSize,
-        tc::Tensor endIds)
-        : BaseInputParams(step, ite, std::move(endIds))
+        tc::Tensor endIds, tc::Tensor minPs)
+        : BaseInputParams(step, ite, std::move(endIds), std::move(minPs))
         , max_input_length{maxInputLength}
         , max_attention_window{maxAttentionWindow}
         , sink_token_length{sinkTokenLength}
