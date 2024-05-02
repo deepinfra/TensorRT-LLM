@@ -165,6 +165,7 @@ void SamplingLayer<T>::forward(
 
     auto logits = inputs->logits.template getPtr<T>();
     auto endIds = inputs->end_ids.template getPtr<int const>();
+    auto minPs = inputs->min_p.template getPtr<const float>();
     auto batchSlots = inputs->batch_slots ? inputs->batch_slots->template getPtr<int const>() : nullptr;
     float* cumLogProbs = (outputs->cum_log_probs) ? outputs->cum_log_probs->template getPtr<float>() : nullptr;
     float* outputLogProbs = (outputs->output_log_probs) ? outputs->output_log_probs->template getPtr<float>() : nullptr;
@@ -176,7 +177,9 @@ void SamplingLayer<T>::forward(
     auto const skipTopP = !mDecodingMode.isTopP();
 
     // Compute probabilities either for TopP or if cumLogProbs or outputLogProbs are specified
-    bool const skipSoftMax = skipTopP && cumLogProbs == nullptr && outputLogProbs == nullptr;
+    //bool const skipSoftMax = skipTopP && cumLogProbs == nullptr && outputLogProbs == nullptr;
+    // FIXME: We can't skip softmax if min_p is in use.
+    bool const skipSoftMax = false;
 
     inputs->curand_states = mCurandStatesDevice;
     inputs->sampling_workspace = mSamplingWorkspaceDevice;
@@ -184,7 +187,7 @@ void SamplingLayer<T>::forward(
 
     invokeAddBiasSoftMax(logits, (T**) nullptr, logits, (T*) (nullptr), endIds, finishedInput, batchSlots, batchSize,
         mDecoderDomain.getMaxBatchSize(), /* bw */ 1, mDecoderDomain.getVocabSize(),
-        mDecoderDomain.getVocabSizePadded(), skipSoftMax, /* batchSlotLogits */ false, mStream);
+        mDecoderDomain.getVocabSizePadded(), skipSoftMax, /* batchSlotLogits */ false, minPs, mStream);
     sync_check_cuda_error();
 
     for (auto&& layer : mSamplingLayers)
