@@ -444,6 +444,7 @@ void DynamicDecodeLayer<T>::layersForward(Tensor& logits, OutputParams& outputs,
 
     // common inputs
     auto const& endIds = params.end_ids;
+    auto const& minP = params.min_p;
     auto const localBatchSize = static_cast<std::size_t>(params.local_batch_size);
 
     // dynamic decode GPT
@@ -472,8 +473,10 @@ void DynamicDecodeLayer<T>::layersForward(Tensor& logits, OutputParams& outputs,
                 {dynamic_decode_batch_size, logits.shape[1], logits.shape[2]}, dynamic_decode_vocab_size_units_offset);
             auto const end_id_offset
                 = endIds.slice({dynamic_decode_batch_size}, dynamic_ite * dynamic_decode_batch_size);
+            auto const min_p_offset
+                = minP.slice({dynamic_decode_batch_size}, dynamic_ite * dynamic_decode_batch_size);
 
-            typename BeamSearchLayer<T>::ForwardParams forwardParams{step, ite, logits_offset, end_id_offset,
+            typename BeamSearchLayer<T>::ForwardParams forwardParams{step, ite, logits_offset, end_id_offset, min_p_offset,
                 *params.src_cache_indirection, static_cast<std::int32_t>(params.max_attention_window),
                 static_cast<std::int32_t>(params.sink_token_length), static_cast<std::int32_t>(maxSeqLen)};
 
@@ -510,8 +513,9 @@ void DynamicDecodeLayer<T>::layersForward(Tensor& logits, OutputParams& outputs,
         // sentences once.
         Tensor const logits_slice{logits.slice({localBatchSize, static_cast<size_t>(beamWidth), logits.shape[2]}, 0)};
         Tensor const end_id_slice{endIds.slice({localBatchSize}, 0)};
+        Tensor const min_p_slice{minP.slice({localBatchSize}, 0)};
         typename BaseSamplingLayer<T>::ForwardParams decode_input_tensors{
-            step, ite, logits_slice, end_id_slice, static_cast<SizeType>(maxSeqLen)};
+            step, ite, logits_slice, end_id_slice, min_p_slice, static_cast<SizeType>(maxSeqLen)};
 
         decode_input_tensors.finished = params.finished;
 
@@ -550,7 +554,7 @@ void DynamicDecodeLayer<T>::layersForward(Tensor& logits, OutputParams& outputs,
     {
         TLLM_CHECK_WITH_INFO(beamWidth == 1, "Decoding mode is Medusa, but beamWidth != 1 (%d != 1)", beamWidth);
 
-        typename MedusaDecodingLayer<T>::MedusaForwardParams medusaInputParams(logits, endIds);
+        typename MedusaDecodingLayer<T>::MedusaForwardParams medusaInputParams(logits, endIds, minP);
         medusaInputParams.finished = outputs.finished.value();
         medusaInputParams.batch_slots = params.batch_slots;
         medusaInputParams.paths = params.medusaInputs->medusaPaths;

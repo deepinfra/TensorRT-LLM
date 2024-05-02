@@ -50,10 +50,10 @@ public:
     class ForwardParams : public DecodingParams
     {
     public:
-        explicit ForwardParams(runtime::SizeType step, runtime::SizeType ite, tc::Tensor logits, tc::Tensor endIds,
+        explicit ForwardParams(runtime::SizeType step, runtime::SizeType ite, tc::Tensor logits, tc::Tensor endIds, tc::Tensor minPs,
             tc::Tensor src_cache_indirection, runtime::SizeType max_attention_window,
             runtime::SizeType sink_token_length, runtime::SizeType max_seq_len)
-            : DecodingParams(step, ite, std::move(logits), std::move(endIds))
+            : DecodingParams(step, ite, std::move(logits), std::move(endIds), std::move(minPs))
             , src_cache_indirection{std::move(src_cache_indirection)}
             , max_attention_window{max_attention_window}
             , sink_token_length{sink_token_length}

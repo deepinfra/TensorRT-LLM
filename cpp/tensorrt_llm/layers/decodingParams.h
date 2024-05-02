@@ -39,11 +39,12 @@ public:
 class DecodingParams
 {
 public:
-    DecodingParams(runtime::SizeType32 step, runtime::SizeType32 ite, tc::Tensor logits, tc::Tensor end_ids)
+    DecodingParams(runtime::SizeType32 step, runtime::SizeType32 ite, tc::Tensor logits, tc::Tensor end_ids, tc::Tensor min_p)
         : step{step}
         , ite{ite}
         , logits{std::move(logits)}
         , end_ids{std::move(end_ids)}
+        , min_p{std::move(min_p)}
     {
     }
 
@@ -52,6 +53,7 @@ public:
     runtime::SizeType32 ite;
     tc::Tensor logits;                     // [local_batch_size, beam_width, vocab_size_padded]
     tc::Tensor end_ids;                    // [local_batch_size]
+    tc::Tensor min_p;                      // [local_batch_size]
     std::optional<tc::Tensor> batch_slots; // [local_batch_size], on pinned memory
     std::optional<tc::Tensor> finished;    // [batch_size * beam_width]
 };

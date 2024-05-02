@@ -93,7 +93,7 @@ public:
     {
     public:
         ForwardParams(SizeType32 step, SizeType32 ite, SizeType maxInputLength, SizeType maxAttentionWindow,
-            SizeType sinkTokenLength, SizeType localBatchSize, tc::Tensor endIds)
+            SizeType sinkTokenLength, SizeType localBatchSize, tc::Tensor endIds, tc::Tensor minPs)
             : step{step}
             , ite{ite}
             , max_input_length{maxInputLength}
@@ -103,6 +103,7 @@ public:
             , max_stop_words_len{0}
             , max_bad_words_len{0}
             , end_ids{std::move(endIds)}
+            , min_p{std::move(minPs)}
         {
         }
 
@@ -116,6 +117,7 @@ public:
         SizeType max_stop_words_len;
         SizeType max_bad_words_len;
         tc::Tensor end_ids; // [batch_size], on gpu
+        tc::Tensor min_p; // [batch_size], on gpu
 
         // One of these two fields has to be set
         // DynamicDecodeLayer::forward checks for it

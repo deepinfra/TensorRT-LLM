@@ -53,8 +53,8 @@ public:
     class MedusaForwardParams : public DecodingParams
     {
     public:
-        MedusaForwardParams(tc::Tensor logits, tc::Tensor endIds)
-            : DecodingParams{0, 0, std::move(logits), std::move(endIds)}
+        MedusaForwardParams(tc::Tensor logits, tc::Tensor endIds, tc::Tensor minPs)
+            : DecodingParams{0, 0, std::move(logits), std::move(endIds), std::move(minPs)}
         {
         }
 

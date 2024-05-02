@@ -53,8 +53,8 @@ public:
     class ForwardParams : public DecodingParams
     {
     public:
-        ForwardParams(int step, int ite, tc::Tensor logits, tc::Tensor end_ids, int max_seq_len)
-            : DecodingParams{step, ite, std::move(logits), std::move(end_ids)}
+        ForwardParams(int step, int ite, tc::Tensor logits, tc::Tensor end_ids, tc::Tensor min_ps, int max_seq_len)
+            : DecodingParams{step, ite, std::move(logits), std::move(end_ids), std::move(min_ps)}
             , max_seq_len{max_seq_len}
         {
         }
