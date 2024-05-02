@@ -44,8 +44,8 @@ public:
 class MedusaInputParams : public BaseInputParams
 {
 public:
-    explicit MedusaInputParams(tc::Tensor logits, tc::Tensor endIds)
-        : BaseInputParams{0, 0, std::move(endIds)}
+    explicit MedusaInputParams(tc::Tensor logits, tc::Tensor endIds, tc::Tensor minPs)
+        : BaseInputParams{0, 0, std::move(endIds), std::move(minPs)}
         , logits{std::move(logits)}
     {
     }
