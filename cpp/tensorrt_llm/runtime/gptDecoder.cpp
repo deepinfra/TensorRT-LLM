@@ -162,7 +162,7 @@ std::shared_ptr<tl::DynamicDecodeInputParams> prepareInputs(
 {
     auto constexpr ite = 0; // no pipeline parallelism
     auto forwardParams = std::make_shared<tl::DynamicDecodeInputParams>(input.step, ite, input.maxLength,
-        input.maxAttentionWindow, input.sinkTokenLength, input.maxBatchSize, tcc::toTllmTensor(*input.endIds));
+        input.maxAttentionWindow, input.sinkTokenLength, input.maxBatchSize, tcc::toTllmTensor(*input.endIds), tcc::toTllmTensor(*input.minP));
 
     if (input.logitsVec)
     {

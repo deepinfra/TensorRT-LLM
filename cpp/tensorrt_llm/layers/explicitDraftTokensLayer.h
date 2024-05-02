@@ -43,7 +43,7 @@ class ExplicitDraftTokensInputParams : public BaseInputParams
 {
 public:
     explicit ExplicitDraftTokensInputParams()
-        : BaseInputParams{0, 0, tc::Tensor()}
+        : BaseInputParams{0, 0, tc::Tensor(), tc::Tensor()}
     {
     }
 

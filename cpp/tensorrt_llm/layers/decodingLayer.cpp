@@ -207,6 +207,7 @@ std::tuple<std::shared_ptr<BaseOutputParams>, std::shared_ptr<BaseInputParams>> 
     auto const localDecoderDomain = getLocalDecoderDomain(params, mDecoderDomain);
     auto const maxSeqLen = outputs->output_ids.shape[outputs->output_ids.shape.size() - 1];
     auto const& endIds = params->end_ids;
+    auto const& minP = params->min_p;
 
     std::shared_ptr<BaseOutputParams> preparedOutputs;
     std::shared_ptr<BaseInputParams> preparedInputs;
@@ -231,8 +232,9 @@ std::tuple<std::shared_ptr<BaseOutputParams>, std::shared_ptr<BaseInputParams>> 
         Tensor const logitsSlice{params->logits->slice(
             {localBatchSize, static_cast<size_t>(localDecoderDomain.getBeamWidth()), params->logits->shape[2]}, 0)};
         Tensor const endIdSlice{endIds.slice({localBatchSize}, 0)};
+        Tensor const minPSlice{minP.slice({localBatchSize}, 0)};
         auto decodeInputs = std::make_shared<SamplingInputParams>(
-            step, ite, logitsSlice, endIdSlice, static_cast<SizeType32>(maxSeqLen));
+            step, ite, logitsSlice, endIdSlice, minPSlice, static_cast<SizeType32>(maxSeqLen));
 
         decodeInputs->finished = params->finished;
 
@@ -275,7 +277,7 @@ std::tuple<std::shared_ptr<BaseOutputParams>, std::shared_ptr<BaseInputParams>> 
         TLLM_CHECK_WITH_INFO(localDecoderDomain.getBeamWidth() == 1,
             "Decoding mode is Medusa, but beamWidth != 1 (%d != 1)", localDecoderDomain.getBeamWidth());
 
-        auto medusaInputParams = std::make_shared<MedusaInputParams>(params->logits.value(), endIds);
+        auto medusaInputParams = std::make_shared<MedusaInputParams>(params->logits.value(), endIds, minP);
         medusaInputParams->finished = outputs->finished.value();
         medusaInputParams->batch_slots = params->batch_slots;
         medusaInputParams->paths = params->medusaInputs->medusaPaths;
