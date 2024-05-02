@@ -48,9 +48,9 @@ class BeamSearchInputParams : public BaseInputParams
 {
 public:
     explicit BeamSearchInputParams(runtime::SizeType32 step, runtime::SizeType32 ite, tc::Tensor logits,
-        tc::Tensor endIds, tc::Tensor src_cache_indirection, runtime::SizeType32 max_attention_window,
-        runtime::SizeType32 sink_token_length, runtime::SizeType32 max_seq_len)
-        : BaseInputParams(step, ite, std::move(endIds))
+	tc::Tensor endIds, tc::Tensor minPs, tc::Tensor src_cache_indirection, runtime::SizeType32 max_attention_window,
+	runtime::SizeType32 sink_token_length, runtime::SizeType32 max_seq_len)
+        : BaseInputParams(step, ite, std::move(endIds), std::move(minPs))
         , logits{std::move(logits)}
         , max_attention_window{max_attention_window}
         , sink_token_length{sink_token_length}
