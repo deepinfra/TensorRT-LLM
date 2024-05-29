@@ -76,6 +76,12 @@ void GptDecoder<T>::setup(
     {
         auto const& topK = mSamplingConfig.topK.value();
         setupParams->samplingParams.runtime_top_k = std::vector<SizeType32>(std::begin(topK), std::end(topK));
+        for (auto &k : setupParams->samplingParams.runtime_top_k.value())
+        {
+            if (k >= 1000000) {
+                k = 0;
+            }
+        }
     }
 
     setupParams->samplingParams.runtime_top_p = mSamplingConfig.topP;
