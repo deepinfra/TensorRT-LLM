@@ -41,6 +41,7 @@ Example usage:
 
     python mmlu.py --hf_model_dir <HF model path> --engine_dir <TRTLLM engine path> --test_trt_llm
     python mmlu.py --hf_model_dir <HF model path> --engine_dir <TRTLLM engine path> --test_hf
+    mpirun -n 8 --allow-run-as-root python /app/tensorrt_llm/examples/mmlu.py --hf_model_dir /data/models--mistralai--Mixtral-8x22B-Instruct-v0.1/ --engine_dir /data/trt/mistralai--Mixtral-8x22B-Instruct-v0.1-fp8-tp8-H100/ --test_trt_llm
 """
 
 import argparse
@@ -253,6 +254,7 @@ class Pipeline:
 
     def __call__(self, prompt):
         # Run the model in batch size 1 and beam size 1
+        prompt = self.tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False)
         inputs = self.tokenizer.encode(prompt, return_tensors="pt").squeeze(0)
         batch_input_ids = [inputs]
 

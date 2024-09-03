@@ -204,7 +204,8 @@ def get_calib_dataloader(dataset_name_or_dir="cnn_dailymail",
                          tokenizer=None,
                          batch_size=1,
                          calib_size=512,
-                         block_size=512):
+                         block_size=512,
+                         dataset_transform_fn=None):
     print("Loading calibration dataset")
     if dataset_name_or_dir == "pileval":
         dataset = load_dataset(
@@ -216,7 +217,12 @@ def get_calib_dataloader(dataset_name_or_dir="cnn_dailymail",
         dataset = load_dataset(dataset_name_or_dir, name="3.0.0", split="train")
         dataset = dataset["article"][:calib_size]
     else:
-        raise NotImplementedError
+        dataset = load_dataset(dataset_name_or_dir, split="train")
+        if dataset_transform_fn:
+            dataset = dataset_transform_fn(dataset, tokenizer, calib_size)
+        else:
+            dataset = dataset[:calib_size]
+    print(f"Calibration sample: {dataset[:8]}")
 
     batch_encoded = tokenizer.batch_encode_plus(dataset,
                                                 return_tensors="pt",
@@ -258,7 +264,8 @@ def quantize_model(model, quant_cfg, calib_dataloader=None):
 def quantize_and_export(*, model_dir, calib_dataset, dtype, qformat,
                         kv_cache_dtype, calib_size, batch_size,
                         calib_max_seq_length, awq_block_size, output_dir,
-                        tp_size, pp_size, seed, tokenizer_max_seq_length):
+                        tp_size, pp_size, seed, tokenizer_max_seq_length,
+                        dataset_transform_fn=None):
     '''
         Load model from the model_dir, call Modelopt to quantize the model, and then export
         the quantized model as TRT-LLM checkpoint
@@ -312,6 +319,7 @@ def quantize_and_export(*, model_dir, calib_dataset, dtype, qformat,
             batch_size=batch_size,
             calib_size=calib_size,
             block_size=calib_max_seq_length,
+            dataset_transform_fn=dataset_transform_fn,
         )
 
         if qformat in quant_cfg_choices():
