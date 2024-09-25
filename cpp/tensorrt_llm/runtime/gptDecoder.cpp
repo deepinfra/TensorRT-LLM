@@ -254,16 +254,16 @@ std::shared_ptr<tl::BaseDecodingInputs> prepareInputs(DecodingInput const& input
     std::shared_ptr<tl::DecodingInputs> forwardParams;
     if (decodingMode.isTopKorTopP())
     {
-        forwardParams = std::make_shared<tl::SamplingInputs>(input.endIds, input.step, ite, input.batchSize);
+        forwardParams = std::make_shared<tl::SamplingInputs>(input.endIds, input.minPs, input.step, ite, input.batchSize);
     }
     else if (decodingMode.isBeamSearch())
     {
         forwardParams = std::make_shared<tl::DecodingInputs>(
-            input.endIds, input.step, ite, input.batchSize, input.maxAttentionWindow, input.sinkTokenLength);
+            input.endIds, input.minPs, input.step, ite, input.batchSize, input.maxAttentionWindow, input.sinkTokenLength);
     }
     else if (decodingMode.isMedusa())
     {
-        forwardParams = std::make_shared<tl::MedusaDecodingInputs>(input.endIds, input.batchSize);
+        forwardParams = std::make_shared<tl::MedusaDecodingInputs>(input.endIds, input.minPs, input.batchSize);
     }
     else if (decodingMode.isLookahead())
     {
@@ -271,7 +271,7 @@ std::shared_ptr<tl::BaseDecodingInputs> prepareInputs(DecodingInput const& input
     }
     else if (decodingMode.isExplicitDraftTokens())
     {
-        forwardParams = std::make_shared<tl::ExplicitDraftTokensInputs>(input.endIds, input.batchSize);
+        forwardParams = std::make_shared<tl::ExplicitDraftTokensInputs>(input.endIds, input.minPs, input.batchSize);
     }
 
     // No logits for explicit draft tokens

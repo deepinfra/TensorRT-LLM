@@ -35,7 +35,7 @@ public:
     using TensorPtr = ITensor::SharedPtr;
 
     DecodingInput(SizeType32 maxLength, SizeType32 maxAttentionWindow, SizeType32 sinkTokenLength, SizeType32 batchSize,
-        TensorPtr logits, TensorPtr endIds)
+        TensorPtr logits, TensorPtr endIds, TensorPtr minPs)
         : step{maxLength}
         , maxLength{maxLength}
         , maxAttentionWindow{maxAttentionWindow}
@@ -45,6 +45,7 @@ public:
         , maxBadWordsLen{0}
         , logits{std::move(logits)}
         , endIds{std::move(endIds)}
+        , minPs{std::move(minPs)}
     {
         TLLM_CHECK_WITH_INFO(static_cast<bool>(this->logits), "Invalid logits tensor");
         TLLM_CHECK_WITH_INFO(static_cast<bool>(this->endIds), "Invalid endIds tensor");
@@ -74,6 +75,8 @@ public:
                    //!< another view on the @property logits
 
     TensorConstPtr endIds; //!<  [batchSize * beamWidth], on gpu
+
+    TensorConstPtr minPs;  //|<  [batchSize * beamWidth], on gpu
 
     // optional parameters
     TensorConstPtr finished;      //!<  [batchSize, beamWidth], finished states at current iteration.

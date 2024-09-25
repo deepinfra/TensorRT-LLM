@@ -86,6 +86,7 @@ private:
     TensorPtr mAcceptedLengthCumSumDevice;
     TensorPtr mPackedPathsDevice;
     TensorPtr mEndIdsDevice;
+    TensorPtr mMinPsDevice;
     TensorPtr mBatchSlots;
 
     TensorPtr mTokensPerStepDevice;
