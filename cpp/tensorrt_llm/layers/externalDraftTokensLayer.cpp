@@ -207,6 +207,7 @@ void ExternalDraftTokensLayer<T>::forwardAsync(std::shared_ptr<BaseDecodingOutpu
     auto const batchSize = inputs->logits.value()->getDimension<0>();
 
     auto const* endIds = bufferCast<TokenIdType>(*inputs->endIds);
+    auto const* minPs = bufferCast<float const*>(*inputs->minPs);
 
     FinishedState const* finishedInput = (inputs->finished)
         ? reinterpret_cast<FinishedState const*>(bufferCast<FinishedState::UnderlyingType>(*inputs->finished.value()))
@@ -237,6 +238,7 @@ void ExternalDraftTokensLayer<T>::forwardAsync(std::shared_ptr<BaseDecodingOutpu
         biasSoftmaxParams.vocabSizePadded = mDecoderDomain.getVocabSizePadded();
         biasSoftmaxParams.skipSoftMax = false;
         biasSoftmaxParams.batchSlotsLogits = false;
+        biasSoftmaxParams.minPs = minPs;
         biasSoftmaxParams.checkParams();
 
         invokeAddBiasSoftMax(biasSoftmaxParams, getStream());
@@ -325,6 +327,7 @@ void ExternalDraftTokensLayer<T>::acceptDraftTokens(std::shared_ptr<BaseDecoding
         biasSoftmaxParams.vocabSizePadded = mDecoderDomain.getVocabSizePadded();
         biasSoftmaxParams.skipSoftMax = false;
         biasSoftmaxParams.batchSlotsLogits = true;
+        biasSoftmaxParams.minPs = nullptr;
         biasSoftmaxParams.checkParams();
         invokeAddBiasSoftMax(biasSoftmaxParams, getStream());
     }
@@ -342,6 +345,7 @@ void ExternalDraftTokensLayer<T>::acceptDraftTokens(std::shared_ptr<BaseDecoding
         biasSoftmaxParams.vocabSizePadded = mDecoderDomain.getVocabSizePadded();
         biasSoftmaxParams.skipSoftMax = false;
         biasSoftmaxParams.batchSlotsLogits = false;
+        biasSoftmaxParams.minPs = nullptr;
         biasSoftmaxParams.checkParams();
         invokeAddBiasSoftMax(biasSoftmaxParams, getStream());
     }
