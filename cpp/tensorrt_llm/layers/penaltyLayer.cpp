@@ -316,6 +316,7 @@ void PenaltyLayer<T>::forwardAsync(std::shared_ptr<BaseDecodingOutputs> const& b
         biasSoftmaxParams.vocabSizePadded = penaltyParams.vocabSizePadded;
         biasSoftmaxParams.skipSoftMax = false;
         biasSoftmaxParams.batchSlotsLogits = penaltyParams.batchSlots != nullptr;
+	biasSoftmaxParams.minPs = bufferCast<float const *>(*params->minPs);
         biasSoftmaxParams.checkParams();
         invokeAddBiasSoftMax(biasSoftmaxParams, penaltyParams.stream);
     }
