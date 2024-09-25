@@ -69,7 +69,7 @@ template <typename T>
 __global__ void addBiasSoftMax(T* logits, T** logitsPtrs, T* probs, float* outputEntropy, T const* bias,
     float const* temperatures, int32_t const* endIds, FinishedState const* finished, int32_t const* beamWidths,
     int32_t const* batchSlots, int32_t maxBatchSize, int32_t maxBeamWidth, int32_t vocabSize, int32_t vocabSizePadded,
-    bool skipSoftMax, bool batchSlotsLogits, bool ptrsForBeams)
+    bool skipSoftMax, bool batchSlotsLogits, bool ptrsForBeams, float const*const* minPs)
 {
     auto const batchIdx = blockIdx.x;
     auto const beamIdx = blockIdx.y;
@@ -124,6 +124,12 @@ __global__ void addBiasSoftMax(T* logits, T** logitsPtrs, T* probs, float* outpu
         logitsPtr[tid] = logit; // Write back biased logits
     }
 
+    float minP = 0.0f;
+    if (minPs != nullptr && minPs[batchSlot] != nullptr)
+    {
+        minP = *minPs[batchSlot];
+    }
+
     if (!skipSoftMax)
     {
         maxVal = blockReduceMax<float>(static_cast<float>(maxVal));
@@ -139,7 +145,13 @@ __global__ void addBiasSoftMax(T* logits, T** logitsPtrs, T* probs, float* outpu
         T* dst = (probs != nullptr) ? probs : logitsPtr;
         for (int tid = threadIdx.x; tid < vocabSizePadded; tid += blockDim.x)
         {
-            auto const value = __expf(static_cast<float>(logitsPtr[tid]) - sMaxVal);
+            // min_p : probability of token proportional to the max token
+            // compare min_p against exp(logit - maxVal) / exp(maxVal - maxVal) = exp(logit - maxVal)
+            float value = __expf(static_cast<float>(logitsPtr[tid]) - sMaxVal);
+            if (value < minP) {
+                value = 0.0f;
+                logitsPtr[tid] = -MAX_T_VAL;
+            }
             dst[offset + tid] = value;
             sumVal += value;
         }
@@ -186,7 +198,7 @@ void invokeAddBiasSoftMax(BiasSoftmaxParams<T> const params, cudaStream_t stream
     addBiasSoftMax<<<grid, block, 0, stream>>>(params.logits, params.logitsPtrs, params.probs, params.outputEntropy,
         params.bias, params.temperatures, params.endIds, params.finished, params.beamWidths, params.batchSlots,
         params.maxBatchSize, params.maxBeamWidth, params.vocabSize, params.vocabSizePadded, params.skipSoftMax,
-        params.batchSlotsLogits, params.ptrsForBeams);
+        params.batchSlotsLogits, params.ptrsForBeams, params.minPs);
 
     TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
 }

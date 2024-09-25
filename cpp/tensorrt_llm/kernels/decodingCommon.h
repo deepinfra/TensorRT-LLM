@@ -256,6 +256,8 @@ struct BiasSoftmaxParams
     bool batchSlotsLogits{false};
     //! flag to indicate the layout of logitsPtrs
     bool ptrsForBeams{false};
+    //! minP values
+    float const*const* minPs{nullptr};
 
     void checkParams()
     {
