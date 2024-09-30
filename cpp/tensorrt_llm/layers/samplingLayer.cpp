@@ -156,7 +156,7 @@ void SamplingLayer<T>::forwardAsync(
 
     auto logits = bufferCast<T>(*inputs->logits.value());
     auto endIds = bufferCast<TokenIdType>(*inputs->endIds);
-    auto minPs = bufferCast<float>(*inputs->minPs);
+    auto minPs = bufferCast<const float*>(*inputs->minPs);
     auto batchSlots = bufferCastOrNull<SizeType32>(inputs->batchSlots);
 
     FinishedState const* finishedInput = (inputs->finished)
