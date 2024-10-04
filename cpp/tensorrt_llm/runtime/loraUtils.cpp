@@ -27,9 +27,9 @@ void loraValidateRequestTensorDims(std::optional<ITensor::SharedPtr> const& optR
     TLLM_CHECK_WITH_INFO(optReqLoraWeights.has_value() && optReqLoraConfig.has_value(),
         "Request for LoRA inference must have both lora_weights and lora_keys");
 
-    SizeType constexpr expectedBatchSize = 1;
-    SizeType constexpr expectedWeightsDims = 3;
-    SizeType constexpr expectedKeysDims = 3;
+    SizeType32 constexpr expectedBatchSize = 1;
+    SizeType32 constexpr expectedWeightsDims = 3;
+    SizeType32 constexpr expectedKeysDims = 3;
 
     auto weights = optReqLoraWeights.value();
     auto keys = optReqLoraConfig.value();
@@ -62,13 +62,14 @@ void loraValidateRequestTensors(std::optional<std::uint64_t> const& optTaskId,
 
         auto weights = optReqLoraWeights.value();
         auto config = optReqLoraConfig.value();
-        SizeType nbModelLayers = modelConfig.getNbAttentionLayers();
+        SizeType32 nbModelLayers = modelConfig.getNbAttentionLayers();
         TLLM_CHECK_WITH_INFO(weights->getDataType() == modelConfig.getDataType(),
             "Expected lora weights to be the same data type as base model");
 
         auto loraModules = modelConfig.getLoraModules();
-        auto configPtr = bufferCast<SizeType>(*config);
-        for (SizeType row = 0; row < config->getShape().d[1]; ++row)
+        auto configPtr = bufferCast<SizeType32>(*config);
+        auto maxAdapterSize = modelConfig.getMaxLoraRank();
+        for (SizeType32 row = 0; row < config->getShape().d[1]; ++row)
         {
             auto modId = configPtr[row * kLORA_CONFIG_ROW_SIZE + kLORA_CONFIG_MODULE_OFF];
             auto layerId = configPtr[row * kLORA_CONFIG_ROW_SIZE + kLORA_CONFIG_LAYER_OFF];
@@ -83,6 +84,9 @@ void loraValidateRequestTensors(std::optional<std::uint64_t> const& optTaskId,
             TLLM_CHECK_WITH_INFO(it != loraModules.end(), "lora module " + moduleName + " not enabled for this model");
             TLLM_CHECK_WITH_INFO(it->flattenedInOutSize(adapterSize) <= weights->getShape().d[2],
                 "lora_weights has to few values for " + moduleName);
+            TLLM_CHECK_WITH_INFO(adapterSize <= maxAdapterSize,
+                "Invalid low_rank (" + std::to_string(adapterSize) + "). low_rank must be smaller than mMaxLowRank ("
+                    + std::to_string(maxAdapterSize) + ")");
         }
     }
 }

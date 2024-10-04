@@ -9,11 +9,9 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Optional, Tuple
 
-import numpy as np
 import safetensors
 import torch
 import torch.nn as nn
-from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from transformers.pytorch_utils import Conv1D
@@ -22,6 +20,8 @@ import tensorrt_llm
 from tensorrt_llm._utils import release_gc
 from tensorrt_llm.layers import MoeConfig
 from tensorrt_llm.mapping import Mapping
+from tensorrt_llm.models.convert_utils import (generate_int8,
+                                               load_calib_dataset, split)
 from tensorrt_llm.quantization import QuantAlgo
 
 
@@ -52,6 +52,13 @@ def parse_arguments():
         'By default, we use a single static scaling factor for the GEMM\'s result. '
         'per_channel instead uses a different static scaling factor for each channel. '
         'The latter is usually more accurate, but a little slower.')
+    parser.add_argument(
+        '--calib_dataset',
+        type=str,
+        default='ccdv/cnn_dailymail',
+        help=
+        "The huggingface dataset name or the local directory of the dataset for calibration."
+    )
     parser.add_argument("--dataset_cache_dir",
                         type=str,
                         default=None,
@@ -117,11 +124,18 @@ def parse_arguments():
         'Specify the top_k value to use for MOE layers. Default to 1 if --moe_num_experts is set'
     )
     parser.add_argument(
-        '--moe_tp_mode',
-        default=MoeConfig.ParallelismMode.TENSOR_PARALLEL,
+        '--moe_tp_size',
         type=int,
+        default=-1,
         help=
-        'Controls how to distribute experts in TP. Check layers/moe.py for accepted values',
+        'N-way tensor parallelism size for MOE, default is tp_size, which will do tp-only for MoE'
+    )
+    parser.add_argument(
+        '--moe_ep_size',
+        type=int,
+        default=-1,
+        help=
+        'N-way expert parallelism size for MOE, default is 1, which will do tp-only for MoE'
     )
     parser.add_argument(
         '--moe_renorm_mode',
@@ -188,106 +202,25 @@ def args_to_build_options(args):
     }
 
 
-def generate_int8(weights, act_range, is_qkv=False, multi_query_mode=False):
-    """
-     This function has two purposes:
-      - compute quantized weights, scaled either per-tensor or per-column
-      - compute scaling factors
-      Depending on the GEMM API (CUTLASS/CUBLAS) the required scaling factors differ.
-      CUTLASS uses two sets of scaling factors. One for the activation X, one for the weight W.
-      CUBLAS only has one (we can't do per-row scaling). So we must provide pre-multiplied scaling factor.
-      Here is the list of what we need (T means per-tensor, C per-column):
-        - scale_x_orig_quant puts fp activation into the quantized range (i.e. [-128, 127], for int8). Used before the GEMM. (T)
-        - scale_y_quant_orig puts quantized activation into the fp range. Used if the GEMM outputs int8. (T)
-        - scale_w_quant_orig puts weights from quant range to fp range (used with CUTLASS) (T, C)
-        - scale_y_accum_quant puts the GEMM result (XW) from accumulation range (int32)
-          to quant range (int8) (used for CUBLAS) (T, C)
-      Note that we don't do anything special about row-parallel GEMM. Theoretically, we could have per-GPU scaling factors too,
-      but then the model would change depending on the number of GPUs used.
-      For QKV projection, the behavior is special. Even if we have a single matrix to perform QKV projection, we consider it
-      as three different matrices: Q, K, and V. So per-tensor actually means one scaling factor for each Q, K and V.
-      For our GEMM implementation to respect this behavior, we use per-column mode and replicate values along columns.
-    """
+def get_weight(params: Dict[str, torch.Tensor], prefix: str,
+               dtype: torch.dtype) -> torch.Tensor:
+    if f'{prefix}' in params:
+        return params[f'{prefix}'].to(dtype).detach().cpu()
+    elif f'{prefix}.weight' not in params:
+        return None
+    return params[f'{prefix}.weight'].to(dtype).detach().cpu()
 
-    # compute weight scaling factors for fp->int8 and int8->fp
-    if is_qkv and not multi_query_mode:
-        scale_w_orig_quant_t = 127. / act_range["w"].reshape(3, -1).max(
-            dim=-1, keepdims=True)[0].cpu().numpy()
-        scale_w_orig_quant_c = 127. / act_range["w"].reshape(3,
-                                                             -1).cpu().numpy()
-    elif is_qkv and multi_query_mode:
-        hidden_dim = weights.shape[0]
-        local_dim = act_range["w"].shape[0]
-        kv_dim = (local_dim - hidden_dim) // 2
-        scale_w_q = act_range["w"][0:hidden_dim]
-        scale_w_k = act_range["w"][hidden_dim:hidden_dim + kv_dim]
-        scale_w_v = act_range["w"][-kv_dim:]
 
-        scale_w_qkv_t = torch.concat([
-            scale_w_q.max(dim=0, keepdim=True)[0],
-            scale_w_k.max(dim=0, keepdim=True)[0],
-            scale_w_v.max(dim=0, keepdim=True)[0]
-        ])
+def get_bias(params: Dict[str, torch.Tensor], prefix: str,
+             dtype: torch.dtype) -> torch.Tensor:
+    if f'{prefix}.bias' not in params:
+        return None
+    return params[f'{prefix}.bias'].to(dtype).detach().cpu()
 
-        scale_w_orig_quant_t = 127. / scale_w_qkv_t.cpu().numpy()
-        scale_w_orig_quant_c = 127. / act_range["w"].cpu().numpy()
-    else:
-        scale_w_orig_quant_t = 127. / act_range["w"].max().cpu().numpy()
-        scale_w_orig_quant_c = 127. / act_range["w"].cpu().numpy()
-    scale_w_quant_orig_t = 1.0 / scale_w_orig_quant_t
-    scale_w_quant_orig_c = 1.0 / scale_w_orig_quant_c
 
-    scale_w_orig_quant_c = scale_w_orig_quant_c.astype(np.float32)
-    scale_w_orig_quant_t = scale_w_orig_quant_t.astype(np.float32)
-    # compute the rest of needed scaling factors
-    scale_x_orig_quant_t = np.array(127. / act_range["x"].max().item())
-    scale_y_orig_quant_t = np.array(127. / act_range["y"].max().item())
-    scale_y_quant_orig_t = np.array(act_range["y"].max().item() / 127.)
-    scale_y_accum_quant_t = scale_y_orig_quant_t / (scale_x_orig_quant_t *
-                                                    scale_w_orig_quant_t)
-    scale_y_accum_quant_c = scale_y_orig_quant_t / (scale_x_orig_quant_t *
-                                                    scale_w_orig_quant_c)
-    if is_qkv and not multi_query_mode:
-        scale_y_accum_quant_t = np.broadcast_to(scale_y_accum_quant_t,
-                                                scale_w_orig_quant_c.shape)
-        scale_w_quant_orig_t = np.broadcast_to(scale_w_quant_orig_t,
-                                               scale_w_orig_quant_c.shape)
-    if is_qkv and multi_query_mode:
-        scale_q_y_accum_t = np.broadcast_to(scale_y_accum_quant_t[0],
-                                            scale_w_q.shape)
-        scale_k_y_accum_t = np.broadcast_to(scale_y_accum_quant_t[1],
-                                            scale_w_k.shape)
-        scale_v_y_accum_t = np.broadcast_to(scale_y_accum_quant_t[2],
-                                            scale_w_v.shape)
-        scale_y_accum_quant_t = np.concatenate(
-            [scale_q_y_accum_t, scale_k_y_accum_t, scale_v_y_accum_t])
-        scale_w_quant_orig_t = np.concatenate([
-            np.broadcast_to(scale_w_quant_orig_t[0], scale_w_q.shape),
-            np.broadcast_to(scale_w_quant_orig_t[1], scale_w_k.shape),
-            np.broadcast_to(scale_w_quant_orig_t[2], scale_w_v.shape)
-        ])
-
-    to_i8 = lambda x: x.round().clip(-127, 127).astype(np.int8)
-    if weights.dtype == torch.bfloat16:
-        weights = weights.to(torch.float32).numpy()
-    else:
-        weights = weights.numpy()
-
-    if is_qkv and multi_query_mode:
-        weight_int8 = to_i8(weights / scale_w_quant_orig_t)
-    else:
-        weight_int8 = to_i8(weights * scale_w_orig_quant_t)
-
-    return {
-        "weight.int8": weight_int8,
-        "weight.int8.col": to_i8(weights * scale_w_orig_quant_c),
-        "scale_x_orig_quant": scale_x_orig_quant_t.astype(np.float32),
-        "scale_w_quant_orig": scale_w_quant_orig_t.astype(np.float32),
-        "scale_w_quant_orig.col": scale_w_quant_orig_c.astype(np.float32),
-        "scale_y_accum_quant": scale_y_accum_quant_t.astype(np.float32),
-        "scale_y_accum_quant.col": scale_y_accum_quant_c.astype(np.float32),
-        "scale_y_quant_orig": scale_y_quant_orig_t.astype(np.float32),
-    }
+def get_weight_and_bias(params: Dict[str, torch.Tensor], prefix: str,
+                        dtype: torch.dtype) -> Tuple[torch.Tensor]:
+    return get_weight(params, prefix, dtype), get_bias(params, prefix, dtype)
 
 
 @torch.no_grad()
@@ -331,8 +264,8 @@ def capture_activation_range(model,
                     functools.partial(stat_input_hook, name=name)))
 
     for i in tqdm(range(num_samples), desc="calibrating model"):
-        datapoint = dataset['train'][i:i + 1]
-        line = copy.copy(datapoint['article'])
+        datapoint = dataset[i:i + 1]
+        line = copy.copy(datapoint)
         line[0] = line[0] + ' TL;DR: '
         line[0] = line[0].strip()
         line[0] = line[0].replace(" n't", "n't")
@@ -347,18 +280,6 @@ def capture_activation_range(model,
         h.remove()
 
     return act_scales
-
-
-def split(weight: torch.Tensor,
-          tp_size: int,
-          rank: int = 0,
-          dim: int = 0) -> torch.Tensor:
-    if tp_size == 1:
-        return weight
-    elif weight.ndim == 1:
-        return torch.chunk(weight, tp_size)[rank].contiguous()
-    else:
-        return torch.chunk(weight, tp_size, dim=dim)[rank].contiguous()
 
 
 def split_qkv_tp(qkv, n_head, n_kv_heads, n_hidden, tensor_parallel, rank):
@@ -376,27 +297,6 @@ def split_qkv_tp(qkv, n_head, n_kv_heads, n_hidden, tensor_parallel, rank):
 def split_matrix(weight: torch.Tensor, tp_size: int, rank: int,
                  dim: int) -> torch.Tensor:
     return split(weight, tp_size, rank, dim=dim)
-
-
-def get_weight(params: Dict[str, torch.Tensor], prefix: str,
-               dtype: torch.dtype) -> torch.Tensor:
-    if f'{prefix}' in params:
-        return params[f'{prefix}'].to(dtype).detach().cpu()
-    elif f'{prefix}.weight' not in params:
-        return None
-    return params[f'{prefix}.weight'].to(dtype).detach().cpu()
-
-
-def get_bias(params: Dict[str, torch.Tensor], prefix: str,
-             dtype: torch.dtype) -> torch.Tensor:
-    if f'{prefix}.bias' not in params:
-        return None
-    return params[f'{prefix}.bias'].to(dtype).detach().cpu()
-
-
-def get_weight_and_bias(params: Dict[str, torch.Tensor], prefix: str,
-                        dtype: torch.dtype) -> Tuple[torch.Tensor]:
-    return get_weight(params, prefix, dtype), get_bias(params, prefix, dtype)
 
 
 def get_tllm_linear_weight(
@@ -489,9 +389,8 @@ def convert_hf_dbrx(model_params: dict,
                 is_qkv=True,
                 multi_query_mode=multi_query_mode)
             weights[
-                f'{tllm_prex}.attention.kv_cache_scaling_factor'] = torch.from_numpy(
-                    np.array([int8_weights['scale_y_quant_orig']],
-                             dtype=np.float32)).contiguous()
+                f'{tllm_prex}.attention.kv_cache_scaling_factor'] = int8_weights[
+                    'scale_y_quant_orig'].contiguous()
 
         # input layer_norm
         input_ln_weight = get_weight(model_params,
@@ -504,76 +403,63 @@ def convert_hf_dbrx(model_params: dict,
         weights[f'{tllm_prex}.post_layernorm.weight'] = post_ln_weight
 
         if moe_config and moe_config.has_moe():
-            # experts mlp w1
-            experts_weights_1 = get_weight(model_params,
-                                           f'{prefix}.ffn.experts.mlp.w1',
-                                           dtype)
-            experts_weights_1 = torch.reshape(experts_weights_1,
-                                              (-1, mlp_hidden_size, num_hidden))
-            if moe_config.tp_mode == MoeConfig.ParallelismMode.TENSOR_PARALLEL:
-                experts_weights_1_proj_w = split_matrix(experts_weights_1,
-                                                        mapping.tp_size,
-                                                        mapping.tp_rank,
-                                                        dim=1)
-            else:
-                experts_weights_1_proj_w = split_matrix(experts_weights_1,
-                                                        mapping.tp_size,
-                                                        mapping.tp_rank,
-                                                        dim=0)
-            # experts mlp v1
-            experts_weights_3 = get_weight(model_params,
-                                           f'{prefix}.ffn.experts.mlp.v1',
-                                           dtype)
-            experts_weights_3 = torch.reshape(experts_weights_3,
-                                              (-1, mlp_hidden_size, num_hidden))
-            if moe_config.tp_mode == MoeConfig.ParallelismMode.TENSOR_PARALLEL:
-                experts_weights_3_proj_w = split_matrix(experts_weights_3,
-                                                        mapping.tp_size,
-                                                        mapping.tp_rank,
-                                                        dim=1)
-            else:
-                experts_weights_3_proj_w = split_matrix(experts_weights_3,
-                                                        mapping.tp_size,
-                                                        mapping.tp_rank,
-                                                        dim=0)
-            experts_weights_1_proj_w = torch.concat(
-                [experts_weights_3_proj_w, experts_weights_1_proj_w], dim=-2)
-            weights.update(
-                get_tllm_linear_weight(
-                    experts_weights_1_proj_w,
-                    f'{tllm_prex}.mlp.experts_weight_1',
-                    None,
-                    use_weight_only,
-                    plugin_weight_only_quant_type,
-                    postfix="",
-                    quant_scale_name=f'{tllm_prex}.mlp.experts_scale_1'))
+            # experts mlp w1 -> mlp gate
+            mlp_gate_weight = get_weight(model_params,
+                                         f'{prefix}.ffn.experts.mlp.w1', dtype)
+            mlp_gate_weight = mlp_gate_weight.reshape(-1, mlp_hidden_size,
+                                                      num_hidden)
+            # moe expert parallel
+            mlp_gate_weight = split_matrix(mlp_gate_weight,
+                                           mapping.moe_ep_size,
+                                           mapping.moe_ep_rank,
+                                           dim=0)
+            # moe tensor parallel
+            mlp_gate_w = split_matrix(mlp_gate_weight,
+                                      mapping.moe_tp_size,
+                                      mapping.moe_tp_rank,
+                                      dim=1)
 
-            # experts mlp w2
-            experts_weights_2 = get_weight(model_params,
-                                           f'{prefix}.ffn.experts.mlp.w2',
-                                           dtype)
-            experts_weights_2 = torch.reshape(
-                experts_weights_2,
-                (-1, mlp_hidden_size, num_hidden)).transpose(1, 2)
-            if moe_config.tp_mode == MoeConfig.ParallelismMode.TENSOR_PARALLEL:
-                experts_weights_2_proj_w = split_matrix(experts_weights_2,
-                                                        mapping.tp_size,
-                                                        mapping.tp_rank,
-                                                        dim=2)
-            else:
-                experts_weights_2_proj_w = split_matrix(experts_weights_2,
-                                                        mapping.tp_size,
-                                                        mapping.tp_rank,
-                                                        dim=0)
+            # experts mlp v1 -> mlp fc
+            mlp_fc_weight = get_weight(model_params,
+                                       f'{prefix}.ffn.experts.mlp.v1', dtype)
+            mlp_fc_weight = mlp_fc_weight.reshape(-1, mlp_hidden_size,
+                                                  num_hidden)
+            # moe expert parallel
+            mlp_fc_weight = split_matrix(mlp_fc_weight,
+                                         mapping.moe_ep_size,
+                                         mapping.moe_ep_rank,
+                                         dim=0)
+            # moe tensor parallel
+            mlp_fc_w = split_matrix(mlp_fc_weight,
+                                    mapping.moe_tp_size,
+                                    mapping.moe_tp_rank,
+                                    dim=1)
+            mlp_fc_w = torch.concat([mlp_fc_w, mlp_gate_w], dim=-2)
             weights.update(
-                get_tllm_linear_weight(
-                    experts_weights_2_proj_w,
-                    f'{tllm_prex}.mlp.experts_weight_2',
-                    None,
-                    use_weight_only,
-                    plugin_weight_only_quant_type,
-                    postfix="",
-                    quant_scale_name=f'{tllm_prex}.mlp.experts_scale_2'))
+                get_tllm_linear_weight(mlp_fc_w, f'{tllm_prex}.mlp.fc.', None,
+                                       use_weight_only,
+                                       plugin_weight_only_quant_type))
+
+            # experts mlp w2 -> mlp proj
+            mlp_proj_weight = get_weight(model_params,
+                                         f'{prefix}.ffn.experts.mlp.w2', dtype)
+            mlp_proj_weight = mlp_proj_weight.reshape(-1, mlp_hidden_size,
+                                                      num_hidden).transpose(
+                                                          1, 2)
+            # moe expert parallel
+            mlp_proj_weight = split_matrix(mlp_proj_weight,
+                                           mapping.moe_ep_size,
+                                           mapping.moe_ep_rank,
+                                           dim=0)
+            # moe tensor parallel
+            mlp_proj_w = split_matrix(mlp_proj_weight,
+                                      mapping.moe_tp_size,
+                                      mapping.moe_tp_rank,
+                                      dim=2)
+            weights.update(
+                get_tllm_linear_weight(mlp_proj_w, f'{tllm_prex}.mlp.proj.',
+                                       None, use_weight_only,
+                                       plugin_weight_only_quant_type))
 
             # router mlp
             router_weights = get_weight(model_params,
@@ -628,6 +514,16 @@ if __name__ == '__main__':
     print(tensorrt_llm.__version__)
     args = parse_arguments()
     world_size = args.tp_size * args.pp_size
+    if (args.moe_tp_size == -1 and args.moe_ep_size == -1):
+        # moe default to tp-only
+        args.moe_tp_size = args.tp_size
+        args.moe_ep_size = 1
+    elif (args.moe_tp_size == -1):
+        args.moe_tp_size = args.tp_size // args.moe_ep_size
+    elif (args.moe_ep_size == -1):
+        args.moe_ep_size = args.tp_size // args.moe_tp_size
+    assert (args.moe_tp_size * args.moe_ep_size == args.tp_size
+            ), "moe_tp_size * moe_ep_size must equal to tp_size"
 
     tik = time.time()
 
@@ -668,10 +564,9 @@ if __name__ == '__main__':
         args.hidden_act = 'swiglu'
         args.rotary_base = hf_config.attn_config.rope_theta
     args.moe_config = MoeConfig(args.moe_num_experts, args.moe_top_k,
-                                args.moe_tp_mode,
                                 args.moe_renorm_mode).validate()
     config = {
-        'architecture': 'DbrxForCausalLM',
+        'architecture': hf_config.architectures[0],
         'dtype': args.dtype,
         'logits_dtype': args.logits_dtype,
         'vocab_size': args.vocab_size,
@@ -689,29 +584,22 @@ if __name__ == '__main__':
         'quantization': {
             'quant_algo': quant_algo,
             'kv_cache_quant_algo': kv_cache_quant_algo,
-            'exclude_modules': ['lm_head'],
         },
-        'moe_config': {
+        'moe': {
             "num_experts": args.moe_num_experts,
             "top_k": args.moe_top_k,
-            "tp_mode": args.moe_tp_mode,
             "normalization_mode": args.moe_renorm_mode
         },
         'mapping': {
             'world_size': world_size,
             'tp_size': args.tp_size,
             'pp_size': args.pp_size,
+            'moe_tp_size': args.moe_tp_size,
+            'moe_ep_size': args.moe_ep_size,
         },
         'clip_qkv': args.clip_qkv,
-        'moe_num_experts': args.moe_num_experts,
-        'moe_top_k': args.moe_top_k,
-        'moe_tp_mode': args.moe_tp_mode,
-        'moe_normalization_mode': args.moe_renorm_mode,
         'dense_context_fmha': args.dense_context_fmha,
     }
-
-    if args.use_weight_only and args.moe_config.has_moe():
-        config['quantization']['exclude_modules'].append('router')
 
     config.update(args_to_build_options(args))
 
@@ -731,17 +619,17 @@ if __name__ == '__main__':
         mapping = Mapping(world_size=world_size,
                           rank=rank,
                           tp_size=args.tp_size,
-                          pp_size=args.pp_size)
+                          pp_size=args.pp_size,
+                          moe_tp_size=args.moe_tp_size,
+                          moe_ep_size=args.moe_ep_size)
         act_range = {}
         if args.int8_kv_cache:
-            dataset = load_dataset("ccdv/cnn_dailymail",
-                                   '3.0.0',
-                                   cache_dir=args.dataset_cache_dir)
-            act_range = capture_activation_range(
-                hf_model,
-                AutoTokenizer.from_pretrained(args.model_dir,
-                                              padding_side='left',
-                                              trust_remote_code=True), dataset)
+            tokenizer = AutoTokenizer.from_pretrained(args.model_dir,
+                                                      padding_side='left',
+                                                      trust_remote_code=True)
+            dataset = load_calib_dataset(args.calib_dataset,
+                                         cache_dir=args.dataset_cache_dir)
+            act_range = capture_activation_range(hf_model, tokenizer, dataset)
 
         hf_model = dict(hf_model.named_parameters())
         weights = convert_hf_dbrx(

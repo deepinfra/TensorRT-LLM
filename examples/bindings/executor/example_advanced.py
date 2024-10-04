@@ -1,6 +1,12 @@
 import argparse
 import csv
 import datetime
+from pathlib import Path
+
+import tensorrt_llm
+
+trtllm_package_dir = Path(tensorrt_llm.__file__).parent
+executor_worker_path = trtllm_package_dir / 'bin' / 'executorWorker'
 
 import tensorrt_llm.bindings.executor as trtllm
 
@@ -28,7 +34,7 @@ def enqueue_requests(args: argparse.Namespace,
     request_ids = []
     for tokens in input_tokens:
         req = trtllm.Request(input_token_ids=tokens,
-                             max_new_tokens=args.max_new_tokens,
+                             max_tokens=args.max_tokens,
                              streaming=args.streaming,
                              sampling_config=sampling_config,
                              output_config=output_config)
@@ -61,8 +67,7 @@ def wait_for_responses(args: argparse.Namespace, request_ids: list[int],
                     output_tokens[req_id][beam].extend(outTokens)
             else:
                 raise RuntimeError(
-                    str(req_id) + " encountered error:" +
-                    response.get_error_msg())
+                    str(req_id) + " encountered error:" + response.error_msg)
 
     return output_tokens
 
@@ -108,6 +113,12 @@ if __name__ == "__main__":
                         default=False,
                         action="store_true",
                         help="Operate in streaming mode")
+
+    parser.add_argument("--use_orchestrator_mode",
+                        default=False,
+                        action="store_true",
+                        help="Operate in orchestrator mode for multi-GPU runs")
+
     parser.add_argument(
         "--exclude_input_from_output",
         default=False,
@@ -115,11 +126,11 @@ if __name__ == "__main__":
         help=
         "Exclude input token when writing output toekns. Only has effect for streaming=False since in streaming mode, input tokens are never included in output."
     )
-    parser.add_argument("--max_new_tokens",
+    parser.add_argument("--max_tokens",
                         type=int,
                         required=False,
                         default=10,
-                        help="The beam width")
+                        help="The max number of tokens to be generated")
     parser.add_argument(
         "--timeout_ms",
         type=int,
@@ -128,10 +139,18 @@ if __name__ == "__main__":
         help="The maximum time to wait for all responses, in milliseconds")
 
     args = parser.parse_args()
+    executor_config = trtllm.ExecutorConfig(args.beam_width)
+
+    if args.use_orchestrator_mode:
+        orchestrator_config = trtllm.OrchestratorConfig(
+            True, str(executor_worker_path))
+        executor_config.parallel_config = trtllm.ParallelConfig(
+            trtllm.CommunicationType.MPI, trtllm.CommunicationMode.ORCHESTRATOR,
+            None, None, orchestrator_config)
 
     # Create the executor.
     executor = trtllm.Executor(args.model_path, trtllm.ModelType.DECODER_ONLY,
-                               trtllm.ExecutorConfig(args.beam_width))
+                               executor_config)
 
     if executor.can_enqueue_requests():
         # Enqueue the requests

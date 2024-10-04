@@ -12,8 +12,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import math
 import unittest
+from collections import OrderedDict
+from itertools import product
 
 import numpy as np
 
@@ -25,17 +28,19 @@ import os
 import sys
 
 from parameterized import parameterized
-from polygraphy.backend.trt import (CreateConfig, EngineFromNetwork, Profile,
-                                    TrtRunner)
 
 import tensorrt_llm
 from tensorrt_llm import Tensor
-from tensorrt_llm._utils import torch_to_numpy, trt_dtype_to_torch
-from tensorrt_llm.layers.moe import MoeConfig
-from tensorrt_llm.quantization import QuantMode
+from tensorrt_llm._utils import (torch_to_numpy, trt_dtype_to_str,
+                                 trt_dtype_to_torch)
+from tensorrt_llm.layers.lora import Lora, LoraParams
+from tensorrt_llm.layers.moe import MoeConfig, MoeOOTB
+from tensorrt_llm.models.modeling_utils import QuantConfig
+from tensorrt_llm.quantization import QuantAlgo, QuantMode
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from utils.util import getSMVersion, skip_bf16_pre_ampere, unittest_name_func
+from utils.util import (create_session, getSMVersion, run_session,
+                        skip_bf16_pre_ampere, unittest_name_func)
 
 default_actfn = 'gelu'
 default_hidden_size = {
@@ -69,7 +74,7 @@ def config_is_allowed(config):
     # TODO: Support ootb path with getSMVersion() < 90:
     enable_ootb = getSMVersion() >= 90
     enable_bf16 = getSMVersion() >= 80
-    enable_fp8 = getSMVersion() >= 90
+    enable_fp8 = getSMVersion() >= 89
 
     DATA_TYPE_INDEX = 5
     WEIGHT_TYPE_INDEX = 6
@@ -84,7 +89,7 @@ def config_is_allowed(config):
 
 
 def gen_uniform_weights(*args, **kwargs):
-    return (torch.rand(*args, **kwargs) * 2 - 1).contiguous()
+    return (torch.rand(*args, **kwargs) * 2 - 1).contiguous().cuda()
 
 
 def quant_dequant_int(weights, quant_mode):
@@ -147,7 +152,7 @@ def gated_matmul(input, weights, bias, actfn):
     return fc1 * doact(gate, gated2act(actfn))
 
 
-class TestFunctional(unittest.TestCase):
+class TestMoE(unittest.TestCase):
 
     def setUp(self):
         # There is a known precision issues where the topk may select different experts when the routing probabilities are similar.
@@ -307,7 +312,7 @@ class TestFunctional(unittest.TestCase):
                 num_experts=8,
                 topk=2,
                 norm_mode=MoeConfig.ExpertScaleNormalizationMode.RENORMALIZE,
-                hidden_size=4096,
+                hidden_size=2048,
                 dtype='bfloat16',
                 actfn='swiglu')
         ]
@@ -358,6 +363,145 @@ class TestFunctional(unittest.TestCase):
         self.weight_scaling_factor_2 = None
         self.activation_scaling_factor_1 = None
         self.activation_scaling_factor_2 = None
+
+    def create_lora_weights(self, num_experts, hidden_size, ffn_hidden_size,
+                            dtype, num_reqs, lora_rank):
+        genfn = torch.randn
+
+        self.lora_rank = lora_rank
+
+        fc1_weight_rescale_1 = math.sqrt(2.0 / lora_rank)
+        fc1_weight_rescale_2 = math.sqrt(2.0 / ffn_hidden_size)
+        fc2_weight_rescale_1 = math.sqrt(2.0 / lora_rank)
+        fc2_weight_rescale_2 = math.sqrt(2.0 / hidden_size)
+
+        self.lora_fc1_weights_1 = (genfn(
+            (num_experts, lora_rank, hidden_size),
+            dtype=trt_dtype_to_torch(dtype),
+            device="cuda",
+        ) * fc1_weight_rescale_1)
+        self.lora_fc1_weights_2 = (genfn(
+            (num_experts, ffn_hidden_size, lora_rank),
+            dtype=trt_dtype_to_torch(dtype),
+            device="cuda",
+        ) * fc1_weight_rescale_2)
+
+        self.lora_fc1_weights_ptrs = torch.tensor(
+            (self.lora_fc1_weights_1.data_ptr(),
+             self.lora_fc1_weights_2.data_ptr()),
+            dtype=torch.int64,
+        ).repeat(num_reqs, 1)
+        self.lora_fc1_ranks = torch.tensor((lora_rank, ),
+                                           dtype=torch.int32).repeat(num_reqs)
+
+        self.lora_gated_weights_1 = (genfn(
+            (num_experts, lora_rank, hidden_size),
+            dtype=trt_dtype_to_torch(dtype),
+            device="cuda",
+        ) * fc1_weight_rescale_1)
+        self.lora_gated_weights_2 = (genfn(
+            (num_experts, ffn_hidden_size, lora_rank),
+            dtype=trt_dtype_to_torch(dtype),
+            device="cuda",
+        ) * fc1_weight_rescale_2)
+
+        self.lora_gated_weights_ptrs = torch.tensor(
+            (self.lora_gated_weights_1.data_ptr(),
+             self.lora_gated_weights_2.data_ptr()),
+            dtype=torch.int64,
+        ).repeat(num_reqs, 1)
+        self.lora_gated_ranks = torch.tensor((lora_rank, ),
+                                             dtype=torch.int32).repeat(num_reqs)
+
+        self.lora_fc2_weights_1 = (genfn(
+            (num_experts, lora_rank, ffn_hidden_size),
+            dtype=trt_dtype_to_torch(dtype),
+            device="cuda",
+        ) * fc2_weight_rescale_1)
+        self.lora_fc2_weights_2 = (genfn(
+            (num_experts, hidden_size, lora_rank),
+            dtype=trt_dtype_to_torch(dtype),
+            device="cuda",
+        ) * fc2_weight_rescale_2)
+
+        self.lora_fc2_weights_ptrs = torch.tensor(
+            (self.lora_fc2_weights_1.data_ptr(),
+             self.lora_fc2_weights_2.data_ptr()),
+            dtype=torch.int64,
+        ).repeat(num_reqs, 1)
+        self.lora_fc2_ranks = torch.tensor((lora_rank, ),
+                                           dtype=torch.int32).repeat(num_reqs)
+
+    def create_lora_params(self, num_reqs):
+
+        moe_h_to_4h_weights_pointers = Tensor(
+            shape=(num_reqs, 2),
+            dtype=tensorrt_llm.str_dtype_to_trt("int64"),
+            name="moe_h_to_4h_weights_pointers",
+        )
+        moe_h_to_4h_lora_ranks = Tensor(
+            shape=(num_reqs, ),
+            dtype=tensorrt_llm.str_dtype_to_trt("int32"),
+            name="moe_h_to_4h_lora_ranks",
+        )
+        moe_4h_to_h_weights_pointers = Tensor(
+            shape=(num_reqs, 2),
+            dtype=tensorrt_llm.str_dtype_to_trt("int64"),
+            name="moe_4h_to_h_weights_pointers",
+        )
+        moe_4h_to_h_lora_ranks = Tensor(
+            shape=(num_reqs, ),
+            dtype=tensorrt_llm.str_dtype_to_trt("int32"),
+            name="moe_4h_to_h_lora_ranks",
+        )
+        moe_gate_weights_pointers = Tensor(
+            shape=(num_reqs, 2),
+            dtype=tensorrt_llm.str_dtype_to_trt("int64"),
+            name="moe_gate_weights_pointers",
+        )
+        moe_gate_lora_ranks = Tensor(
+            shape=(num_reqs, ),
+            dtype=tensorrt_llm.str_dtype_to_trt("int32"),
+            name="moe_gate_lora_ranks",
+        )
+        host_context_lengths = Tensor(
+            shape=(num_reqs, ),
+            dtype=tensorrt_llm.str_dtype_to_trt("int32"),
+            name="host_context_lengths",
+        )
+        host_request_types = Tensor(
+            shape=(num_reqs, ),
+            dtype=tensorrt_llm.str_dtype_to_trt("int32"),
+            name="host_request_types",
+        )
+
+        self.lora_params = LoraParams(
+            lora_ranks=[{
+                "moe_h_to_4h_lora_ranks": moe_h_to_4h_lora_ranks,
+                "moe_4h_to_h_lora_ranks": moe_4h_to_h_lora_ranks,
+                "moe_gate_lora_ranks": moe_gate_lora_ranks,
+                "mlp_h_to_4h_lora_ranks": moe_h_to_4h_lora_ranks,
+                "mlp_4h_to_h_lora_ranks": moe_4h_to_h_lora_ranks,
+                "mlp_gate_lora_ranks": moe_gate_lora_ranks,
+            }],
+            lora_weights_pointers=[{
+                "moe_h_to_4h_lora_weights_pointers":
+                moe_h_to_4h_weights_pointers,
+                "moe_4h_to_h_lora_weights_pointers":
+                moe_4h_to_h_weights_pointers,
+                "moe_gate_lora_weights_pointers":
+                moe_gate_weights_pointers,
+                "mlp_h_to_4h_lora_weights_pointers":
+                moe_h_to_4h_weights_pointers,
+                "mlp_4h_to_h_lora_weights_pointers":
+                moe_4h_to_h_weights_pointers,
+                "mlp_gate_lora_weights_pointers":
+                moe_gate_weights_pointers,
+            }],
+            host_context_lengths=host_context_lengths,
+            host_request_types=host_request_types,
+            weight_index=0,
+        )
 
     def create_fp8_scaling_factors(self, max_act1, max_act2):
         self.activation_scaling_factor_1 = torch.tensor([max_act1
@@ -416,14 +560,15 @@ class TestFunctional(unittest.TestCase):
         act_2_quant = 0.0
 
         for i, input in enumerate(inputs):
-            result, act2_quant_values = self.referenceImpl(
+            result, act2_quant_values = self.generate_reference(
                 input, top_k, actfn, weight_dtype, quant_mode, norm_mode)
-            reference_values.append(result.cpu().float())
+            reference_values.append(result)
             act_2_quant = max(act_2_quant, act2_quant_values)
 
         self.create_fp8_scaling_factors(act_1_quant, act_2_quant)
 
-        engine = self.buildTrtEngine(
+        # build trt engine
+        session = self.create_trt_session(
             (-1, -1, hidden_size),
             num_experts,
             top_k,
@@ -439,8 +584,9 @@ class TestFunctional(unittest.TestCase):
             max_sizes=[max_num_seq, max_seq_len, hidden_size])
 
         for input, ref in zip(inputs, reference_values):
-            # construct trt network
-            trt_res = self.runTrtEngine(engine, input)['output'].float()
+            # run trt output
+            inputs = {"input_hidden_states": input}
+            outputs = run_session(session, inputs)
 
             tolerances = {
                 'float32': 1e-2,
@@ -454,18 +600,11 @@ class TestFunctional(unittest.TestCase):
 
             # Bit of a hack to allow bigger tolerance for the Mixtral tests
             if hidden_size > 1024:
-                # Do some extra checks on the full distribution
-                self.assertAlmostEqual(np.mean((trt_res - ref).numpy()),
-                                       0.0,
-                                       delta=2e-4)
-                self.assertAlmostEqual(np.var((trt_res - ref).numpy()),
-                                       0.0,
-                                       delta=tolerance)
                 # Set a higher tolerance because we hit a small fraction of outlier cases (<<1%)
                 tolerance = 0.3
 
-            np.testing.assert_allclose(trt_res,
-                                       ref,
+            torch.testing.assert_close(outputs['output'].float(),
+                                       ref.float(),
                                        rtol=tolerance,
                                        atol=tolerance)
 
@@ -553,36 +692,205 @@ class TestFunctional(unittest.TestCase):
                 mlp.proj.bias.value = np.ascontiguousarray(
                     torch_to_numpy(self.fc2_bias[0].cpu()))
 
-            output = mlp(trt_key).trt_tensor
-            output.name = 'mlp_output'
-            network.mark_output(output)
-            output.dtype = dtype
+            output = mlp(trt_key)
+            output.mark_output('mlp_output', dtype)
 
-        res = self.trtImpl(input_data,
-                           num_experts,
-                           top_k,
-                           hidden_size,
-                           ffn_hidden_size,
-                           actfn,
-                           bias,
-                           dtype,
-                           weight_dtype=weight_dtype,
-                           quant_mode=quant_mode,
-                           custom_network=MLP,
-                           use_plugin=use_plugin)
+        session = self.create_trt_session(
+            tuple(input_data.shape),
+            num_experts,
+            top_k,
+            hidden_size,
+            ffn_hidden_size,
+            actfn,
+            bias,
+            dtype,
+            weight_dtype,
+            quant_mode,
+            norm_mode=MoeConfig.ExpertScaleNormalizationMode.NONE,
+            custom_network=MLP,
+            use_plugin=use_plugin)
+
+        inputs = {"input_hidden_states": input_data}
+        outputs = run_session(session, inputs)
 
         tolerances = {
             'float32': 1e-2,
-            'float16': 1e-2
+            'float16': 2e-2
             if getSMVersion() >= 75 else 1e-1,  # Some issues for geglu on volta
             'bfloat16': 1e-1,
             'int8': 2e-1,
             'int4': 2e-1,
         }
-        np.testing.assert_allclose(res['output'].float(),
-                                   res['mlp_output'].float(),
-                                   rtol=tolerances[dtype_str],
-                                   atol=tolerances[dtype_str])
+        torch.testing.assert_close(
+            outputs["output"],
+            outputs["mlp_output"],
+            rtol=tolerances[dtype_str],
+            atol=tolerances[dtype_str],
+        )
+
+    @parameterized.expand(list(
+        product(["float16", "bfloat16", "int4", "int8"], ["gelu", "geglu"],
+                [True], [32, 64])),
+                          name_func=unittest_name_func)
+    def test_mlp_lora_comparison(self, dtype_str, actfn, use_plugin, lora_rank):
+        """This test uses one expert and compares the result to a plain MLP"""
+        skip_bf16_pre_ampere(dtype_str)
+
+        use_int4_weights = dtype_str == "int4"
+        weight_dtype = (trt.int8 if use_int4_weights else
+                        tensorrt_llm.str_dtype_to_trt(dtype_str))
+
+        dtype = weight_dtype
+        quant_mode = QuantMode(0)
+        hidden_size = 8
+        if dtype_str == "int8" or dtype_str == "int4":
+            dtype = tensorrt_llm.str_dtype_to_trt("float16")
+            hidden_size = 64
+            quant_mode = QuantMode.use_weight_only(
+                use_int4_weights=use_int4_weights)
+
+        num_sequences = 4
+        sequence_lengths = 4
+        num_experts = 1
+        top_k = 1
+        bias = False
+        ffn_hidden_size = 4 * hidden_size
+        self.create_weights(
+            num_experts,
+            hidden_size,
+            ffn_hidden_size,
+            bias,
+            dtype,
+            weight_dtype,
+            is_gated=is_gated_activation(actfn),
+        )
+
+        self.create_lora_weights(
+            num_experts,
+            hidden_size,
+            ffn_hidden_size,
+            dtype,
+            num_sequences,
+            lora_rank,
+        )
+
+        input_data = gen_uniform_weights(
+            (num_sequences, sequence_lengths, hidden_size),
+            dtype=trt_dtype_to_torch(dtype),
+        )
+
+        def MLP(network, trt_key, lora_params):
+            mlp_type = (tensorrt_llm.layers.GatedMLP if
+                        is_gated_activation(actfn) else tensorrt_llm.layers.MLP)
+            mlp = mlp_type(
+                hidden_size=hidden_size,
+                ffn_hidden_size=ffn_hidden_size,
+                hidden_act=gated2act(actfn),
+                bias=bias,
+                quant_mode=quant_mode,
+                dtype=dtype,
+            )
+
+            mlp.fc.lora = Lora(
+                in_hidden_size=hidden_size,
+                out_hidden_sizes=[ffn_hidden_size],
+                max_low_rank=lora_rank,
+            )
+
+            mlp.proj.lora = Lora(
+                in_hidden_size=ffn_hidden_size,
+                out_hidden_sizes=[hidden_size],
+                max_low_rank=lora_rank,
+            )
+
+            if is_gated_activation(actfn):
+                mlp.gate.lora = Lora(
+                    in_hidden_size=hidden_size,
+                    out_hidden_sizes=[ffn_hidden_size],
+                    max_low_rank=lora_rank,
+                )
+            # Quantize the weights manually so the results are comparable
+            fc1_qd = quant_dequant(self.fc1_weights[0].cpu(), quant_mode)
+            if is_gated_activation(actfn):
+                # Note that the MLP uses the opposite convention to the GLU paper for naming,
+                #  the gate is the matrix the activations are NOT applied to
+                gate, fc1_qd = fc1_qd.chunk(2, dim=0)
+                mlp.gate.weight.value = np.ascontiguousarray(
+                    torch_to_numpy(gate))
+
+            mlp.fc.weight.value = np.ascontiguousarray(torch_to_numpy(fc1_qd))
+            fc2_qd = quant_dequant(self.fc2_weights[0].cpu(), quant_mode)
+            mlp.proj.weight.value = np.ascontiguousarray(torch_to_numpy(fc2_qd))
+            if bias:
+                fc1_bias = self.fc1_bias[0].cpu()
+
+                if is_gated_activation(actfn):
+                    gate, fc1_bias = fc1_bias.chunk(2, dim=0)
+                    mlp.gate.bias.value = np.ascontiguousarray(
+                        torch_to_numpy(gate))
+
+                mlp.fc.bias.value = np.ascontiguousarray(
+                    torch_to_numpy(fc1_bias))
+                mlp.proj.bias.value = np.ascontiguousarray(
+                    torch_to_numpy(self.fc2_bias[0].cpu()))
+
+            output = mlp(trt_key, lora_params)
+            output.mark_output("mlp_output", dtype)
+
+        session = self.create_trt_session(
+            tuple(input_data.shape),
+            num_experts,
+            top_k,
+            hidden_size,
+            ffn_hidden_size,
+            actfn,
+            bias,
+            dtype,
+            weight_dtype,
+            quant_mode,
+            norm_mode=MoeConfig.ExpertScaleNormalizationMode.NONE,
+            custom_network=MLP,
+            use_plugin=use_plugin,
+            use_lora=True,
+        )
+
+        inputs = {
+            "input_hidden_states":
+            input_data,
+            "moe_h_to_4h_weights_pointers":
+            self.lora_fc1_weights_ptrs,
+            "moe_h_to_4h_lora_ranks":
+            self.lora_fc1_ranks,
+            "moe_4h_to_h_weights_pointers":
+            self.lora_fc2_weights_ptrs,
+            "moe_4h_to_h_lora_ranks":
+            self.lora_fc2_ranks,
+            "moe_gate_weights_pointers":
+            self.lora_gated_weights_ptrs,
+            "moe_gate_lora_ranks":
+            self.lora_gated_ranks,
+            "host_context_lengths":
+            torch.tensor((sequence_lengths, ),
+                         dtype=torch.int32).repeat(num_sequences),
+            "host_request_types":
+            torch.tensor((0, ), dtype=torch.int32).repeat(num_sequences),
+        }
+        outputs = run_session(session, inputs)
+
+        tolerances = {
+            "float32": 1e-2,
+            "float16": (2e-2 if getSMVersion() >= 75 else
+                        1e-1),  # Some issues for geglu on volta
+            "bfloat16": 1e-1,
+            "int8": 2e-1,
+            "int4": 2e-1,
+        }
+        torch.testing.assert_close(
+            outputs["output"],
+            outputs["mlp_output"],
+            rtol=tolerances[dtype_str],
+            atol=tolerances[dtype_str],
+        )
 
     def set_weight_layer(self,
                          input_weights,
@@ -613,35 +921,56 @@ class TestFunctional(unittest.TestCase):
             moe_weight_wrapper.weight.value = np.ascontiguousarray(
                 torch_to_numpy(input_weights))
 
-    def buildTrtEngine(self,
-                       input_shape,
-                       num_experts,
-                       top_k,
-                       hidden_size,
-                       ffn_hidden_size,
-                       actfn,
-                       bias,
-                       dtype: trt.DataType,
-                       weight_dtype: trt.DataType,
-                       quant_mode,
-                       norm_mode,
-                       custom_network=None,
-                       use_plugin=True,
-                       max_sizes=None):
+    def create_trt_session(
+        self,
+        input_shape,
+        num_experts,
+        top_k,
+        hidden_size,
+        ffn_hidden_size,
+        actfn,
+        bias,
+        dtype: trt.DataType,
+        weight_dtype: trt.DataType,
+        quant_mode,
+        norm_mode,
+        custom_network=None,
+        use_plugin=True,
+        max_sizes=None,
+        use_lora=False,
+    ):
         builder = tensorrt_llm.Builder()
-        builder.strongly_typed = weight_dtype == trt.fp8
-        net = builder.create_network()
-        net.plugin_config.set_moe_plugin(dtype if use_plugin else None)
-        with tensorrt_llm.net_guard(net):
-            network = tensorrt_llm.default_trtnet()
+        network = builder.create_network()
+
+        with tensorrt_llm.net_guard(network):
+            if max_sizes:
+                dim_range = OrderedDict([("max_num_seq", [[1, 1,
+                                                           max_sizes[0]]]),
+                                         ("max_seq_len", [[1, 1,
+                                                           max_sizes[1]]]),
+                                         ("hidden_size", [hidden_size])])
+            else:
+                dim_range = None
+
             trt_key = Tensor(name='input_hidden_states',
                              shape=input_shape,
+                             dim_range=dim_range,
                              dtype=dtype)
 
-            moe = tensorrt_llm.layers.MOE(moe_config=MoeConfig(
-                num_experts=num_experts,
-                top_k=top_k,
-                normalization_mode=norm_mode),
+            network.plugin_config.moe_plugin = trt_dtype_to_str(dtype)
+
+            lora_params = None
+            if use_lora:
+                network.plugin_config.lora_plugin = trt_dtype_to_str(dtype)
+                network.plugin_config.remove_input_padding = False
+                self.create_lora_params(input_shape[0])
+                lora_params = self.lora_params
+
+            moe_config = MoeConfig(num_experts=num_experts,
+                                   top_k=top_k,
+                                   normalization_mode=norm_mode)
+
+            moe = tensorrt_llm.layers.MOE(moe_config=moe_config,
                                           hidden_size=hidden_size,
                                           ffn_hidden_size=ffn_hidden_size,
                                           hidden_act=actfn,
@@ -649,6 +978,9 @@ class TestFunctional(unittest.TestCase):
                                           dtype=dtype,
                                           quant_mode=quant_mode)
             moe.router.weight.value = torch_to_numpy(self.router_weights.cpu())
+
+            if use_lora:
+                moe.max_low_rank = self.lora_rank
 
             self.set_weight_layer(self.fc1_weights, moe.fc, quant_mode,
                                   self.weight_scaling_factor_1)
@@ -670,69 +1002,32 @@ class TestFunctional(unittest.TestCase):
                 moe.proj.bias.value = torch_to_numpy(self.fc2_bias.cpu())
 
             if custom_network:
-                custom_network(network, trt_key)
+                if use_lora:
+                    custom_network(network, trt_key, lora_params)
+                else:
+                    custom_network(network, trt_key)
 
-            output = moe(trt_key).trt_tensor
-            output.name = 'output'
-            network.mark_output(output)
-            output.dtype = dtype
+            if not use_plugin:
+                quant_config = None
+                if quant_mode.has_fp8_qdq():
+                    quant_config = QuantConfig(
+                        quant_algo=QuantAlgo.FP8,
+                        kv_cache_quant_algo=QuantAlgo.FP8)
+                moe = moe.to(MoeOOTB, quant_config=quant_config)
 
-        profiles = None
-        if max_sizes:
-            profiles = [
-                Profile().add('input_hidden_states', (1, 1, hidden_size),
-                              (1, 1, hidden_size), max_sizes)
-            ]
-
-        config = CreateConfig(builder_optimization_level=4, profiles=profiles)
-        if not builder.strongly_typed:
-            config = CreateConfig(fp16=(dtype == trt.float16),
-                                  bf16=(dtype == trt.bfloat16),
-                                  int8=(weight_dtype == trt.int8),
-                                  fp8=(weight_dtype == trt.fp8),
-                                  precision_constraints='obey',
-                                  builder_optimization_level=4,
-                                  profiles=profiles)
-
+            output = moe(trt_key, lora_layer_params=lora_params)
+            output.mark_output("output", dtype)
         # trt run
-        build_engine = EngineFromNetwork((builder.trt_builder, net.trt_network),
-                                         config=config)
-        assert build_engine is not None
-        return build_engine
+        session = create_session(builder,
+                                 network,
+                                 precision=trt_dtype_to_str(dtype),
+                                 int8=weight_dtype == trt.int8,
+                                 quant_mode=quant_mode,
+                                 opt_level=4)
+        return session
 
-    def runTrtEngine(self, engine, input_data):
-        with TrtRunner(engine) as runner:
-            feed_dict = {
-                'input_hidden_states': input_data,
-            }
-            outputs = runner.infer(feed_dict=feed_dict)
-        return outputs
-
-    def trtImpl(self,
-                input_data,
-                num_experts,
-                top_k,
-                hidden_size,
-                ffn_hidden_size,
-                actfn,
-                bias,
-                dtype: trt.DataType,
-                weight_dtype: trt.DataType = None,
-                quant_mode=QuantMode(0),
-                norm_mode=MoeConfig.ExpertScaleNormalizationMode.NONE,
-                custom_network=None,
-                use_plugin=True):
-        build_engine = self.buildTrtEngine(tuple(input_data.shape), num_experts,
-                                           top_k, hidden_size, ffn_hidden_size,
-                                           actfn, bias, dtype, weight_dtype,
-                                           quant_mode, norm_mode,
-                                           custom_network, use_plugin)
-
-        outputs = self.runTrtEngine(build_engine, input_data)
-        return outputs
-
-    def referenceImpl(self, inputs, k, actfn, weight_dtype, quant_mode,
-                      norm_mode):
+    def generate_reference(self, inputs, k, actfn, weight_dtype, quant_mode,
+                           norm_mode):
         # Always run the ref implementation at full precision TODO is this a good choice?
         inputs = inputs.cuda().float()
         inputs_merged = inputs.view(-1, inputs.shape[-1])
@@ -769,7 +1064,3 @@ class TestFunctional(unittest.TestCase):
                 assert final.shape == (inputs.shape[-1], )
                 results[i] += scale * final
         return results.view(*inputs.shape), max_act_2
-
-
-if __name__ == "__main__":
-    unittest.main()

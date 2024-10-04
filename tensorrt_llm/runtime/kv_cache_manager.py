@@ -79,7 +79,8 @@ class BlocksManager(object):
                  max_blocks_per_seq: int = 128,
                  beam_width: int = 1):
         """
-        expected block pool shape: [num_blocks, num_layers, 2, block_size]
+        If layers are homogeneous then the expected block pool shape is: [num_blocks, num_layers, 2, block_size]
+        Otherwise, the expected block pool shape is: [num_blocks, 2, block_size]
         """
 
         self.max_blocks_per_seq = max_blocks_per_seq
@@ -263,6 +264,7 @@ class KVCacheManager(object):
             block_size=block_size,
             max_blocks_per_seq=max_blocks_per_seq,
             beam_width=beam_width)
+
         self.tokens_per_block = tokens_per_block
         self.max_attention_window_size = max_attention_window_size
         self.sink_token_len = sink_token_len
@@ -328,13 +330,20 @@ class KVCacheManager(object):
                 batch_idx += 1
         self.sequences = new_sequences
 
-    def add_sequence(self, sequence: GenerationSequence, context_len: int):
+    def add_sequence(self,
+                     sequence: GenerationSequence,
+                     context_len: int,
+                     always_share_across_beam: bool = False):
         """
         Add sequence to the manager and allocate minimum amount of blocks for context
         """
         seq_len = context_len + self.bubble_len
         self.lens.append(seq_len)
         self.sequences.append(sequence)
+
+        # Enable cyclic kv cache when inputLength exceeds maxAttentionWindow.
+        # Note that currently cyclic kv cache doesn't work with shared kv cache of different beams.
+        enable_cyclic_kv_cache = seq_len >= self.max_token_num
 
         # Get the final token index in kv cache
         final_token_kv_index = self.sink_block_token_num + (
@@ -343,8 +352,11 @@ class KVCacheManager(object):
 
         # Get block index that with shareAmongBeams=False.
         unshared_block_idx = -1
-        if final_token_kv_index % self.tokens_per_block > 0:
-            unshared_block_idx = final_token_kv_index // self.tokens_per_block
+        if (not enable_cyclic_kv_cache or self.beam_width > 1
+                or final_token_kv_index % self.tokens_per_block > 0):
+            unshared_block_idx = final_token_kv_index // self.tokens_per_block + 1 if (
+                final_token_kv_index + 1
+            ) % self.tokens_per_block == 0 else final_token_kv_index // self.tokens_per_block
 
         # Get context block num.
         # Allocate one more block if there are tokens that can't be shared across beams.
@@ -356,7 +368,9 @@ class KVCacheManager(object):
         # Allocate blocks
         for i in range(context_blocks):
             self.blocks_manager.allocate(
-                sequence, share_across_beam=i != unshared_block_idx)
+                sequence,
+                share_across_beam=True if always_share_across_beam else
+                (i != unshared_block_idx))
 
     def get_block_offsets(self, beam_width: int) -> torch.Tensor:
         """
@@ -410,8 +424,15 @@ class KVCacheUpdater:
                                                           int) else 0
         assert self.use_paged_kv_cache is not None
         if self.use_paged_kv_cache:
-            host_kv_cache_block_offsets = self.kv_cache_manager.get_block_offsets(
-                1)
+            if self.kv_cache_manager.has_single_pool():
+                kv_cache_manager = self.kv_cache_manager.get_single_kv_cache_manager(
+                )
+            else:
+                raise RuntimeError(
+                    "Currently, using KVCacheUpdater with more then single memory pool is not supported"
+                )
+
+            host_kv_cache_block_offsets = kv_cache_manager.get_block_offsets(1)
             kv_cache_block_offsets = host_kv_cache_block_offsets.to('cuda')
             torch.ops.tensorrt_llm.update_kv_cache_draft_token_location(
                 accepted_draft_token_offsets,
@@ -422,13 +443,13 @@ class KVCacheUpdater:
                 self.num_kv_heads,
                 self.head_dim * self.elt_size,
                 rewind_tokens_count,
-                self.kv_cache_manager.max_attention_window_size,
+                kv_cache_manager.max_attention_window_size,
                 rewind_tokens_tensor,
                 None,
                 self.host_kv_cache_pool_pointers,
                 kv_cache_block_offsets,
-                self.kv_cache_manager.blocks_manager.max_blocks_per_seq,
-                self.kv_cache_manager.tokens_per_block,
+                kv_cache_manager.blocks_manager.max_blocks_per_seq,
+                kv_cache_manager.tokens_per_block,
                 None,
             )
         else:

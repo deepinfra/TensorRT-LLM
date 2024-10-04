@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 import os
 import subprocess  # nosec B404
+import sys
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import click
 
-from tensorrt_llm.hlapi import ModelConfig
+from tensorrt_llm.hlapi import BuildConfig
 from tensorrt_llm.hlapi._perf_evaluator import LLMPerfEvaluator
+from tensorrt_llm.hlapi.llm import ModelLoader
+from tensorrt_llm.hlapi.llm_utils import _ModelFormatKind
 from tensorrt_llm.hlapi.utils import print_colored
 
 try:
@@ -25,12 +29,17 @@ def cli():
 @click.option("--model-path", type=str, required=True)
 @click.option("--samples-path", type=str, required=True)
 @click.option("--report-path-prefix", type=str, required=True)
-@click.option("--num-samples", type=int, default=-1)
+@click.option("--num-samples", type=int, default=None, show_default=True)
 @click.option("--tp-size", type=int, default=1, show_default=True)
-@click.option("--warmup", type=int, default=100, show_default=True)
+@click.option("--streaming/--no-streaming",
+              type=bool,
+              default=False,
+              show_default=True)
+@click.option("--warmup", type=int, default=2, show_default=True)
+@click.option("--concurrency", type=int, default=None, show_default=True)
 @click.option("--max-num-tokens", type=int, default=2048, show_default=True)
 @click.option("--max-input-length", type=int, required=True, default=200)
-@click.option("--max-output-length", type=int, required=True, default=200)
+@click.option("--max-seq-length", type=int, required=True, default=400)
 @click.option("--max-batch-size", type=int, default=128)
 @click.option("--engine-output-dir", type=str, default="")
 @click.option(
@@ -42,12 +51,14 @@ def cli():
 def benchmark_main(model_path: str,
                    samples_path: str,
                    report_path_prefix: str,
-                   num_samples: int = -1,
+                   num_samples: Optional[int] = None,
                    tp_size: int = 1,
-                   warmup: int = 100,
-                   max_num_tokens=2048,
+                   streaming: bool = False,
+                   warmup: int = 2,
+                   concurrency: Optional[int] = None,
+                   max_num_tokens: int = 2048,
                    max_input_length: int = 200,
-                   max_output_length: int = 200,
+                   max_seq_length: int = 400,
                    max_batch_size: int = 128,
                    engine_output_dir: str = "",
                    cpp_executable: str = None):
@@ -66,64 +77,79 @@ def benchmark_main(model_path: str,
     if engine_output_dir:
         engine_output_dir = Path(engine_output_dir)
     elif cpp_executable:
-        temp_dir = tempfile.TemporaryDirectory()
-        engine_output_dir = Path(temp_dir.name)
+        if ModelLoader.get_model_format(
+                model_path) is _ModelFormatKind.TLLM_ENGINE:
+            engine_output_dir = model_path
+        else:
+            temp_dir = tempfile.TemporaryDirectory()
+            engine_output_dir = Path(temp_dir.name)
 
     def run_hlapi():
-        print_colored(f"Running HLAPI benchmark ...\n", "bold_green")
+        print_colored(f"Running HLAPI benchmark ...\n",
+                      "bold_green",
+                      writer=sys.stdout)
 
-        config = ModelConfig(model_path)
-        config._set_additional_options(
-            max_num_tokens=max_num_tokens,
-            max_input_len=max_input_length,
-            max_output_len=max_output_length,
-            max_batch_size=max_batch_size,
-        )
-        config.parallel_config.tp_size = tp_size
+        build_config = BuildConfig(max_num_tokens=max_num_tokens,
+                                   max_input_len=max_input_length,
+                                   max_seq_len=max_seq_length,
+                                   max_batch_size=max_batch_size)
 
         evaluator = LLMPerfEvaluator.create(
-            config,
-            num_samples=num_samples,
+            model=model_path,
             samples_path=samples_path,
+            num_samples=num_samples,
+            streaming=streaming,
             warmup=warmup,
+            concurrency=concurrency,
             engine_cache_path=engine_output_dir,
             # The options should be identical to the cpp benchmark
-            use_custom_all_reduce=True,
-            enable_chunked_context=False,
-        )
+            tensor_parallel_size=tp_size,
+            build_config=build_config)
         assert evaluator
         report = evaluator.run()
         report.display()
 
-        report_path = Path(report_path_prefix + ".json")
-        if report_path.exists():
-            for i in range(10000):
-                if (Path(f"report_path_prefix{i}.json").exists()):
-                    continue
-                else:
-                    report_path = Path(f"report_path_prefix{i}")
-                    break
-
+        report_path = Path(f"{report_path_prefix}.json")
+        i = 0
+        while report_path.exists():
+            report_path = Path(f"{report_path_prefix}{i}.json")
+            i += 1
         report.save_json(report_path)
 
     def run_gpt_manager_benchmark():
-        print_colored(f"Running gptManagerBenchmark ...\n", "bold_green")
-        cpp_executable_path = (
-            cpp_executable and cpp_executable != "on") or os.path.join(
+        print_colored(f"Running gptManagerBenchmark ...\n",
+                      "bold_green",
+                      writer=sys.stdout)
+        if os.path.isfile(cpp_executable):
+            cpp_executable_path = cpp_executable
+        else:
+            cpp_executable_path = os.path.join(
                 os.path.dirname(__file__),
                 "../../cpp/build/benchmarks/gptManagerBenchmark")
 
-        run_command = f"{cpp_executable_path} --engine_dir {engine_output_dir} --type IFB --dataset {samples_path} --warm_up {warmup} --output_csv {report_path_prefix}.cpp.csv"
-        launch_prefix = f"mpirun -n {tp_size}" if tp_size > 1 else ""
-        command = f"{launch_prefix} {run_command}"
+        command = f"{cpp_executable_path} --engine_dir {engine_output_dir} --type IFB --dataset {samples_path} --warm_up {warmup} --output_csv {report_path_prefix}.cpp.csv --api executor"
+        if streaming:
+            command = f"{command} --streaming"
+        if concurrency:
+            command = f"{command} --concurrency {concurrency}"
+        if tp_size > 1:
+            command = f"mpirun -n {tp_size} {command}"
+        print_colored(f'cpp benchmark command: {command}\n',
+                      "grey",
+                      writer=sys.stdout)
         output = subprocess.run(command,
                                 check=True,
                                 universal_newlines=True,
                                 shell=True,
                                 capture_output=True,
                                 env=os.environ)  # nosec B603
-        print_colored(f'cpp benchmark output: {output.stdout}', "grey")
-        print(f'cpp benchmark error: {output.stderr}', "red")
+        print_colored(f'cpp benchmark output: {output.stdout}',
+                      "grey",
+                      writer=sys.stdout)
+        if output.stderr:
+            print_colored(f'cpp benchmark error: {output.stderr}',
+                          "red",
+                          writer=sys.stdout)
 
     run_hlapi()
     if cpp_executable:
@@ -139,7 +165,7 @@ def benchmark_main(model_path: str,
               default=1e8,
               help="Specify the first N cases to test")
 @click.option("--max-input-len", type=int, default=1024)
-@click.option("--max-output-len", type=int, default=1024)
+@click.option("--max-seq-len", type=int, default=2048)
 @click.option("--max-num-tokens", type=int, default=4096)
 @click.option("--tp-size", type=int, default=1)
 @click.option("--num-samples", type=int, default=200)
@@ -148,28 +174,25 @@ def grid_searcher_main(model_path,
                        reports_root,
                        prune_space_for_debug: int,
                        max_input_len: int,
-                       max_output_len: int,
+                       max_seq_len: int,
                        max_num_tokens: int,
                        tp_size: int = 1,
                        num_samples: int = 200):
     reports_root = Path(reports_root)
 
-    grid_searcher = GridSearcher(prune_space_for_debug=prune_space_for_debug, )
+    grid_searcher = GridSearcher(prune_space_for_debug=prune_space_for_debug)
 
-    model_config = ModelConfig(model_path)
-    model_config.parallel_config.tp_size = tp_size
+    build_config = BuildConfig(max_seq_len=max_seq_len,
+                               max_input_len=max_input_len,
+                               max_num_tokens=max_num_tokens)
 
-    model_config._set_additional_options(max_output_len=max_input_len,
-                                         max_input_len=max_output_len,
-                                         max_num_tokens=max_num_tokens)
-
-    grid_searcher.evaluate(
-        model_config=model_config,
-        samples_path=samples_path,
-        report_dir=reports_root,
-        memory_monitor_interval=1,
-        num_samples=num_samples,
-    )
+    grid_searcher.evaluate(model=model_path,
+                           samples_path=samples_path,
+                           report_dir=reports_root,
+                           memory_monitor_interval=1,
+                           num_samples=num_samples,
+                           tensor_parallel_size=tp_size,
+                           build_config=build_config)
 
 
 if __name__ == '__main__':

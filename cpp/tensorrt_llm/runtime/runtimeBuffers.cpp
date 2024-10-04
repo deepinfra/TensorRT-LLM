@@ -18,7 +18,6 @@
 
 #include "tensorrt_llm/batch_manager/kvCacheManager.h"
 #include "tensorrt_llm/common/assert.h"
-#include "tensorrt_llm/common/stlUtils.h"
 #include "tensorrt_llm/runtime/runtimeKernels.h"
 #include "tensorrt_llm/runtime/tllmRuntime.h"
 #include "tensorrt_llm/runtime/utils/sessionUtils.h"
@@ -61,11 +60,11 @@ void RuntimeBuffers::clearTensorMaps()
     TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
 }
 
-void RuntimeBuffers::create(TllmRuntime& runtime, ModelConfig const& modelConfig, WorldConfig const& worldConfig)
+void RuntimeBuffers::create(TllmRuntime const& runtime, ModelConfig const& modelConfig, WorldConfig const& worldConfig)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
-    auto& manager = runtime.getBufferManager();
-    auto& engine = runtime.getEngine();
+    auto const& manager = runtime.getBufferManager();
+    auto const& engine = runtime.getEngine();
 
     if (worldConfig.isLastPipelineParallelRank())
     {
@@ -77,7 +76,8 @@ void RuntimeBuffers::create(TllmRuntime& runtime, ModelConfig const& modelConfig
         if (modelConfig.computeGenerationLogits())
         {
             cacheGenerationFragmentPointerDevice = manager.emptyTensor(MemoryType::kGPU, nvinfer1::DataType::kINT64);
-            cacheGenerationFragmentPointerHost = manager.emptyTensor(MemoryType::kPINNED, nvinfer1::DataType::kINT64);
+            cacheGenerationFragmentPointerHost
+                = manager.emptyTensor(MemoryType::kPINNEDPOOL, nvinfer1::DataType::kINT64);
 
             generationLogitsFragments = std::make_shared<std::vector<TensorPtr>>();
         }
@@ -86,11 +86,9 @@ void RuntimeBuffers::create(TllmRuntime& runtime, ModelConfig const& modelConfig
     lastTokenIds = manager.emptyTensor(MemoryType::kGPU, nvinfer1::DataType::kINT32);
 
     bool transformerBased = modelConfig.isTransformerBased();
-    bool ssmBased = modelConfig.isSsmBased();
+    bool rnnBased = modelConfig.isRnnBased();
 
-    TLLM_CHECK_WITH_INFO(transformerBased ^ ssmBased, "Model should be either Transformer based or SSM based now.");
-
-    contextLengthsHost = manager.emptyTensor(MemoryType::kPINNED, nvinfer1::DataType::kINT32);
+    contextLengthsHost = manager.emptyTensor(MemoryType::kPINNEDPOOL, nvinfer1::DataType::kINT32);
     if (transformerBased)
     {
         if (modelConfig.useGptAttentionPlugin())
@@ -99,10 +97,10 @@ void RuntimeBuffers::create(TllmRuntime& runtime, ModelConfig const& modelConfig
         }
         transformerBuffers.emplace(runtime, modelConfig, worldConfig);
     }
-    if (ssmBased)
+    if (rnnBased)
     {
         requestTypes = manager.emptyTensor(MemoryType::kCPU, nvinfer1::DataType::kINT32);
-        ssmStateBuffers.emplace(runtime, modelConfig, worldConfig);
+        rnnStateBuffers.emplace(runtime, modelConfig, worldConfig);
     }
 
     cacheIndirectionDecoderInput = manager.emptyTensor(MemoryType::kGPU, nvinfer1::DataType::kINT32);
@@ -119,20 +117,19 @@ void RuntimeBuffers::create(TllmRuntime& runtime, ModelConfig const& modelConfig
 }
 
 void RuntimeBuffers::initFromInput(ITensor const& inputIds, TensorPtr const& inputLengths, bool inputPacked,
-    SizeType beamWidth, SizeType maxAttentionWindow, SizeType sinkTokenLength, SizeType maxSequenceLength,
-    BufferManager& manager)
+    SizeType32 beamWidth, std::vector<SizeType32> maxAttentionWindowVec, SizeType32 maxAttentionWindow,
+    SizeType32 sinkTokenLength, SizeType32 maxSequenceLength, BufferManager& manager)
 {
     contextLengthsDevice = inputLengths;
     contextLengthsHost->reshape(inputLengths->getShape());
     manager.copy(*contextLengthsDevice, *contextLengthsHost);
     manager.getStream().synchronize(); // wait for context lengths to be copied to host
 
-    generationConfig = GenerationConfig::fromInput(
-        inputIds, *contextLengthsHost, inputPacked, beamWidth, maxAttentionWindow, sinkTokenLength, maxSequenceLength);
+    generationConfig = GenerationConfig::fromInput(inputIds, *contextLengthsHost, inputPacked, beamWidth,
+        maxAttentionWindowVec, maxAttentionWindow, sinkTokenLength, maxSequenceLength);
 }
 
-void RuntimeBuffers::reshape(
-    KvCacheManager const* kvCacheManager, ModelConfig const& modelConfig, WorldConfig const& worldConfig)
+void RuntimeBuffers::reshape(ModelConfig const& modelConfig, WorldConfig const& worldConfig)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
 
@@ -184,13 +181,13 @@ void RuntimeBuffers::reshape(
         {
             requestTypes->reshape(ITensor::makeShape({batchSize}));
         }
-        transformerBuffers->reshape(generationConfig, kvCacheManager, modelConfig, worldConfig);
+        transformerBuffers->reshape(generationConfig, modelConfig, worldConfig);
     }
 
-    if (ssmStateBuffers)
+    if (rnnStateBuffers)
     {
         requestTypes->reshape(ITensor::makeShape({batchSize}));
-        ssmStateBuffers->reshape(generationConfig, modelConfig, worldConfig);
+        rnnStateBuffers->reshape(generationConfig, modelConfig, worldConfig);
     }
 
     auto const cacheIndirShape = ITensor::makeShape({batchSize, beamWidth, maxAttentionWindow});
@@ -222,14 +219,14 @@ void RuntimeBuffers::reset(BufferManager& manager)
         transformerBuffers->reset(manager);
     }
 
-    if (ssmStateBuffers)
+    if (rnnStateBuffers)
     {
-        ssmStateBuffers->reset(manager);
+        rnnStateBuffers->reset(manager);
     }
 }
 
 std::vector<RuntimeBuffers> RuntimeBuffers::split(
-    SizeType contextBatchSize, ModelConfig const& modelConfig, WorldConfig const& worldConfig)
+    SizeType32 contextBatchSize, ModelConfig const& modelConfig, WorldConfig const& worldConfig)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
 
@@ -265,9 +262,9 @@ std::vector<RuntimeBuffers> RuntimeBuffers::split(
                     = transformerBuffers->sliceTo(generationConfig, modelConfig, offset, batchSize);
             }
 
-            if (ssmStateBuffers)
+            if (rnnStateBuffers)
             {
-                buffers.ssmStateBuffers = ssmStateBuffers->sliceTo(offset, batchSize);
+                buffers.rnnStateBuffers = rnnStateBuffers->sliceTo(offset, batchSize);
             }
 
             if (requestTypes != nullptr)
@@ -336,9 +333,9 @@ void RuntimeBuffers::postContextStep(std::vector<RuntimeBuffers> const& contextB
     {
         transformerBuffers->postContextStep(this, contextBuffers, manager, modelConfig, worldConfig);
     }
-    if (ssmStateBuffers)
+    if (rnnStateBuffers)
     {
-        ssmStateBuffers->postContextStep(this, contextBuffers, manager, modelConfig, worldConfig);
+        rnnStateBuffers->postContextStep(this, contextBuffers, manager, modelConfig, worldConfig);
     }
 
     // use output lengths after context step
@@ -350,11 +347,11 @@ void RuntimeBuffers::postContextStep(std::vector<RuntimeBuffers> const& contextB
 
     if (modelConfig.usePromptTuning())
     {
-        std::vector<SizeType> reqBeamWidths(batchSize, beamWidth);
+        std::vector<SizeType32> reqBeamWidths(batchSize, beamWidth);
         //// Note: reqPromptLenghts won't be used
-        std::vector<SizeType> reqPromptLengths;
+        std::vector<SizeType32> reqPromptLengths;
         // Copy the generationInput tasks to host
-        promptTuningTasksHost = manager.copyFrom(*promptTuningParams.tasks, MemoryType::kPINNED);
+        promptTuningTasksHost = manager.copyFrom(*promptTuningParams.tasks, MemoryType::kPINNEDPOOL);
         // Update the promptTuningParams tasks tensor
         promptTuningParams.fillTasksTensor(promptTuningTasksHost, batchSize, 0, reqBeamWidths, reqPromptLengths,
             manager, modelConfig.usePackedInput());
@@ -364,11 +361,11 @@ void RuntimeBuffers::postContextStep(std::vector<RuntimeBuffers> const& contextB
 }
 
 void RuntimeBuffers::prepareContextStep(TensorPtr const& inputIds, TokenIdType const padId, BufferManager& manager,
-    batch_manager::kv_cache_manager::KVCacheManager const* kvCacheManager, SizeType firstBatchSlotIdx,
+    batch_manager::kv_cache_manager::KVCacheManager const* kvCacheManager, SizeType32 firstBatchSlotIdx,
     ModelConfig const& modelConfig, WorldConfig const& worldConfig)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
-    auto& stream = manager.getStream();
+    auto const& stream = manager.getStream();
 
     // use context lengths only in context step
     sequenceLengths = contextLengthsDevice;
@@ -379,9 +376,9 @@ void RuntimeBuffers::prepareContextStep(TensorPtr const& inputIds, TokenIdType c
             this, inputIds, padId, manager, kvCacheManager, firstBatchSlotIdx, modelConfig, worldConfig);
     }
 
-    if (ssmStateBuffers)
+    if (rnnStateBuffers)
     {
-        ssmStateBuffers->prepareContextStep(this, manager);
+        rnnStateBuffers->prepareContextStep(this, manager);
     }
 
     if (modelConfig.usePackedInput())
@@ -396,14 +393,14 @@ void RuntimeBuffers::prepareContextStep(TensorPtr const& inputIds, TokenIdType c
     TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
 }
 
-RuntimeBuffers::TensorPtr RuntimeBuffers::prepareNextStep(SizeType const step, BufferManager& manager,
-    batch_manager::kv_cache_manager::KVCacheManager* kvCacheManager, SizeType firstBatchSlotIdx,
+RuntimeBuffers::TensorPtr RuntimeBuffers::prepareNextStep(SizeType32 const step, BufferManager& manager,
+    batch_manager::kv_cache_manager::KVCacheManager* kvCacheManager, SizeType32 firstBatchSlotIdx,
     ModelConfig const& modelConfig, WorldConfig const& worldConfig)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
-    auto& stream = manager.getStream();
-    SizeType const batchSize = generationConfig.batchSize;
-    SizeType const beamWidth = generationConfig.beamWidth;
+    auto const& stream = manager.getStream();
+    SizeType32 const batchSize = generationConfig.batchSize;
+    SizeType32 const beamWidth = generationConfig.beamWidth;
 
     auto const inputShape = [&modelConfig, batchSize, beamWidth]()
     {
@@ -436,7 +433,7 @@ RuntimeBuffers::TensorPtr RuntimeBuffers::prepareNextStep(SizeType const step, B
     return nextInputIds;
 }
 
-void RuntimeBuffers::getRuntimeBuffers(TensorMap& inputBuffers, TensorMap& outputBuffers, SizeType const step,
+void RuntimeBuffers::getRuntimeBuffers(TensorMap& inputBuffers, TensorMap& outputBuffers, SizeType32 const step,
     TensorPtr const& inputIds, TensorPtr const& commPtrs, ModelConfig const& modelConfig,
     WorldConfig const& worldConfig) const
 {
@@ -447,16 +444,15 @@ void RuntimeBuffers::getRuntimeBuffers(TensorMap& inputBuffers, TensorMap& outpu
     if (transformerBuffers)
     {
         transformerBuffers->getRuntimeBuffers(
-            this, inputBuffers, outputBuffers, step, inputIds, commPtrs, modelConfig, worldConfig);
+            this, inputBuffers, outputBuffers, step, inputIds, modelConfig, worldConfig);
     }
 
-    if (ssmStateBuffers)
+    if (rnnStateBuffers)
     {
-        ssmStateBuffers->getRuntimeBuffers(
-            this, inputBuffers, outputBuffers, step, inputIds, commPtrs, modelConfig, worldConfig);
+        rnnStateBuffers->getRuntimeBuffers(this, inputBuffers, outputBuffers, step, inputIds, modelConfig, worldConfig);
     }
 
-    if (modelConfig.useCustomAllReduce() && worldConfig.getTensorParallelism())
+    if (worldConfig.isTensorParallel())
     {
         inputBuffers.insert_or_assign("all_reduce_workspace", commPtrs);
     }

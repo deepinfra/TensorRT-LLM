@@ -1,6 +1,6 @@
 # Executor API examples
 
-This directory contains two examples that demonstrate how to use the `Executor` API. The first example defined in `executorExampleBasic.cpp` shows how you can generate output tokens for a single prompt in only a few lines of code. The second example defined in `executorExampleAdvanced.cpp` supports more options such as providing an arbitrary number of input requests with arbitrary tokens per request and running in streaming mode.
+This directory contains three examples that demonstrate how to use the `Executor` API. The first example defined in `executorExampleBasic.cpp` shows how you can generate output tokens for a single prompt in only a few lines of code. The second example defined in `executorExampleAdvanced.cpp` supports more options such as providing an arbitrary number of input requests with arbitrary tokens per request and running in streaming mode. The third example defined in `executorExampleLogitsProcessor.cpp` shows how to use `LogitsPostProcessor` to control output tokens.
 
 ## Building the examples
 
@@ -30,6 +30,16 @@ From the `examples/cpp/executor/build` folder, you can get run the `executorExam
 
 ```
 ./executorExampleBasic <path_to_engine_dir>
+```
+where `<path_to_engine_dir>` is the path to the directly containing the TensorRT engine files.
+
+### executorExampleDebug
+
+This example shows how you can define which engine IO tensors should be dumped to numpy files.
+From the `examples/cpp/executor/build` folder, you can get run the `executorExampleDebug` example with:
+
+```
+./executorExampleDebug <path_to_engine_dir>
 ```
 where `<path_to_engine_dir>` is the path to the directly containing the TensorRT engine files.
 

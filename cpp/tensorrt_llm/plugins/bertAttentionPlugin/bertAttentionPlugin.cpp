@@ -32,13 +32,12 @@ static char const* BERT_ATTENTION_PLUGIN_NAME{"BertAttention"};
 PluginFieldCollection BertAttentionPluginCreator::mFC{};
 std::vector<nvinfer1::PluginField> BertAttentionPluginCreator::mPluginAttributes;
 
-BertAttentionPlugin::BertAttentionPlugin(int num_heads, int head_size, float q_scaling, bool qk_half_accum,
+BertAttentionPlugin::BertAttentionPlugin(int num_heads, int head_size, float q_scaling,
     ContextFMHAType context_fmha_type, nvinfer1::DataType type, bool do_relative_attention, int max_distance,
     bool remove_padding)
     : mNumHeads(num_heads)
     , mHeadSize(head_size)
     , mQScaling(q_scaling)
-    , mQKHalfAccum(qk_half_accum)
     , mEnableContextFMHA(context_fmha_type != ContextFMHAType::DISABLED)
     , mFMHAForceFP32Acc(context_fmha_type == ContextFMHAType::ENABLED_WITH_FP32_ACC)
     , mType(type)
@@ -53,11 +52,6 @@ BertAttentionPlugin::BertAttentionPlugin(int num_heads, int head_size, float q_s
         if (!(mType == DataType::kHALF || mType == DataType::kBF16))
         {
             TLLM_LOG_WARNING("Fall back to unfused MHA because of unsupported data type.");
-        }
-        else if (!MHARunner::fmha_supported(mHeadSize, mSM))
-        {
-            TLLM_LOG_WARNING(
-                "Fall back to unfused MHA because of unsupported head size %d in sm_{%d}.", mHeadSize, mSM);
         }
         else if (mRelativeAttention)
         {
@@ -168,7 +162,7 @@ size_t BertAttentionPlugin::getWorkspaceSize(nvinfer1::PluginTensorDesc const* i
     const size_t qkv_buf_2_size = mEnableContextFMHA ? 0 : size * batch_size * input_seq_len * local_hidden_units_;
     const size_t qk_buf_float_size
         = mEnableContextFMHA ? 0 : sizeof(float) * batch_size * mNumHeads * input_seq_len * input_seq_len;
-    const size_t padding_offset_size = sizeof(int) * batch_size * input_seq_len;
+    const size_t padding_offset_size = mEnableContextFMHA ? 0 : sizeof(int) * batch_size * input_seq_len;
     const size_t fmha_scheduler_counter = mEnableContextFMHA ? sizeof(uint32_t) : 0;
 
     int const NUM_BUFFERS = 11;
@@ -247,7 +241,7 @@ int BertAttentionPlugin::enqueueImpl(nvinfer1::PluginTensorDesc const* inputDesc
     const size_t qkv_buf_2_size = mEnableContextFMHA ? 0 : sizeof(T) * batch_size * input_seq_len * local_hidden_units_;
     const size_t qk_buf_float_size
         = mEnableContextFMHA ? 0 : sizeof(float) * batch_size * mNumHeads * input_seq_len * input_seq_len;
-    const size_t padding_offset_size = sizeof(int) * batch_size * input_seq_len;
+    const size_t padding_offset_size = mEnableContextFMHA ? 0 : sizeof(int) * batch_size * input_seq_len;
     const size_t fmha_scheduler_counter = mEnableContextFMHA ? sizeof(uint32_t) : 0;
 
     // Workspace pointer shift
@@ -277,7 +271,6 @@ int BertAttentionPlugin::enqueueImpl(nvinfer1::PluginTensorDesc const* inputDesc
     params.batchSize = batch_size;
     params.maxQSeqLength = input_seq_len;
     params.numTokens = num_tokens;
-    params.removePadding = mRemovePadding;
     params.attentionMaskType = AttentionMaskType::PADDING;
     params.fmhaTileCounter = fmha_tile_counter_ptr;
     invokeBuildDecoderInfo(params, stream);
@@ -301,13 +294,36 @@ int BertAttentionPlugin::enqueueImpl(nvinfer1::PluginTensorDesc const* inputDesc
     // We update mEnableContextFMHA in constructor to check this condition
     if (mEnableContextFMHA)
     {
-        // b, max_seqlen, actual_total_seqlen
-        mFMHARunner->setup(request_batch_size, request_seq_len, request_seq_len, request_batch_size * request_seq_len);
-        mFMHARunner->run(
-            const_cast<T*>(attention_input), cu_seqlens, fmha_tile_counter_ptr, nullptr, context_buf_, stream);
+        // Construct the fmha params for running kernels.
+        MHARunnerParams fmhaParams{};
+        fmhaParams.b = request_batch_size;
+        fmhaParams.qSeqLen = request_seq_len;
+        fmhaParams.kvSeqLen = request_seq_len;
+        fmhaParams.totalQSeqLen = request_batch_size * request_seq_len;
+        // Device buffer pointers.
+        fmhaParams.qkvPtr = attention_input;
+        fmhaParams.outputPtr = context_buf_;
+        fmhaParams.cuQSeqLenPtr = cu_seqlens;
+        fmhaParams.cuKvSeqLenPtr = cu_seqlens;
+        fmhaParams.tileCounterPtr = fmha_tile_counter_ptr;
+        fmhaParams.stream = stream;
+
+        // Run the fmha kernel.
+        mFMHARunner->run(fmhaParams);
     }
     else
     {
+        // FIXME: a temporary solution to make sure the padding part of key/value buffer is 0
+        // NOTE: pointer subtraction is used below since there could be some extra gap due to alignment.
+        //  Otherwise, we could do cudaMemsetAsync(k_buf_2_, 0, k_buf_2_size + v_buf_2_size, stream);
+        // cudaMemsetAsync(k_buf_2_, 0, reinterpret_cast<int8_t*>(qk_buf_) - reinterpret_cast<int8_t*>(k_buf_2_),
+        // stream);
+        // FIXME: the final solution is to change the add_fusedQKV_bias_transpose_kernel to map CTAs corresponding to
+        // the output shape, and set the padding part to 0. Without zero-initialize guarantee, these workspace buffers
+        // may contain random NaN values when IFB workload is high.
+        cudaMemsetAsync(k_buf_2_, 0,
+            reinterpret_cast<int8_t*>(v_buf_2_) - reinterpret_cast<int8_t*>(k_buf_2_) + v_buf_2_size, stream);
+
         // only non-FMHA path needs to split Q,K,V from QKV
         invokeAddFusedQKVBiasTranspose(q_buf_2_, k_buf_2_, v_buf_2_, const_cast<T*>(attention_input), input_lengths,
             mRemovePadding ? padding_offset : nullptr, batch_size, input_seq_len, num_tokens, mNumHeads, mNumHeads,
@@ -407,6 +423,7 @@ int BertAttentionPlugin::enqueueImpl(nvinfer1::PluginTensorDesc const* inputDesc
                 request_seq_len, mNumHeads, mHeadSize, padding_offset, (float*) nullptr, 0, stream);
         }
     }
+    sync_check_cuda_error();
     return 0;
 }
 
@@ -491,10 +508,23 @@ int BertAttentionPlugin::initialize() noexcept
         {
             TLLM_CHECK_WITH_INFO(false, "GPTAttentionPlugin received wrong data type.");
         }
-        // Paged KV FMHA it not needed.
-        mFMHARunner.reset(new FusedMHARunnerV2(data_type, false, mNumHeads, mHeadSize, mQScaling));
-        // set flags: force_fp32_acc, is_s_padded, causal_mask, num_kv_heads = num_heads
-        mFMHARunner->setup_flags(mFMHAForceFP32Acc, !mRemovePadding, false, mNumHeads);
+
+        // Construct the fmha runner.
+        MHARunnerFixedParams fmhaParams{};
+        fmhaParams.dataType = data_type;
+        fmhaParams.forceFp32Acc = mFMHAForceFP32Acc;
+        fmhaParams.attentionMaskType = ContextAttentionMaskType::PADDING;
+        fmhaParams.isSPadded = !mRemovePadding;
+        fmhaParams.numQHeads = mNumHeads;
+        fmhaParams.numKvHeads = mNumHeads;
+        fmhaParams.headSize = mHeadSize;
+        fmhaParams.qScaling = mQScaling;
+
+        // Load kernels from the pre-compiled cubins.
+        mFMHARunner.reset(new FusedMHARunnerV2(fmhaParams));
+
+        // Fall back to unfused MHA kernels if not supported.
+        mEnableContextFMHA = mFMHARunner->isFmhaSupported();
     }
 
     return 0;
@@ -539,7 +569,6 @@ BertAttentionPluginCreator::BertAttentionPluginCreator()
     mPluginAttributes.emplace_back(PluginField("num_heads", nullptr, PluginFieldType::kINT32, -1));
     mPluginAttributes.emplace_back(PluginField("head_size", nullptr, PluginFieldType::kINT32, -1));
     mPluginAttributes.emplace_back(PluginField("q_scaling", nullptr, PluginFieldType::kFLOAT32, 1.0));
-    mPluginAttributes.emplace_back(PluginField("enable_qk_half_accum", nullptr, PluginFieldType::kINT8, 0));
     mPluginAttributes.emplace_back(PluginField("context_fmha_type", nullptr, PluginFieldType::kINT8, 0));
     mPluginAttributes.emplace_back(PluginField("type_id", nullptr, PluginFieldType::kINT32, 1));
     mPluginAttributes.emplace_back(PluginField("do_relative_attention", nullptr, PluginFieldType::kINT8, 0));
@@ -569,7 +598,6 @@ IPluginV2* BertAttentionPluginCreator::createPlugin(char const* name, PluginFiel
     PluginField const* fields = fc->fields;
     int num_heads, head_size;
     ContextFMHAType context_fmha_type;
-    bool qk_half_accum;
     float q_scaling;
     nvinfer1::DataType type;
     bool do_relative_attention;
@@ -593,11 +621,6 @@ IPluginV2* BertAttentionPluginCreator::createPlugin(char const* name, PluginFiel
         {
             TLLM_CHECK(fields[i].type == PluginFieldType::kFLOAT32);
             q_scaling = static_cast<float>(*(static_cast<float const*>(fields[i].data)));
-        }
-        else if (!strcmp(attrName, "enable_qk_half_accum"))
-        {
-            TLLM_CHECK(fields[i].type == PluginFieldType::kINT8);
-            qk_half_accum = static_cast<bool>(*(static_cast<int8_t const*>(fields[i].data)));
         }
         else if (!strcmp(attrName, "context_fmha_type"))
         {
@@ -627,7 +650,7 @@ IPluginV2* BertAttentionPluginCreator::createPlugin(char const* name, PluginFiel
     }
     try
     {
-        auto* obj = new BertAttentionPlugin(num_heads, head_size, q_scaling, qk_half_accum, context_fmha_type, type,
+        auto* obj = new BertAttentionPlugin(num_heads, head_size, q_scaling, context_fmha_type, type,
             do_relative_attention, max_distance, remove_padding);
         obj->setPluginNamespace(mNamespace.c_str());
         return obj;

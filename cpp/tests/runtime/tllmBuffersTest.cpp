@@ -20,6 +20,7 @@
 #include "tensorrt_llm/batch_manager/namedTensor.h"
 #include "tensorrt_llm/common/cudaUtils.h"
 #include "tensorrt_llm/common/stringUtils.h"
+#include "tensorrt_llm/runtime/cudaMemPool.h"
 #include "tensorrt_llm/runtime/memoryCounters.h"
 #include "tensorrt_llm/runtime/tllmBuffers.h"
 
@@ -44,19 +45,29 @@ protected:
     {
         mDeviceCount = tc::getDeviceCount();
         PinnedPoolAllocator::getPool().setChunkSize(kPinnedPoolChunkSize);
+        mStream = std::make_shared<CudaStream>();
+        mMemPool = CudaMemPool::getPrimaryPoolForDevice(mStream->getDevice());
     }
 
     void TearDown() override {}
 
     int mDeviceCount;
+    std::shared_ptr<CudaMemPool> mMemPool = nullptr;
+    std::shared_ptr<CudaStream> mStream = nullptr;
 
     static auto constexpr kPinnedPoolChunkSize = std::size_t(1) << 22;
+
+    static constexpr std::string_view noDeviceSkipReason = "This test cannot run without any device present";
+    static constexpr std::string_view noPoolSkipReason
+        = "This test cannot be run against devices that do not support memory pools.";
 };
 
 TEST_F(TllmBuffersTest, Stream)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
 
     CudaStream stream{};
     EXPECT_NE(stream.get(), nullptr);
@@ -136,11 +147,16 @@ TEST_F(TllmBuffersTest, UVMAllocator)
 TEST_F(TllmBuffersTest, CudaAllocatorAsync)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
 
-    auto streamPtr = std::make_shared<CudaStream>();
     auto constexpr size = 1024;
-    CudaAllocatorAsync allocator{streamPtr};
+    if (mMemPool == nullptr)
+    {
+        GTEST_SKIP() << "This test cannot be run against devices that do not support memory pools.";
+    }
+    CudaAllocatorAsync allocator{mStream, mMemPool};
     auto& counters = MemoryCounters::getInstance();
     EXPECT_EQ(counters.getGpu(), 0);
     auto ptr = allocator.allocate(size);
@@ -151,11 +167,11 @@ TEST_F(TllmBuffersTest, CudaAllocatorAsync)
     EXPECT_EQ(counters.getGpu(), 0);
     EXPECT_EQ(counters.getGpuDiff(), -size);
     EXPECT_EQ(allocator.getMemoryType(), MemoryType::kGPU);
-    streamPtr->synchronize();
+    mStream->synchronize();
     CudaAllocatorAsync allocatorCopy = allocator;
-    EXPECT_EQ(allocatorCopy.getCudaStream(), streamPtr);
+    EXPECT_EQ(allocatorCopy.getCudaStream(), mStream);
     CudaAllocatorAsync allocatorMove = std::move(allocatorCopy);
-    EXPECT_EQ(allocatorMove.getCudaStream(), streamPtr);
+    EXPECT_EQ(allocatorMove.getCudaStream(), mStream);
     EXPECT_THROW(allocator.deallocate(ptr, size), std::runtime_error);
 }
 
@@ -190,43 +206,65 @@ void testBuffer(IBuffer& buffer, std::int32_t typeSize)
     EXPECT_EQ(byteBuffer->getSizeInBytes(), buffer.getSizeInBytes());
     EXPECT_EQ(byteBuffer->getCapacity(), buffer.getSizeInBytes());
     auto tensorWrapped = ITensor::wrap(buffer.data(), buffer.getDataType(),
-        ITensor::makeShape({static_cast<SizeType>(buffer.getSize())}), buffer.getCapacity());
+        ITensor::makeShape({static_cast<SizeType32>(buffer.getSize())}), buffer.getCapacity());
     EXPECT_EQ(tensorWrapped->getSize(), buffer.getSize());
     EXPECT_EQ(tensorWrapped->getCapacity(), buffer.getCapacity());
     EXPECT_EQ(tensorWrapped->getDataType(), buffer.getDataType());
     EXPECT_EQ(tensorWrapped->getMemoryType(), buffer.getMemoryType());
-    EXPECT_NO_THROW(tensorWrapped->reshape(ITensor::makeShape({static_cast<SizeType>(buffer.getCapacity()) / 2})));
-    EXPECT_THROW(
-        tensorWrapped->reshape(ITensor::makeShape({static_cast<SizeType>(buffer.getCapacity()) * 2})), std::bad_alloc);
+    EXPECT_NO_THROW(tensorWrapped->reshape(ITensor::makeShape({static_cast<SizeType32>(buffer.getCapacity()) / 2})));
+    EXPECT_THROW(tensorWrapped->reshape(ITensor::makeShape({static_cast<SizeType32>(buffer.getCapacity()) * 2})),
+        std::bad_alloc);
 }
 } // namespace
 
 TEST_F(TllmBuffersTest, DeviceBuffer)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
 
     auto streamPtr = std::make_shared<CudaStream>();
     auto constexpr size = 1024;
-    CudaAllocatorAsync allocator{streamPtr};
+    if (static_cast<bool>(mMemPool))
     {
-        DeviceBuffer buffer{size, nvinfer1::DataType::kFLOAT, allocator};
-        testBuffer(buffer, sizeof(float));
-    }
-    streamPtr->synchronize();
+        CudaAllocatorAsync allocator{mStream, mMemPool};
+        {
+            DeviceBuffer buffer{size, nvinfer1::DataType::kFLOAT, allocator};
+            testBuffer(buffer, sizeof(float));
+        }
+        streamPtr->synchronize();
 
-    static_assert(!std::is_copy_constructible<DeviceBuffer>::value);
-    static_assert(!std::is_copy_assignable<DeviceBuffer>::value);
+        static_assert(!std::is_copy_constructible<DeviceBuffer>::value);
+        static_assert(!std::is_copy_assignable<DeviceBuffer>::value);
+    }
+    else
+    {
+        CudaAllocator allocator{};
+        {
+            StaticDeviceBuffer buffer{size, nvinfer1::DataType::kFLOAT, allocator};
+            testBuffer(buffer, sizeof(float));
+        }
+        streamPtr->synchronize();
+
+        static_assert(!std::is_copy_constructible<DeviceBuffer>::value);
+        static_assert(!std::is_copy_assignable<DeviceBuffer>::value);
+    }
 }
 
 TEST_F(TllmBuffersTest, DeviceTensor)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
-
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
+    if (mMemPool == nullptr)
+    {
+        GTEST_SKIP() << noPoolSkipReason;
+    }
     auto streamPtr = std::make_shared<CudaStream>();
     nvinfer1::Dims constexpr dims{3, 16, 8, 4};
-    CudaAllocatorAsync allocator{streamPtr};
+    CudaAllocatorAsync allocator{streamPtr, mMemPool};
     {
         DeviceTensor tensor{dims, nvinfer1::DataType::kFLOAT, allocator};
         EXPECT_EQ(tensor.getSize(), ITensor::volume(dims));
@@ -269,10 +307,16 @@ TEST_F(TllmBuffersTest, BufferSlice)
 TEST_F(TllmBuffersTest, BufferOutput)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
+    if (mMemPool == nullptr)
+    {
+        GTEST_SKIP() << noPoolSkipReason;
+    }
 
     auto streamPtr = std::make_shared<CudaStream>();
-    CudaAllocatorAsync allocator{streamPtr};
+    CudaAllocatorAsync allocator{streamPtr, mMemPool};
     for (std::size_t size : {0, 16})
     {
         DeviceBuffer buffer{size, nvinfer1::DataType::kFLOAT, allocator};
@@ -290,11 +334,17 @@ TEST_F(TllmBuffersTest, BufferOutput)
 TEST_F(TllmBuffersTest, TensorOutput)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
+    if (mMemPool == nullptr)
+    {
+        GTEST_SKIP() << noPoolSkipReason;
+    }
 
     auto streamPtr = std::make_shared<CudaStream>();
     nvinfer1::Dims constexpr dims{3, 16, 8, 4};
-    CudaAllocatorAsync allocator{streamPtr};
+    CudaAllocatorAsync allocator{streamPtr, mMemPool};
     for (auto dataType :
         {nvinfer1::DataType::kFLOAT, nvinfer1::DataType::kHALF, nvinfer1::DataType::kBOOL, nvinfer1::DataType::kINT8,
             nvinfer1::DataType::kINT32, nvinfer1::DataType::kINT64, nvinfer1::DataType::kUINT8})
@@ -357,7 +407,7 @@ TEST_F(TllmBuffersTest, ExtendedTypes)
 TEST_F(TllmBuffersTest, BytesToString)
 {
     auto constexpr precision = 2;
-    MemoryCounters::SizeType size;
+    MemoryCounters::SizeType32 size;
     MemoryCounters::DiffType diff;
 
     size = (1ul << 10) - 1;
@@ -414,7 +464,9 @@ TEST_F(TllmBuffersTest, BytesToString)
 TEST_F(TllmBuffersTest, PinnedPoolAllocator)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
 
     using MemPool = MemoryPool<PinnedAllocator>;
     auto expectedSize = [](auto const& tensor)
@@ -469,11 +521,9 @@ TEST_F(TllmBuffersTest, PinnedPoolAllocator)
         EXPECT_NE(it->tag, nullptr);
         EXPECT_EQ(it->size, expectedSize(c));
         it = std::next(it);
-        EXPECT_EQ(it->tag, nullptr);
-        secondChunkSize = expectedSize(c) + it->size;
-        EXPECT_EQ(secondChunkSize, pool.getChunkSize());
-        it = std::next(it);
         EXPECT_EQ(it, std::end(segments));
+        secondChunkSize = expectedSize(c);
+        EXPECT_EQ(secondChunkSize, pool.getChunkSize());
     }
 
     {
@@ -523,7 +573,9 @@ TEST_F(TllmBuffersTest, MemoryPool)
 TEST_F(TllmBuffersTest, PinnedPoolStressTest)
 {
     if (mDeviceCount == 0)
-        GTEST_SKIP();
+    {
+        GTEST_SKIP() << noDeviceSkipReason;
+    }
 
     using Allocator = PinnedPoolAllocator;
     using MemPool = Allocator::PoolType;

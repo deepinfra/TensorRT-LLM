@@ -31,7 +31,14 @@ public:
     Executor(
         std::filesystem::path const& modelPath, tle::ModelType modelType, tle::ExecutorConfig const& executorConfig);
 
-    Executor(std::string const& engineBuffer, std::string const& jsonConfigStr, tle::ModelType modelType,
+    Executor(std::filesystem::path const& encoderModelPath, std::filesystem::path const& decoderModelPath,
+        tle::ModelType modelType, tle::ExecutorConfig const& executorConfig);
+
+    Executor(pybind11::buffer engineBuffer, std::string const& jsonConfigStr, tle::ModelType modelType,
+        tle::ExecutorConfig const& executorConfig, std::optional<pybind11::dict> managedWeights);
+
+    Executor(std::string const& encoderEngineBuffer, std::string const& encoderJsonConfigStr,
+        std::string const& decoderEngineBuffer, std::string const& decoderJsonConfigStr, tle::ModelType modelType,
         tle::ExecutorConfig const& executorConfig);
 
     pybind11::object enter();
@@ -76,7 +83,7 @@ public:
         return mExecutor->awaitResponses(requestIds, timeout);
     }
 
-    [[nodiscard]] tle::SizeType getNumResponsesReady(std::optional<tle::IdType> const& requestId = std::nullopt) const
+    [[nodiscard]] tle::SizeType32 getNumResponsesReady(std::optional<tle::IdType> const& requestId = std::nullopt) const
     {
         return mExecutor->getNumResponsesReady(requestId);
     }
@@ -94,6 +101,11 @@ public:
     std::deque<tle::RequestStatsPerIteration> getLatestRequestStats()
     {
         return mExecutor->getLatestRequestStats();
+    }
+
+    std::deque<tle::DebugTensorsPerIteration> getLatestDebugTensors()
+    {
+        return mExecutor->getLatestDebugTensors();
     }
 
     [[nodiscard]] bool canEnqueueRequests() const

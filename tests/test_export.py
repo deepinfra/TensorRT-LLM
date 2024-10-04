@@ -12,21 +12,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 import torch
 
-sys.path.append(str(Path(__file__).parent.resolve() /
-                    "../examples/gpt"))  # more precise, avoid confusion
-from convert_checkpoint import generate_int8
+from tensorrt_llm.models.convert_utils import generate_int8
 
 
 def dist(x, y):
-    x = x.flatten().astype(float)
-    y = y.flatten().astype(float)
+    x = x.flatten().to(float)
+    y = y.flatten().to(float)
 
     l2_x = np.linalg.norm(x)
     l2_y = np.linalg.norm(y)
@@ -51,6 +47,9 @@ class TestINT8Export(unittest.TestCase):
             "y": torch.from_numpy(np.abs(y).max(axis=0)),
             "w": torch.from_numpy(np.abs(w).max(axis=0)),
         }
+        x = torch.from_numpy(x)
+        y = torch.from_numpy(y)
+        w = torch.from_numpy(w)
         values = generate_int8(w, ranges)
 
         self.x, self.y, self.w = x, y, w
@@ -71,13 +70,15 @@ class TestINT8Export(unittest.TestCase):
     def test_e2e_gemm_quantization(self):
         # mimic what CUTLASS would do
         x_i8 = (self.x * self.values["scale_x_orig_quant"]).round().clip(
-            -127, 127)
-        y_i32 = x_i8 @ self.values["weight.int8"].astype(np.int32)
+            -127, 127).to(torch.int32)
+        # import pdb
+        # pdb.set_trace()
+        y_i32 = x_i8 @ self.values["weight.int8"].to(torch.int32)
         y_quant = y_i32 * self.values["scale_y_accum_quant"] * self.values[
             "scale_y_quant_orig"]
         y_angle = dist(self.y, y_quant)[1]
 
-        y_i32_col = x_i8 @ self.values["weight.int8.col"].astype(np.int32)
+        y_i32_col = x_i8 @ self.values["weight.int8.col"].to(torch.int32)
         y_quant_col = y_i32_col * self.values[
             "scale_y_accum_quant.col"] * self.values["scale_y_quant_orig"]
         y_angle_col = dist(self.y, y_quant_col)[1]

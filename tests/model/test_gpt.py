@@ -33,18 +33,20 @@ from tensorrt_llm import Builder
 from tensorrt_llm._utils import str_dtype_to_torch
 from tensorrt_llm.functional import RotaryScalingType
 from tensorrt_llm.layers import PositionEmbeddingType
+from tensorrt_llm.models.gpt.convert import load_weights_from_hf_model
 from tensorrt_llm.network import net_guard
 from tensorrt_llm.plugin.plugin import ContextFMHAType
 from tensorrt_llm.runtime import ModelConfig, SamplingConfig
 from tensorrt_llm.runtime.generation import _prepare_attention_mask
-from tensorrt_llm.runtime.kv_cache_manager import (GenerationSequence,
-                                                   KVCacheManager)
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-from examples.gpt.convert_checkpoint import convert_hf_gpt
+from tensorrt_llm.runtime.kv_cache_manager import GenerationSequence
+from tensorrt_llm.runtime.memory_pools.pools_kv_cache_manager import \
+    PoolsKVCacheManager
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.util import skip_fp32_accum_pre_ampere, unittest_name_func
+
+from tensorrt_llm.runtime.memory_pools.memory_pools_allocator import \
+    MemoryPoolsAllocator
 
 
 class TestGPT(unittest.TestCase):
@@ -61,12 +63,11 @@ class TestGPT(unittest.TestCase):
         return gpt_config, hf_gpt
 
     def _gen_tensorrt_llm_network(self, network, builder, hf_gpt, gpt_config,
-                                  batch_size, input_len, output_len, fp16,
+                                  batch_size, input_len, output_len, dtype,
                                   gpt_attention_plugin, tensor_parallel,
                                   apply_query_key_layer_scaling,
                                   gather_context_logits,
                                   gather_generation_logits):
-        dtype = 'float16' if fp16 else 'float32'
         config = {
             'architecture': 'GPTForCausalLM',
             'dtype': dtype,
@@ -87,12 +88,9 @@ class TestGPT(unittest.TestCase):
             'bias': getattr(gpt_config, 'bias', True),
             'apply_query_key_layer_scaling': apply_query_key_layer_scaling,
         }
-        config = tensorrt_llm.models.PretrainedConfig.from_dict(config)
-        weights = convert_hf_gpt(hf_gpt,
-                                 gpt_config,
-                                 "gpt2",
-                                 config.mapping,
-                                 dtype=dtype)
+        config = tensorrt_llm.models.GPTConfig.from_dict(config)
+        weights = load_weights_from_hf_model(hf_gpt, config)
+
         tensorrt_llm_gpt = tensorrt_llm.models.GPTForCausalLM(config)
         tensorrt_llm_gpt.load(weights)
 
@@ -103,6 +101,7 @@ class TestGPT(unittest.TestCase):
                 max_batch_size=batch_size,
                 max_input_len=input_len,
                 max_seq_len=input_len + output_len,
+                max_num_tokens=batch_size * input_len,
                 use_cache=True,
                 max_beam_width=1,
                 gather_context_logits=gather_context_logits,
@@ -138,7 +137,6 @@ class TestGPT(unittest.TestCase):
 
         runtime = None
         builder = Builder()
-        fp16 = (dtype == 'float16')
 
         with tempfile.TemporaryDirectory() as tmpdirname:
 
@@ -150,23 +148,23 @@ class TestGPT(unittest.TestCase):
                 use_refit=use_refit,
                 gather_context_logits=gather_context_logits,
                 gather_generation_logits=gather_generation_logits,
-                strongly_typed=fp16,
+                strongly_typed=True,
             )
             network = builder.create_network()
             network.plugin_config.to_legacy_setting()
             if use_plugin:
-                network.plugin_config.set_gpt_attention_plugin(dtype)
+                network.plugin_config.gpt_attention_plugin = dtype
             if fast_building:
-                network.plugin_config.set_gemm_plugin(dtype)
+                network.plugin_config.gemm_plugin = dtype
             network.plugin_config.set_context_fmha(context_fmha_type)
             if enable_remove_input_padding:
-                network.plugin_config.enable_remove_input_padding()
+                network.plugin_config.remove_input_padding = True
             if enable_paged_kv_cache:
                 network.plugin_config.enable_paged_kv_cache(tokens_per_block)
 
             self._gen_tensorrt_llm_network(network, builder, hf_gpt, gpt_config,
                                            batch_size, input_len, output_len,
-                                           fp16, use_plugin, world_size,
+                                           dtype, use_plugin, world_size,
                                            apply_query_key_layer_scaling,
                                            gather_context_logits,
                                            gather_generation_logits)
@@ -178,6 +176,8 @@ class TestGPT(unittest.TestCase):
 
     @parameterized.expand([("other", False)], name_func=unittest_name_func)
     def test_gpt_float32(self, test_partition, use_refit):
+        torch.manual_seed(42)
+
         model = 'gpt'
         log_level = 'error'
         dtype = 'float32'
@@ -236,16 +236,10 @@ class TestGPT(unittest.TestCase):
                        device='cuda')
         ]  # ping-pong buffers
 
-        ctx_shape = {
-            'input_ids': ctx_ids.shape,
-            'position_ids': ctx_position_ids.shape,
-            'context_lengths': ctx_context_lengths.shape,
-            'host_context_lengths': ctx_host_context_lengths.shape,
-            'last_token_ids': ctx_last_token_ids.shape,
-            'attention_mask': ctx_attention_mask.shape,
-            'host_request_types': ctx_host_request_types.shape,
-            'cache_indirection': cache_indirections[0].shape,
-        }
+        perf_knob_tensor_size = 16
+        context_runtime_perf_knobs = torch.tensor([-1] * perf_knob_tensor_size,
+                                                  dtype=torch.int64)
+
         ctx_buffer = {
             'input_ids': ctx_ids,
             'position_ids': ctx_position_ids,
@@ -255,7 +249,9 @@ class TestGPT(unittest.TestCase):
             'attention_mask': ctx_attention_mask,
             'host_request_types': ctx_host_request_types,
             'cache_indirection': cache_indirections[0],
+            'host_runtime_perf_knobs': context_runtime_perf_knobs,
         }
+        ctx_shape = {k: v.shape for k, v in ctx_buffer.items()}
         for i in range(gpt_config.n_layer):
             shape = (batch_size, 2, gpt_config.n_head, 0,
                      gpt_config.n_embd // gpt_config.n_head)
@@ -327,6 +323,9 @@ class TestGPT(unittest.TestCase):
             ctx_attention_mask.new_ones((ctx_attention_mask.shape[0], 1))
         ],
                                        dim=-1)
+
+        gen_runtime_perf_knobs = torch.tensor([-1] * perf_knob_tensor_size,
+                                              dtype=torch.int64)
         step1_shape = {
             'input_ids': gen_id.shape,
             'context_lengths': gen_context_lengths.shape,
@@ -336,6 +335,7 @@ class TestGPT(unittest.TestCase):
             'last_token_ids': gen_last_token_ids.shape,
             'attention_mask': gen_attention_mask.shape,
             'cache_indirection': cache_indirections[1].shape,
+            'host_runtime_perf_knobs': gen_runtime_perf_knobs.shape
         }
         step1_buffer = {
             'input_ids': gen_id,
@@ -346,6 +346,7 @@ class TestGPT(unittest.TestCase):
             'last_token_ids': gen_last_token_ids.contiguous(),
             'attention_mask': gen_attention_mask.contiguous(),
             'cache_indirection': cache_indirections[1].contiguous(),
+            'host_runtime_perf_knobs': gen_runtime_perf_knobs
         }
         for i in range(gpt_config.n_layer):
             shape = (batch_size, 2, gpt_config.n_head, seq_len,
@@ -516,27 +517,50 @@ class TestGPT(unittest.TestCase):
         if enable_paged_kv_cache:
             max_blocks_per_seq = math.ceil(total_length / tokens_per_block)
             num_blocks = batch_size * beam_width * max_blocks_per_seq
-            block_size = gpt_config.n_head * tokens_per_block * head_size
-            kv_cache_manager = KVCacheManager(
-                num_layers=gpt_config.n_layer,
+
+            memory_pools_allocator = MemoryPoolsAllocator(
                 num_blocks=num_blocks,
-                block_size=block_size,
                 tokens_per_block=tokens_per_block,
-                max_blocks_per_seq=max_blocks_per_seq,
+                head_size=head_size)
+            num_kv_heads_per_layer = MemoryPoolsAllocator.prepare_num_kv_heads_per_layer(
+                gpt_config.n_head, gpt_config.n_layer)
+            memory_pools_allocator.allocate(dtype, num_kv_heads_per_layer)
+            pools_kv_cache_manager = PoolsKVCacheManager(
+                memory_pools_allocator.pools_metadata,
+                max_blocks_per_seq,
+                num_blocks,
+                tokens_per_block,
+                head_size,
                 max_attention_window_size=total_length,
-                sink_token_len=0,
-                beam_width=beam_width)
-            host_kv_cache_pool_pointers = torch.tensor(
-                [key_value_cache_buffers[0].data_ptr(), 0], dtype=torch.int64)
+                beam_width=beam_width,
+                sink_token_len=0)
+
+            host_kv_cache_pool_pointers = memory_pools_allocator.get_kv_cache_pool_pointers(
+            )
+            host_kv_cache_pool_mapping = memory_pools_allocator.pool_mapping
+
+            # block_size = gpt_config.n_head * tokens_per_block * head_size
+            # kv_cache_manager = KVCacheManager(
+            #     num_layers=gpt_config.n_layer,
+            #     num_blocks=num_blocks,
+            #     block_size=block_size,
+            #     tokens_per_block=tokens_per_block,
+            #     max_blocks_per_seq=max_blocks_per_seq,
+            #     max_attention_window_size=total_length,
+            #     sink_token_len=0,
+            #     beam_width=beam_width)
+            # host_kv_cache_pool_pointers = torch.tensor(
+            # [key_value_cache_buffers[0].data_ptr(), 0], dtype=torch.int64)
 
             # Add sequences to the manager
             for bi in range(batch_size):
                 generation_sequence = GenerationSequence(seq_idx=bi,
                                                          batch_idx=bi)
-                kv_cache_manager.add_sequence(generation_sequence, seq_len)
+                pools_kv_cache_manager.add_sequence(generation_sequence,
+                                                    seq_len)
 
             # Pre allocate the kv cache for the generated tokens.
-            kv_cache_manager.step([False] * batch_size)
+            pools_kv_cache_manager.step([False] * batch_size)
 
         def run_engine(context,
                        input_ids,
@@ -548,6 +572,7 @@ class TestGPT(unittest.TestCase):
                        host_past_key_value_lengths,
                        host_max_attention_window_sizes,
                        host_sink_token_length,
+                       host_runtime_perf_knobs,
                        sequence_length=None,
                        host_context_lengths=None):
 
@@ -561,6 +586,7 @@ class TestGPT(unittest.TestCase):
                 'host_past_key_value_lengths': host_past_key_value_lengths,
                 'sequence_length': sequence_length,
                 'host_sink_token_length': host_sink_token_length,
+                'host_runtime_perf_knobs': host_runtime_perf_knobs
             }
 
             assert host_request_types is not None
@@ -571,7 +597,7 @@ class TestGPT(unittest.TestCase):
             if enable_paged_kv_cache:
                 assert beam_width == 1
                 # for beam_width > 1 the argument must be '1' in ctx phase and 'beam_width' in gen phase
-                host_kv_cache_block_offsets = kv_cache_manager.get_block_offsets(
+                host_kv_cache_block_offsets = pools_kv_cache_manager.get_block_offsets(
                     beam_width=1)
                 kv_cache_block_offsets = host_kv_cache_block_offsets.to('cuda')
 
@@ -586,6 +612,10 @@ class TestGPT(unittest.TestCase):
                 ctx_buffer[
                     f'host_kv_cache_pool_pointers'] = host_kv_cache_pool_pointers.contiguous(
                     )
+                ctx_buffer[
+                    f'host_kv_cache_pool_mapping'] = memory_pools_allocator.pool_mapping.contiguous(
+                    )
+
                 ctx_buffer[
                     f'host_max_attention_window_sizes'] = host_max_attention_window_sizes
             else:
@@ -659,6 +689,12 @@ class TestGPT(unittest.TestCase):
             # and it will be added one after each step.
             sequence_length = ctx_context_lengths.detach().clone()
 
+            perf_knob_tensor_size = 16
+            ctx_runtime_perf_knobs = torch.tensor([-1] * perf_knob_tensor_size,
+                                                  dtype=torch.int64)
+            if context_fmha_type == ContextFMHAType.enabled_with_fp32_acc:
+                ctx_runtime_perf_knobs[1] = 1  # enable_context_fmha_fp32_acc
+
             res = run_engine(
                 context=runtime.ctx_context,
                 input_ids=ctx_ids,
@@ -671,7 +707,8 @@ class TestGPT(unittest.TestCase):
                 host_sink_token_length=host_sink_token_length,
                 sequence_length=sequence_length,
                 host_context_lengths=host_context_lengths,
-                host_request_types=host_request_types)
+                host_request_types=host_request_types,
+                host_runtime_perf_knobs=ctx_runtime_perf_knobs)
 
             if gather_context_logits:
                 np.testing.assert_allclose(ref.cpu().numpy().flatten(),
@@ -732,6 +769,12 @@ class TestGPT(unittest.TestCase):
             # For step 1, the sequence_lengths = context_lengths + 1.
             sequence_length = torch.add(gen_context_lengths.detach().clone(), 1)
 
+            perf_knob_tensor_size = 16
+            gen_runtime_perf_knobs = torch.tensor([-1] * perf_knob_tensor_size,
+                                                  dtype=torch.int64)
+            if context_fmha_type == ContextFMHAType.enabled_with_fp32_acc:
+                gen_runtime_perf_knobs[1] = 1  # enable_context_fmha_fp32_acc
+
             res = run_engine(
                 context=runtime.context_1,
                 input_ids=gen_ids,
@@ -744,7 +787,8 @@ class TestGPT(unittest.TestCase):
                 host_sink_token_length=host_sink_token_length,
                 sequence_length=sequence_length,
                 host_context_lengths=host_context_lengths,
-                host_request_types=host_request_types)
+                host_request_types=host_request_types,
+                host_runtime_perf_knobs=gen_runtime_perf_knobs)
 
             np.testing.assert_allclose(ref.cpu().numpy().flatten(),
                                        res.cpu().numpy().flatten(),
@@ -816,6 +860,12 @@ class TestGPT(unittest.TestCase):
             sequence_length = torch.tensor([seq_len] * num_context_input +
                                            [seq_len + 1] * num_generation_input,
                                            dtype=torch.int32).cuda()
+            perf_knob_tensor_size = 16
+            runtime_perf_knobs_tensor = torch.tensor([-1] *
+                                                     perf_knob_tensor_size,
+                                                     dtype=torch.int64)
+            if context_fmha_type == ContextFMHAType.enabled_with_fp32_acc:
+                runtime_perf_knobs_tensor[1] = 1  # enable_context_fmha_fp32_acc
 
             res = run_engine(
                 context=runtime.context_1,
@@ -830,7 +880,7 @@ class TestGPT(unittest.TestCase):
                 sequence_length=sequence_length,
                 host_context_lengths=host_context_lengths,
                 host_request_types=host_request_types,
-            )
+                host_runtime_perf_knobs=runtime_perf_knobs_tensor)
 
             np.testing.assert_allclose(ref_out.cpu().numpy(),
                                        res.cpu().numpy(),
@@ -847,6 +897,8 @@ class TestGPT(unittest.TestCase):
     @parameterized.expand([("other", False, False), ("other", False, True)],
                           name_func=unittest_name_func)
     def test_greedy_search_float32(self, test_partition, use_refit, streaming):
+        torch.manual_seed(42)
+
         model = 'gpt'
         log_level = 'error'
         dtype = 'float32'

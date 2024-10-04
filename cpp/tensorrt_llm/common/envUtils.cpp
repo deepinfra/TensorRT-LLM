@@ -16,6 +16,7 @@
  */
 
 #include "envUtils.h"
+#include "tensorrt_llm/common/cudaUtils.h"
 #include "tensorrt_llm/common/logger.h"
 #include <cstdlib>
 
@@ -44,15 +45,32 @@ bool forceXQAKernels()
     return forceXQA;
 }
 
-int32_t xqaMaxNbCtaPerKVHeadFactor()
+std::optional<bool> getEnvEnableXQAJIT()
 {
-    return envXqaNbCtaPerKVHead().value_or(8);
-}
-
-std::optional<int32_t> envXqaNbCtaPerKVHead()
-{
-    static std::optional<int32_t> const ret = getIntEnv("TRTLLM_XQA_BLOCKS_PER_SEQUENCE");
-    return ret;
+    static bool init = false;
+    static bool exists = false;
+    static bool enableXQAJIT = false;
+    if (!init)
+    {
+        init = true;
+        char const* enable_xqa_jit_var = std::getenv("TRTLLM_ENABLE_XQA_JIT");
+        if (enable_xqa_jit_var)
+        {
+            exists = true;
+            if (enable_xqa_jit_var[0] == '1' && enable_xqa_jit_var[1] == '\0')
+            {
+                enableXQAJIT = true;
+            }
+        }
+    }
+    if (exists)
+    {
+        return enableXQAJIT;
+    }
+    else
+    {
+        return std::nullopt;
+    }
 }
 
 // Tune the number of blocks per sequence for accuracy/performance purpose.
@@ -113,6 +131,30 @@ int getEnvMmhaKernelBlockSize()
         }
     }
     return mmhaKernelBlockSize;
+}
+
+bool getEnvEnablePDL()
+{
+    static bool init = false;
+    static bool enablePDL = false;
+    if (!init)
+    {
+        init = true;
+        // PDL only available when arch >= 90
+        if (getSMVersion() >= 90)
+        {
+            char const* enable_pdl = std::getenv("TRTLLM_ENABLE_PDL");
+            if (enable_pdl)
+            {
+                // PDL will be enabled by setting the env variables `TRTLLM_ENABLE_PDL` to `1`
+                if (enable_pdl[0] == '1' && enable_pdl[1] == '\0')
+                {
+                    enablePDL = true;
+                }
+            }
+        }
+    }
+    return enablePDL;
 }
 
 } // namespace tensorrt_llm::common

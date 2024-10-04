@@ -18,7 +18,7 @@ The TensorRT-LLM InternLM implementation is based on the LLaMA model. The implem
 be found in [tensorrt_llm/models/llama/model.py](../../tensorrt_llm/models/llama/model.py).
 The TensorRT-LLM InternLM example code lies in [`examples/llama`](./):
 
-* [`convert_checkpoint.py`](../llama/convert_checkpoint.py) converts the Huggingface Model of Skywork into TensorRT-LLM checkpoint.
+* [`convert_checkpoint.py`](../llama/convert_checkpoint.py) converts the Huggingface Model of InternLM into TensorRT-LLM checkpoint.
 * [`convert_checkpoint.py`] to to convert a checkpoint from the [HuggingFace (HF) Transformers](https://github.com/huggingface/transformers) format to the TensorRT-LLM format
 
 In addition, there are two shared files in the parent folder [`examples`](../) for inference and evaluation:
@@ -131,7 +131,6 @@ python convert_checkpoint.py --model_dir ./internlm-chat-7b  \
 trtllm-build --checkpoint_dir ./internlm-chat-7b/smooth_internlm/int8_kv_cache/ \
              --output_dir ./engine_outputs \
              --gemm_plugin float16 \
-             --strongly_typed
 ```
 
 
@@ -150,7 +149,6 @@ python convert_checkpoint.py --model_dir ./internlm-chat-20b  \
 trtllm-build --checkpoint_dir ./internlm-chat-20b/smooth_internlm/int8_kv_cache/ \
   --output_dir ./engine_outputs \
   --gemm_plugin float16 \
-  --strongly_typed
 ```
 
 

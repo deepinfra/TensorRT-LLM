@@ -1,5 +1,10 @@
 (perf-overview)=
 
+> [!IMPORTANT]
+> As of TensorRT-LLM v0.10, these performance benchmarks have changed methodology to utilize in-flight batching and
+no longer utilize static benchmarking. These numbers are initial measurements and are expected to improve in future
+releases.
+
 # Overview
 
 This document summarizes performance measurements of TensorRT-LLM on H100
@@ -9,237 +14,6 @@ The data in the following tables is provided as a reference point to help users
 validate observed performance. It should not be considered as the peak
 performance that can be delivered by TensorRT-LLM.
 
-## Methodology
-
-The different performance numbers below were collected using the methodology
-described in the benchmarks [folder](source:benchmarks/).
-
-## Peak Throughput
-
-The below tables provide reference data at large batch sizes, representing
-high throughput offline tasks.
-
-All data was generated using version 0.9.0
-
-### H200 GPUs (FP8)
-
-
-| Model                        | Batch Size | TP (1)    | Input Length | Output Length | Throughput (out tok/s/GPU) |
-| :--------------------------- | :--------- | :-------- | :----------- | :------------ | -------------------------: |
-| GPT-J 6B                     | 1024       | 1         | 128          | 128           |                     27,304 |
-| GPT-J 6B                     | 120        | 1         | 128          | 2048          |                      8,530 |
-| GPT-J 6B                     | 64         | 1         | 2048         | 128           |                      2,785 |
-| GPT-J 6B                     | 64         | 1         | 2048         | 2048          |                      3,753 |
-|                              |            |           |              |               |                            |
-| Mistral 7B                   | 896        | 1         | 128          | 128           |                     20,460 |
-| Mistral 7B                   | 120        | 1         | 128          | 2048          |                      8,950 |
-| Mistral 7B                   | 64         | 1         | 2048         | 128           |                      2,423 |
-| Mistral 7B                   | 56         | 1         | 2048         | 2048          |                      3,867 |
-|                              |            |           |              |               |                            |
-| LLaMA 7B                     | 896        | 1         | 128          | 128           |                     20,618 |
-| LLaMA 7B                     | 120        | 1         | 128          | 2048          |                      8,348 |
-| LLaMA 7B                     | 64         | 1         | 2048         | 128           |                      2,391 |
-| LLaMA 7B                     | 56         | 1         | 2048         | 2048          |                      3,522 |
-|                              |            |           |              |               |                            |
-| LLaMA 70B                    | 1024       | 1         | 128          | 128           |                      3,989 |
-| LLaMA 70B                    | 512        | 2         | 128          | 2048          |                      3,963 |
-| LLaMA 70B                    | 64         | 1         | 2048         | 128           |                        418 |
-| LLaMA 70B                    | 64         | 1         | 2048         | 2048          |                      1,458 |
-|                              |            |           |              |               |                            |
-| Falcon 180B                  | 1024       | 4         | 128          | 128           |                      1,118 |
-| Falcon 180B                  | 1024       | 4         | 128          | 2048          |                        990 |
-| Falcon 180B                  | 64         | 4         | 2048         | 128           |                        118 |
-| Falcon 180B                  | 64         | 4         | 2048         | 2048          |                        265 |
-
-
-### H100 GPUs (FP8)
-
-
-| Model                        | Batch Size | TP (1)    | Input Length | Output Length | Throughput (out tok/s/GPU) |
-| :--------------------------- | :--------- | :-------- | :----------- | :------------ | -------------------------: |
-| GPT-J 6B                     | 1024       | 1         | 128          | 128           |                     25,860 |
-| GPT-J 6B                     | 120        | 1         | 128          | 2048          |                      7,350 |
-| GPT-J 6B                     | 64         | 1         | 2048         | 128           |                      2,570 |
-| GPT-J 6B                     | 64         | 1         | 2048         | 2048          |                      3,212 |
-|                              |            |           |              |               |                            |
-| Mistral 7B                   | 896        | 1         | 128          | 128           |                     20,404 |
-| Mistral 7B                   | 120        | 1         | 128          | 2048          |                      8,623 |
-| Mistral 7B                   | 84         | 1         | 2048         | 128           |                      2,405 |
-| Mistral 7B                   | 56         | 1         | 2048         | 2048          |                      3,731 |
-|                              |            |           |              |               |                            |
-| LLaMA 7B                     | 896        | 1         | 128          | 128           |                     19,854 |
-| LLaMA 7B                     | 120        | 1         | 128          | 2048          |                      6,944 |
-| LLaMA 7B                     | 84         | 1         | 2048         | 128           |                      2,163 |
-| LLaMA 7B                     | 56         | 1         | 2048         | 2048          |                      2,826 |
-|                              |            |           |              |               |                            |
-| LLaMA 70B                    | 1024       | 2         | 128          | 128           |                      3,214 |
-| LLaMA 70B                    | 512        | 4         | 128          | 2048          |                      2,725 |
-| LLaMA 70B                    | 96         | 2         | 2048         | 128           |                        346 |
-| LLaMA 70B                    | 64         | 2         | 2048         | 2048          |                      1,011 |
-|                              |            |           |              |               |                            |
-| Falcon 180B                  | 1024       | 4         | 128          | 128           |                      1,100 |
-| Falcon 180B                  | 1024       | 8         | 128          | 2048          |                        837 |
-| Falcon 180B                  | 64         | 4         | 2048         | 128           |                        112 |
-| Falcon 180B                  | 64         | 4         | 2048         | 2048          |                        246 |
-
-### L40S GPUs (FP8)
-
-
-| Model                        | Batch Size | TP (1)    | Input Length | Output Length | Throughput (out tok/s/GPU) |
-| :--------------------------- | :--------- | :-------- | :----------- | :------------ | ---------------------: |
-| GPT-J 6B                     | 512        | 1         | 128          | 128           |                  7,859 |
-| GPT-J 6B                     | 64         | 1         | 128          | 2048          |                  1,904 |
-| GPT-J 6B                     | 32         | 1         | 2048         | 128           |                    684 |
-| GPT-J 6B                     | 32         | 1         | 2048         | 2048          |                    768 |
-|                              |            |           |              |               |                        |
-| Mistral 7B                   | 896        | 1         | 128          | 128           |                  9,562 |
-| Mistral 7B                   | 120        | 1         | 128          | 2048          |                  4,387 |
-| Mistral 7B                   | 84         | 1         | 2048         | 128           |                    971 |
-| Mistral 7B                   | 56         | 1         | 2048         | 2048          |                  1,721 |
-|                              |            |           |              |               |                        |
-| LLaMA 7B                     | 256        | 1         | 128          | 128           |                  5,885 |
-| LLaMA 7B                     | 64         | 1         | 128          | 2048          |                  1,654 |
-| LLaMA 7B                     | 32         | 1         | 2048         | 128           |                    574 |
-| LLaMA 7B                     | 16         | 1         | 2048         | 2048          |                    537 |
-|                              |            |           |              |               |                        |
-| LLaMA 70B                    | 256        | 2         | 128          | 128           |                    562 |
-| LLaMA 70B                    | 256        | 4         | 128          | 2048          |                    478 |
-| LLaMA 70B                    | 16         | 2         | 2048         | 128           |                     49 |
-| LLaMA 70B                    | 64         | 4         | 2048         | 2048          |                    185 |
-|                              |            |           |              |               |                        |
-| Falcon 180B                  | 512        | 8         | 128          | 128           |                    152 |
-| Falcon 180B                  | 256        | 8         | 128          | 2048          |                    200 |
-| Falcon 180B                  | 32         | 8         | 2048         | 128           |                     15 |
-| Falcon 180B                  | 32         | 8         | 2048         | 2048          |                     52 |
-
-
-### A100 GPUs (FP16)
-
-| Model                        | Batch Size | TP (1)    | Input Length | Output Length | Throughput (out tok/s/GPU) |
-| :--------------------------- | :--------- | :-------- | :----------- | :------------ | ---------------------: |
-| GPT-J 6B                     | 512        | 1         | 128          | 128           |                  5,876 |
-| GPT-J 6B                     | 32         | 1         | 128          | 2048          |                  1,549 |
-| GPT-J 6B                     | 32         | 1         | 2048         | 128           |                    545 |
-| GPT-J 6B                     | 32         | 1         | 2048         | 2048          |                    815 |
-|                              |            |           |              |               |                        |
-| Mistral 7B                   | 896        | 1         | 128          | 128           |                  6,251 |
-| Mistral 7B                   | 120        | 1         | 128          | 2048          |                  3,776 |
-| Mistral 7B                   | 64         | 1         | 2048         | 128           |                    698 |
-| Mistral 7B                   | 56         | 1         | 2048         | 2048          |                  1,576 |
-|                              |            |           |              |               |                        |
-| Mixtral 8x7B                 | 512        | 2         | 128          | 128           |                  2,842 |
-| Mixtral 8x7B                 | 128        | 2         | 128          | 2048          |                  1,724 |
-| Mixtral 8x7B                 | 64         | 2         | 2048         | 128           |                    319 |
-| Mixtral 8x7B                 | 32         | 2         | 2048         | 2048          |                    801 |
-|                              |            |           |              |               |                        |
-| LLaMA 7B                     | 256        | 1         | 128          | 128           |                  5,390 |
-| LLaMA 7B                     | 32         | 1         | 128          | 2048          |                  1,484 |
-| LLaMA 7B                     | 32         | 1         | 2048         | 128           |                    533 |
-| LLaMA 7B                     | 16         | 1         | 2048         | 2048          |                    603 |
-|                              |            |           |              |               |                        |
-| LLaMA 70B                    | 1024       | 4         | 128          | 128           |                    686 |
-| LLaMA 70B                    | 512        | 8         | 128          | 2048          |                    684 |
-| LLaMA 70B                    | 96         | 4         | 2048         | 128           |                     80 |
-| LLaMA 70B                    | 64         | 4         | 2048         | 2048          |                    289 |
-|                              |            |           |              |               |                        |
-| Falcon 180B                  | 1024       | 8         | 128          | 128           |                    254 |
-| Falcon 180B                  | 512        | 8         | 128          | 2048          |                    266 |
-| Falcon 180B                  | 64         | 8         | 2048         | 128           |                     29 |
-| Falcon 180B                  | 64         | 8         | 2048         | 2048          |                     93 |
-
-(1) TP stands for Tensor Parallelism.
-
-## Low Latency<sup>**</sup>
-
-All data was generated using version 0.9.0
-<sup> ** Low latency numbers will soon be updated to reflect real time latency with infight-batching.</sup>
-
-The below tables provide reference data at batch size 1 for first token
-latency, representing end-user's perceived latency for online streaming
-tasks.
-
-### H200 GPUs (FP8)
-
-| Model                        | Batch Size | TP (1)    | Input Length | 1st Token Latency (ms) |
-| :--------------------------- | :--------- | :-------- | :----------- | ---------------------: |
-| GPT-J 6B                     | 1          | 1         | 128          |                    5.0 |
-| GPT-J 6B                     | 1          | 1         | 2048         |                   23.5 |
-|                              |            |           |              |                        |
-| Mistral 7B                   | 1          | 1         | 128          |                    5.9 |
-| Mistral 7B                   | 1          | 1         | 2048         |                   31.7 |
-|                              |            |           |              |                        |
-| LLaMA 7B                     | 1          | 1         | 128          |                    5.7 |
-| LLaMA 7B                     | 1          | 1         | 2048         |                   30.2 |
-|                              |            |           |              |                        |
-| LLaMA 70B                    | 1          | 4         | 128          |                   17.8 |
-| LLaMA 70B                    | 1          | 4         | 2048         |                  103.0 |
-|                              |            |           |              |                        |
-| Falcon 180B                  | 1          | 4         | 128          |                   36.4 |
-| Falcon 180B                  | 1          | 4         | 2048         |                  194.4 |
-
-### H100 GPUs (FP8)
-
-| Model                        | Batch Size | TP (1)    | Input Length | 1st Token Latency (ms) |
-| :--------------------------- | :--------- | :-------- | :----------- | ---------------------: |
-| GPT-J 6B                     | 1          | 1         | 128          |                    5.5 |
-| GPT-J 6B                     | 1          | 1         | 2048         |                   23.8 |
-|                              |            |           |              |                        |
-| Mistral 7B                   | 1          | 1         | 128          |                    6.5 |
-| Mistral 7B                   | 1          | 1         | 2048         |                   32.4 |
-|                              |            |           |              |                        |
-| LLaMA 7B                     | 1          | 1         | 128          |                    6.3 |
-| LLaMA 7B                     | 1          | 1         | 2048         |                   30.8 |
-|                              |            |           |              |                        |
-| LLaMA 70B                    | 1          | 4         | 128          |                   19.6 |
-| LLaMA 70B                    | 1          | 8         | 2048         |                   85.1 |
-|                              |            |           |              |                        |
-| Falcon 180B                  | 1          | 4         | 128          |                   41.1 |
-| Falcon 180B                  | 1          | 8         | 2048         |                  129.9 |
-
-### L40S GPUs (FP8)
-
-| Model                        | Batch Size | TP (1)    | Input Length | 1st Token Latency (ms) |
-| :--------------------------- | :--------- | :-------- | :----------- | ---------------------: |
-| GPT-J 6B                     | 1          | 1         | 128          |                   12.4 |
-| GPT-J 6B                     | 1          | 1         | 2048         |                   61.7 |
-|                              |            |           |              |                        |
-| Mistral 7B                   | 1          | 1         | 128          |                   15.4 |
-| Mistral 7B                   | 1          | 1         | 2048         |                   87.3 |
-|                              |            |           |              |                        |
-| LLaMA 7B                     | 1          | 1         | 128          |                   14.1 |
-| LLaMA 7B                     | 1          | 1         | 2048         |                   80.1 |
-|                              |            |           |              |                        |
-| LLaMA 70B                    | 1          | 8         | 128          |                   70.4 |
-| LLaMA 70B                    | 1          | 4         | 2048         |                  673.3 |
-|                              |            |           |              |                        |
-| Falcon 180B                  | 1          | 8         | 128          |                   91.0 |
-| Falcon 180B                  | 1          | 8         | 2048         |                  768.8 |
-
-### A100 GPUs (FP16)
-
-| Model                        | Batch Size | TP (1)    | Input Length | 1st Token Latency (ms) |
-| :--------------------------- | :--------- | :-------- | :----------- | ---------------------: |
-| GPT-J 6B                     | 1          | 1         | 128          |                   14.8 |
-| GPT-J 6B                     | 1          | 1         | 2048         |                  136.4 |
-|                              |            |           |              |                        |
-| Mistral 7B                   | 1          | 1         | 128          |                   16.3 |
-| Mistral 7B                   | 1          | 1         | 2048         |                  139.6 |
-|                              |            |           |              |                        |
-| Mixtral 8x7B                 | 1          | 2         | 128          |                   23.8 |
-| Mixtral 8x7B                 | 1          | 2         | 2048         |                  160.9 |
-|                              |            |           |              |                        |
-| LLaMA 7B                     | 1          | 1         | 128          |                   16.2 |
-| LLaMA 7B                     | 1          | 1         | 2048         |                  132.4 |
-|                              |            |           |              |                        |
-| LLaMA 70B                    | 1          | 4         | 128          |                   45.6 |
-| LLaMA 70B                    | 1          | 8         | 2048         |                  249.2 |
-|                              |            |           |              |                        |
-| Falcon 180B                  | 1          | 8         | 128          |                   76.5 |
-| Falcon 180B                  | 1          | 8         | 2048         |                  456.0 |
-
-(1) TP stands for Tensor Parallelism.
-
-
 ## Known Issues
 
 The following issues are being addressed to improve the efficiency of TensorRT-LLM.
@@ -247,399 +21,229 @@ The following issues are being addressed to improve the efficiency of TensorRT-L
 ### Fused Matmul + Gated-SiLU (LLaMA)
 
 The current implementation combines two Matmul operations into one Matmul followed by
-a separate SwiGLU kernel (when `--use_fused_mlp` is enabled). The future release will
-include a more efficient implementation that runs single Matmul + SwiGLU fused kernel.
+a separate SwiGLU kernel (when `--use_fused_mlp=enable` is enabled). There is also a more
+efficient implementation that runs single Matmul + SwiGLU fused kernel for FP8 on Hopper
+(when `--use_fused_mlp=enable --gemm_swiglu_plugin fp8` is enabled). The gemm_swiglu_plugin
+will support more data types and GPU architectures in the future release.
 
+## Throughput Measurements
+
+The below table shows performance data where a local inference client is fed requests at an infinite rate (no delay between messages),
+and shows the throughput client-server scenario under maximum load.
+
+
+The performance numbers below were collected using the steps described in this document.
+
+**All data in the table below was generated using version 0.12.0 and presents token throughput in tokens/second.**
+
+|              |                          |               |                 |             |                |                |                |         |
+| ------------ | ------------------------ | ------------- | --------------- | ----------- | -------------- | -------------- | -------------- | ------- |
+|              |                          | **GPU**       | H200 141GB HBM3 | GH200 120GB | H100 80GB HBM3 | H100 80GB HBM3 | A100-SXM4-80GB | L40S    |
+|              |                          | **Precision** | FP8             | FP8         | FP8            | FP16           | FP16           | FP8     |
+| **Model**    | **Input/Output Lengths** | **TP**        |                 |             |                |                |                |         |
+| GPTJ 6B      | 128/128                  | 1             | 24834.76        | 22454.79    | 24429.55       | 13085.91       | 5864.81        | 7647.24 |
+|              | 128/2048                 | 1             | 8348.93         | 6656.25     | 7831.38        | 3882.21        | 2194.57        | 1843.91 |
+|              | 128/4096                 | 1             | 5062.80         | 3678.91     | 3968.98        | 2046.53        | 1118.22        | 980.67  |
+|              | 2048/128                 | 1             | 2776.53         | 2491.03     | 2724.38        | 1488.56        | 657.01         | 741.06  |
+|              | 2048/2048                | 1             | 3631.54         | 2994.81     | 3004.17        | 1280.54        | 854.37         | 754.16  |
+| LLaMA v2 7B  | 128/128                  | 1             | 19706.35        | 17803.58    | 19068.99       | 11393.48       | 5272.39        | 6345.72 |
+|              | 128/2048                 | 1             | 7651.12         | 5472.34     | 6610.03        | 2964.65        | 1785.79        | 1551.37 |
+|              | 128/4096                 | 1             | 4424.90         | 3271.61     | 3649.38        | 1596.87        | 957.12         | 817.24  |
+|              | 2048/128                 | 1             | 2385.54         | 2035.42     | 2271.63        | 1189.06        | 564.77         | 625.09  |
+|              | 2048/2048                | 1             | 3191.34         | 2726.29     | 2802.41        | 1243.96        | 735.19         | 641.56  |
+| LLaMA v3 8B  | 128/128                  | 1             | 28288.75        | 25420.52    | 27399.75       | 15567.44       | 6586.88        | 8745.80 |
+|              | 128/2048                 | 1             | 23230.62        | 16426.68    | 19198.73       | 8817.39        | 4882.13        | 5084.49 |
+|              | 128/4096                 | 1             | 16144.44        | 9832.66     | 12084.97       | 5352.37        | 3079.90        | 2755.13 |
+|              | 2048/128                 | 1             | 3623.79         | 3290.22     | 3463.26        | 1852.48        | 781.63         | 980.86  |
+|              | 2048/2048                | 1             | 11093.62        | 7573.35     | 8894.11        | 3986.83        | 2268.13        | 2051.79 |
+| Mistral 7B   | 128/128                  | 1             | 30223.01        | 27696.90    | 29788.46       | 16319.25       | 6807.02        | 9612.58 |
+|              | 128/2048                 | 1             | 24989.54        | 17942.29    | 20509.72       | 9982.01        | 5296.02        | 5444.89 |
+|              | 128/4096                 | 1             | 17036.14        | 10846.03    | 12807.80       | 5718.89        | 3241.33        | 2931.17 |
+|              | 2048/128                 | 1             | 3678.80         | 3294.02     | 3521.71        | 1887.75        | 786.43         | 1002.49 |
+|              | 2048/2048                | 1             | 11510.54        | 8357.75     | 9214.61        | 4284.82        | 2363.25        | 2154.26 |
+| Mixtral 8x7B | 128/128                  | 2             | 24895.03        | 8785.80     | 24394.71       | 15529.86       | 5921.41        |         |
+|              |                          | 4             | 42014.24        | 38828.53    | 40197.42       | 28132.17       | 11414.95       | 6820.26 |
+|              | 128/2048                 | 2             | 29389.21        | 5474.69     | 20873.02       | 7066.02        | 4306.98        |         |
+|              |                          | 4             | 52348.10        | 41573.66    | 40588.05       | 21285.72       | 10974.83       | 7467.15 |
+|              | 128/4096                 | 2             | 21480.27        | 2277.66     | 12838.28       | 3986.01        | 2400.11        |         |
+|              |                          | 4             | 39182.04        | 28626.55    | 28337.31       | 12447.13       | 7278.89        | 5233.43 |
+|              | 2048/128                 | 2             | 2934.44         | 1003.51     | 2898.27        | 1834.77        | 693.51         |         |
+|              |                          | 4             | 5152.40         | 4724.01     | 5028.61        | 3393.18        | 1362.93        | 805.49  |
+|              | 2048/2048                | 2             | 14029.17        | 2671.88     | 10479.45       | 3531.31        | 1945.88        |         |
+|              |                          | 4             | 25436.05        | 20302.56    | 19971.72       | 9622.66        | 5221.74        | 3616.30 |
+| LLaMA v3 70B | 128/128                  | 2             | 5386.88         |             |                | 2959.22        | 1301.14        |         |
+|              |                          | 4             | 8944.26         | 8587.01     | 8642.05        | 5966.47        | 2413.95        |         |
+|              |                          | 8             | 16125.20        |             | 15397.47       | 10406.55       | 4548.32        | 1364.08 |
+|              | 128/2048                 | 2             | 7007.27         |             |                | 720.73         | 500.83         |         |
+|              |                          | 4             | 12906.75        | 10761.53    | 8978.95        | 4736.61        | 2380.02        |         |
+|              |                          | 8             | 19417.37        |             | 14822.93       | 6672.14        | 3815.08        | 1809.40 |
+|              | 128/4096                 | 2             | 6183.85         |             |                | 369.29         | 251.24         |         |
+|              |                          | 4             | 8859.54         | 7270.77     | 6073.48        | 2969.99        | 1634.82        |         |
+|              |                          | 8             | 13969.95        |             | 10094.57       | 4358.77        | 2847.54        | 1313.78 |
+|              | 2048/128                 | 2             | 696.59          |             |                | 301.46         | 140.88         |         |
+|              |                          | 4             | 1044.35         | 1000.55     | 1022.06        | 681.72         | 278.76         |         |
+|              |                          | 8             | 2018.47         |             | 1933.15        | 1279.46        | 543.73         | 163.36  |
+|              | 2048/2048                | 2             | 3525.18         |             |                |                | 87.54          |         |
+|              |                          | 4             | 6550.76         | 4859.38     | 4870.26        | 2379.66        | 1209.69        |         |
+|              |                          | 8             | 9706.95         |             | 7670.04        | 3692.41        | 2192.28        | 895.23  |
+| LLaMA v2 70B | 128/128                  | 2             | 6355.16         |             |                | 2927.71        | 1374.05        |         |
+|              |                          | 4             | 10818.97        | 10819.19    | 10754.99       | 6603.10        | 2765.94        |         |
+|              |                          | 8             | 16667.25        |             | 16074.84       | 11369.11       | 4796.89        | 1402.92 |
+|              | 128/2048                 | 2             | 6185.77         |             |                | 668.52         | 445.04         |         |
+|              |                          | 4             | 12884.76        | 11356.48    | 8870.71        | 5067.06        | 2710.53        |         |
+|              |                          | 8             | 19053.13        |             | 17534.62       | 8805.16        | 5665.93        | 2203.33 |
+|              | 128/4096                 | 2             | 4873.24         |             |                | 334.10         | 215.70         |         |
+|              |                          | 4             | 8664.90         | 6311.85     | 7564.99        | 3354.02        | 1884.46        |         |
+|              |                          | 8             | 15110.32        |             | 10584.03       | 5373.10        | 3672.80        | 1787.76 |
+|              | 2048/128                 | 2             | 732.09          |             |                | 302.49         | 141.70         |         |
+|              |                          | 4             | 1272.90         | 1269.58     | 1265.80        | 774.93         | 320.79         |         |
+|              |                          | 8             | 2015.77         |             | 1943.96        | 1355.78        | 569.48         | 165.52  |
+|              | 2048/2048                | 2             | 3508.50         |             |                | 321.95         | 212.97         |         |
+|              |                          | 4             | 6642.69         | 5545.83     | 4889.26        | 2439.10        | 1276.58        |         |
+|              |                          | 8             | 10178.71        |             | 8071.77        | 4275.74        | 2589.60        | 1083.45 |
+| Falcon 180B  | 128/128                  | 4             | 5129.55         |             |                |                |                |         |
+|              |                          | 8             | 8370.98         |             | 8268.72        |                |                |         |
+|              | 128/2048                 | 4             | 7823.79         |             |                |                |                |         |
+|              |                          | 8             | 13278.59        |             | 13107.48       |                |                |         |
+|              | 128/4096                 | 4             | 6374.10         |             |                |                |                |         |
+|              |                          | 8             | 12660.89        |             | 10493.79       |                |                |         |
+|              | 2048/128                 | 4             | 601.67          |             |                |                |                |         |
+|              |                          | 8             | 1002.57         |             | 991.22         |                |                |         |
+|              | 2048/2048                | 4             | 3869.76         |             |                |                |                |         |
+|              |                          | 8             | 7134.33         |             | 6386.83        |                |                |         |
+*TP stands for Tensor Parallelism*
 
 ## Reproducing Benchmarked Results
 
-### Building the TensorRT-LLM Container
+> [!NOTE] The only models supported in this workflow are those listed in the table above.
 
----
-In order to benchmark TensorRT-LLM, you will need to follow the [Quick Start](../../README.md#quick-start)
-build process to create a baseline container for building a wheel. Additionally, the development
-container needs a copy of the source code to build the wheel and the benchmarking script. Create the
-right build environment, use the following :
+The following tables are references for commands that are used as part of the benchmarking process. For a more detailed
+description of this benchmarking workflow, see the [Benchmarking Suite README](../../../benchmarks/Suite.md).
 
-```shell
-git clone https://github.com/NVIDIA/TensorRT-LLM.git
-cd TensorRT-LLM
-git submodule update --init --recursive
-git lfs install
-git lfs pull
-make -C docker build
-make -C docker run LOCAL_USER=1
-```
+### Commands
 
-> [!WARNING]
-> If you have elevated privileges on your system, then skip the `make -C docker run LOCAL_USER=1`
-command above as it may make it so that you cannot access some required system libraries within the
-container because the build forces your UID and GID to match those that are set for your non-elevated
-user. There are cases where the container will be booted as root (i.e. on some SLURM systems with
-the pyxis plugin) which will cause libraries to be missing.
+| Stage | Description | Command |
+| :- | - | - |
+| [Dataset](#preparing-a-dataset) | Create a synthetic dataset | `python benchmarks/cpp/prepare_dataset.py --tokenizer=$model_name --stdout token-norm-dist --num-requests=$num_requests --input-mean=$isl --output-mean=$osl --input-stdev=0 --output-stdev=0 > $dataset_file` |
+| [Build](#engine-building) | Build a TensorRT-LLM engine | `trtllm-bench --model $model_name build --tp_size $tp_size --quantization FP8 --dataset $dataset_file` |
+| [Run](#running-the-benchmark) | Run a benchmark with a dataset | `trtllm-bench --model $model_name throughput --dataset $dataset_file --engine_dir $engine_dir` |
 
-If you are benchmarking in a shared environment, you need to specify the GPU indices that you would
-like the container to use, otherwise the Makefile defaults to loading the container with all GPUs on
-the system. For example, if you only have the 4 higher indices of GPUs on your system you can
-configure it using the following example:
+### Variables
 
-```shell
-NV_GPU=0,1,2,3
-make -C docker run LOCAL_USER=1 GPU_OPTS='--gpus \"device=${NV_GPU}\"'
-```
+| Name | Description |
+| :- | - |
+| `$isl` | Benchmark input sequence length. |
+| `$osl` | Benchmark output sequence length. |
+| `$tp_size` | Number of GPUs to run the benchmark with |
+| `$engine_dir` | Location to store built engine file (can be deleted after running benchmarks). |
+| `$model_name` | HuggingFace model name eg. meta-llama/Llama-2-7b-hf or use the path to a local weights directory |
+| `$dataset_file` | Location of the dataset file generated by `prepare_dataset.py` |
+| `$num_requests` | The number of requests to generate for dataset generation |
+| `$seq_len` | A sequence length of ISL + OSL |
 
-Additionally, if you'd like to mount external storage to access persistent storage, or previously
-built engines, you can mount directories as follows (simply replace `source` and `destination` with
-the appropriate paths):
+## Preparing a Dataset
+
+In order to prepare a dataset, you can use the provided [script](../../../benchmarks/cpp/prepare_dataset.py).
+To generate a synthetic dataset, run the following command:
 
 ```shell
-make -C docker run LOCAL_USER=1 DOCKER_RUN_ARGS="-v /source:/destination"
+python benchmarks/cpp/prepare_dataset.py --output=$dataset_file --tokenizer=$model_name token-norm-dist --num-requests=$num_requests --input-mean=$isl --output-mean=$osl --input-stdev=0 --output-stdev=0 > $dataset_file
 ```
 
-Once the container starts, you'll need to build the wheel and the benchmarking scripts. From the
-code root (the default directory when the container is loaded), the following commands will build
-the TensorRT-LLM wheel, install dependencies, and build the benchmark scripts:
+The command will generate a text file located at the path specified `$dataset_file` where all requests are of the same
+input/output sequence length combinations. The script works by using the tokenizer to retrieve the vocabulary size and
+randomly sample token IDs from it to create entirely random sequences. In the command above, all requests will be uniform
+because the standard deviations for both input and output sequences are set to 0.
+
+
+For each input and output sequence length combination, the table below details the `$num_requests` that were used. For
+shorter input and output lengths, a larger number of messages were used to guarantee that the system hit a steady state
+because requests enter and exit the system at a much faster rate. For longer input/output sequence lengths, requests
+remain in the system longer and therefore require less requests to achieve steady state.
+
+
+| Input Length | Output Length |  $seq_len  | $num_requests      |
+| ------------ | ------------- | ---------- | ------------------ |
+| 128          | 128           | 256        | 30000              |
+| 128          | 2048          | 2176       | 3000               |
+| 128          | 4096          | 4224       | 1500               |
+| 2048         | 128           | 2176       | 3000               |
+| 2048         | 2048          | 4096       | 1500               |
+
+
+## Engine Building
+
+All engines are built using the `trtllm-bench build` sub-command. The basic command for FP8 quantized engines is as follows:
+
+```
+trtllm-bench --model $model_name build --tp_size $tp_size --quantization FP8 --dataset $dataset_file
+```
+
+or if you would like to build for a specific sequence length:
+
+```
+trtllm-bench --model $model_name build --tp_size $tp_size --quantization FP8 --max_seq_length $seq_len
+```
+
+If you would like to build an FP16 engine without any quantization, simply remove the `--quantization FP8` option.
+
+> [!NOTE] If you specify FP8 quantization, the KV cache will automatically be set to FP8 as well!
+
+The `trtllm-bench build` sub-command will output the path where the engine is located upon a successful build. For example,
 
 ```shell
-python3 ./scripts/build_wheel.py --benchmarks --trt_root /usr/local/tensorrt
-pip install ./build/tensorrt_llm*.whl
+===========================================================
+ENGINE SAVED: /tmp/meta-llama/Llama-2-7b-hf/tp_1_pp_1
+===========================================================
 ```
 
-## Methodology
+## Running the Benchmark
 
-### Engine Building Setups
-
-Each engine needs to be built before they can be benchmarked, and requires the source code for each
-of their respective build scripts. For smaller models, it is fine to build the engine on the fly in
-container; however, for larger engines it is recommended to pre-build and mount a directory with the
-engine because engine files are quite large and take time to repeatedly build. Additionally, built
-engines can be used for input lengths, output lengths, and batch sizes *up to* their build options
-meaning you can use an engine to benchmark multiple input configurations.
-
-In order to benchmark the various networks, our engine building scheme is as follows:
-- For the GPT-J, Llama2-7b, and Llama2-70b benchmarks were ran using a single-setting engine build
-for each network configured for our maximum expected throughput.
-- For Falcon-180B, where memory limits and model size have a higher impact for running the model,
-our benchmarks transition to a per-configuration engine build.
-
-Below we document how to benchmark each model on an H100-HBM3-80GB system and reproduce the throughput
-numbers we document on our [Performance section](#performance of-tensorrt-llm).
-
-### Running on A100
-
-To run the benchmarks below on A100, you will need to undefine or remove the following
-quantization fields from each config json file, because FP8 computation is a feature in H100 and newer GPUs.
-```json
-"quantization": {
-	"quant_algo": null,
-	"kv_cache_quant_algo": null,
-}
-```
-
-### Reproducing First Token Latency
-
-In order to test the latency to the first token, you can build the engines as specified below (or
-with the tweaks specified above on A100) -- once built as described in the
-[build steps](#engine-building-setups) above, you can then benchmark with a single output token in
-order to find the time to first token latency. We provide the appropriate command lines below for
-each of the benchmarked models, but you can use this same method to benchmark other models available
-in [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM).
-
-## Benchmarking per Model
-
-> [!WARNING]
-> In some cases, using Group Query Attention (GQA) can improve performance of some networks. These
-kernels are currently experimental and not enabled by default. In order to enable them, simply run
-`export TRTLLM_ENABLE_XQA=1` in your shell. The kernels are an inference runtime optimization, so
-previously built engines should still function. For the benchmarks below, we have enabled GQA where
-our tests displayed performance benefits. If your network is not listed below, be sure to try both
-GQA-enabled and GQA-disabled configurations to find the configuration that works best.
-For more details see our documentation about [GPT Attention](./gpt_attention.md#generation-phase).
-
-### GPT-J 6B
-
----
-Prepare a config json file `/tmp/engines/gptj/ckpt_config.json`:
-```json
-{
-    "architecture": "GPTJForCausalLM",
-    "dtype": "float16",
-    "num_hidden_layers": 28,
-    "num_attention_heads": 16,
-    "hidden_size": 4096,
-    "norm_epsilon": 1e-05,
-    "vocab_size": 50400,
-    "position_embedding_type": "rope_gptj",
-    "max_position_embeddings": 2048,
-    "hidden_act": "gelu",
-    "quantization": {
-        "quant_algo": "FP8",
-        "kv_cache_quant_algo": "FP8"
-    },
-    "rotary_dim": 64
-}
-```
-
-Build an engine:
-```shell
-trtllm-build --model_config /tmp/engines/gptj/ckpt_config.json \
-	--output_dir /tmp/engines/gptj \
-	--paged_kv_cache disable \
-	--context_fmha enable \
-	--gpt_attention_plugin float16 \
-	--max_batch_size 64 \
-	--max_input_len 2048 \
-	--max_output_len 2048 \
-	--strongly_typed
-```
-
-#### Throughput Benchmark
+To run the benchmark with the generated data set, simply use the `trtllm-bench throughput` sub-command. The benchmarker will
+run an offline maximum throughput scenario such that all requests are queued in rapid succession. You simply need to provide
+the patch to the engine from the [build](#engine-building) phase and a [generated dataset](#preparing-a-dataset).
 
 ```shell
-in_out_sizes=("64:128,128" "64:128,2048" "64:2048,128" "64:2048,2048")
-for in_out in ${in_out_sizes[@]}
-do
-	batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-	in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-	echo "BS: $batch_size, ISL/OSL: $in_out_dims"
-
-	./cpp/build/benchmarks/gptSessionBenchmark --engine_dir /tmp/engines/gptj/ --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len $in_out_dims
-done
+trtllm-bench --model $model_name throughput --dataset $dataset_file --engine_dir $engine_dir
 ```
 
-#### First Token Latency Benchmark
+The results will be printed to the terminal upon benchmark completion. For example,
 
 ```shell
-in_out_sizes=("64:128,1" "64:2048,1")
-for in_out in ${in_out_sizes[@]}
-do
-	batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-	in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-	echo "BS: $batch_size, ISL/OSL: $in_out_dims"
+===========================================================
+= ENGINE DETAILS
+===========================================================
+Model:                  meta-llama/Llama-2-7b-hf
+Engine Directory:       /tmp/meta-llama/Llama-2-7b-hf/tp_1_pp_1
+TensorRT-LLM Version:   0.12.0
+Dtype:                  float16
+KV Cache Dtype:         FP8
+Quantization:           FP8
+Max Input Length:       2048
+Max Sequence Length:    4098
 
-	./cpp/build/benchmarks/gptSessionBenchmark --engine_dir /tmp/engines/gptj/ --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len $in_out_dims
-done
+===========================================================
+= WORLD + RUNTIME INFORMATION
+===========================================================
+TP Size:                1
+PP Size:                1
+Max Runtime Batch Size: 4096
+Max Runtime Tokens:     8192
+Scheduling Policy:      Guaranteed No Evict
+KV Memory Percentage:   99.0%
+Issue Rate (req/sec):   3.680275266452667e+18
+===========================================================
+= STATISTICS
+===========================================================
+Number of requests:             3000
+Average Input Length (tokens):  128.0
+Average Output Length (tokens): 128.0
+Token Throughput (tokens/sec):  23405.927228471104
+Request Throughput (req/sec):   182.8588064724305
+Total Latency (seconds):        16.406100739
+===========================================================
 ```
 
-
-### Llama2-7b
-
----
-Prepare a config json file `/tmp/engines/llama/7b/ckpt_config.json`:
-```json
-{
-    "architecture": "LlamaForCausalLM",
-    "dtype": "float16",
-    "num_hidden_layers": 32,
-    "num_attention_heads": 32,
-    "hidden_size": 4096,
-    "intermediate_size": 11008,
-    "num_key_value_heads": 32,
-    "vocab_size": 32000,
-    "position_embedding_type": "rope_gpt_neox",
-    "max_position_embeddings": 4096,
-    "hidden_act": "silu",
-    "rotary_base": 10000.0,
-    "rotary_scaling": null,
-    "norm_epsilon": 1e-05,
-    "quantization": {
-        "quant_algo": "FP8",
-        "kv_cache_quant_algo": "FP8"
-    }
-}
-```
-
-Build an engine:
-```shell
-pip install -r examples/llama/requirements.txt
-trtllm-build --model_config /tmp/engines/llama/7b/ckpt_config.json \
-	--output_dir /tmp/engines/llama/7b \
-	--paged_kv_cache disable \
-	--context_fmha enable \
-	--gpt_attention_plugin float16 \
-	--max_batch_size 64 \
-	--max_input_len 2048 \
-	--max_output_len 2048 \
-	--strongly_typed
-```
-
-#### Throughput Benchmark
-
-```shell
-in_out_sizes=("64:128,128" "64:128,2048" "64:2048,128" "32:2048,2048")
-for in_out in ${in_out_sizes[@]}
-do
-	batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-	in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-	echo "BS: $batch_size, ISL/OSL: $in_out_dims"
-
-	./cpp/build/benchmarks/gptSessionBenchmark --engine_dir /tmp/engines/llama/7b --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len $in_out_dims
-done
-```
-#### First Token Latency Benchmark
-
-```shell
-in_out_sizes=("64:128,1" "32:2048,1")
-for in_out in ${in_out_sizes[@]}
-do
-	batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-	in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-	echo "BS: $batch_size, ISL/OSL: $in_out_dims"
-
-	./cpp/build/benchmarks/gptSessionBenchmark --engine_dir /tmp/engines/llama/7b --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len $in_out_dims
-done
-```
-
-### Llama2-70b
-
----
-Prepare a config json file `/tmp/engines/llama/70b/ckpt_config.json`:
-```json
-{
-    "architecture": "LlamaForCausalLM",
-    "dtype": "float16",
-    "num_hidden_layers": 80,
-    "num_attention_heads": 64,
-    "hidden_size": 8192,
-    "intermediate_size": 28672,
-    "num_key_value_heads": 8,
-    "vocab_size": 32000,
-    "position_embedding_type": "rope_gpt_neox",
-    "max_position_embeddings": 4096,
-    "hidden_act": "silu",
-    "rotary_base": 10000.0,
-    "rotary_scaling": null,
-    "norm_epsilon": 1e-05,
-    "quantization": {
-        "quant_algo": "FP8",
-        "kv_cache_quant_algo": "FP8"
-    },
-    "mapping": {
-        "world_size": 4,
-        "tp_size": 4,
-        "pp_size": 1
-    }
-}
-```
-
-Build an engine:
-```shell
-pip install -r examples/llama/requirements.txt
-trtllm-build --model_config /tmp/engines/llama/70b/ckpt_config.json \
-	--output_dir /tmp/engines/llama/70b \
-	--workers 4 \
-	--paged_kv_cache disable \
-	--context_fmha enable \
-	--gpt_attention_plugin float16 \
-	--max_batch_size 64 \
-	--max_input_len 2048 \
-	--max_output_len 2048 \
-	--strongly_typed
-```
-
-#### Throughput Benchmark
-
-```shell
-export TRTLLM_ENABLE_XQA=1
-in_out_sizes=("64:128,128" "64:128,2048" "64:2048,128" "64:2048,2048")
-for in_out in ${in_out_sizes[@]}
-do
-	batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-	in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-	echo "BS: $batch_size, ISL/OSL: $in_out_dims"
-
-	mpirun -n 4 --allow-run-as-root --oversubscribe ./cpp/build/benchmarks/gptSessionBenchmark --engine_dir /tmp/engines/llama/70b --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len $in_out_dims
-done
-```
-
-#### First Token Latency Benchmark
-
-```shell
-export TRTLLM_ENABLE_XQA=1
-in_out_sizes=("64:128,1" "64:128,1")
-for in_out in ${in_out_sizes[@]}
-do
-	batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-	in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-	echo "BS: $batch_size, ISL/OSL: $in_out_dims"
-
-	mpirun -n 4 --allow-run-as-root --oversubscribe ./cpp/build/benchmarks/gptSessionBenchmark --engine_dir /tmp/engines/llama/70b --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len $in_out_dims
-done
-```
-
-
-### Falcon-180B
-
----
-
-Benchmarking Falcon-180B requires a custom engine per batch size, input/output sequence length due
-to the large footprint of the model and the large input size of 2048. You can build and benchmark
-each engine one at a time with the following loop.
-
-Prepare a config json file `/tmp/engines/falcon/180b/ckpt_config.json`:
-```json
-{
-    "architecture": "FalconForCausalLM",
-    "dtype": "bfloat16",
-    "num_hidden_layers": 80,
-    "num_attention_heads": 232,
-    "num_key_value_heads": 8,
-    "hidden_size": 14848,
-    "norm_epsilon": 1e-05,
-    "vocab_size": 65024,
-    "position_embedding_type": "rope_gpt_neox",
-    "max_position_embeddings": 2048,
-    "hidden_act": "gelu",
-    "use_parallel_embedding": false,
-    "embedding_sharding_dim": 0,
-    "share_embedding_table": false,
-    "quantization": {
-        "quant_algo": "FP8",
-        "kv_cache_quant_algo": "FP8"
-    },
-    "mapping": {
-        "world_size": 8,
-        "tp_size": 8,
-        "pp_size": 1
-    },
-    "bias": false,
-    "parallel_attention": true,
-    "new_decoder_architecture": true
-}
-```
-
-```shell
-export TRTLLM_ENABLE_XQA=1
-# Benchmark specific batch size:isl:osl combinations.
-in_out_sizes=("96:128,128" "96:128,2048" "64:2048,128")
-for in_out in ${in_out_sizes[@]}
-do
-	batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-	in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-	isl=$(echo $in_out_dims | awk -F',' '{ print $1 }')
-	osl=$(echo $in_out_dims | awk -F',' '{ print $2 }')
-	engine_path="/tmp/engines/falcon/180b/${batch_size}_${isl}_${osl}"
-	echo "BS: $batch_size, ISL/OSL: ${isl},${osl}"
-
-	# Build the specific engine for the BS,ISL,OSL combination
-	trtllm-build --model_config /tmp/engines/falcon/180b/ckpt_config.json \
-		--output_dir $engine_path \
-		--workers 8 \
-		--paged_kv_cache disable \
-		--context_fmha enable \
-		--gpt_attention_plugin bfloat16 \
-		--max_batch_size $batch_size \
-		--max_input_len $isl \
-		--max_output_len $osl \
-		--strongly_typed
-
-	# Throughput benchmark
-	mpirun -n 8 --allow-run-as-root --oversubscribe ./cpp/build/benchmarks/gptSessionBenchmark --engine_dir $engine_path --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len "${isl},${osl}"
-	# Time to first token benchmark
-	mpirun -n 8 --allow-run-as-root --oversubscribe ./cpp/build/benchmarks/gptSessionBenchmark --engine_dir $engine_path --warm_up 1 --batch_size $batch_size --duration 0 --num_runs 5 --input_output_len "${isl},1"
-
-	# The Falcon-180b engine is quite large, remove after the benchmark to free up space
-	# Remove this line if you'd like to save the engines.
-	rm -r $engine_path
-done
-```
+> [!WARNING] In some cases, the benchmarker may not print anything at all. This behavior usually
+means that the benchmark has hit an out of memory issue. Try reducing the KV cache percentage
+using the `--kv_cache_free_gpu_mem_fraction` option to lower the percentage of used memory.

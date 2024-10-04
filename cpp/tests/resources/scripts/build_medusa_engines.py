@@ -19,16 +19,21 @@ import pathlib as _pl
 import platform as _pf
 import sys as _sys
 
-from build_engines_utils import run_command, wincopy
+from build_engines_utils import init_model_spec_module, run_command, wincopy
+
+init_model_spec_module()
+import model_spec
+
+import tensorrt_llm.bindings as _tb
 
 
-def build_engine(weight_dir: _pl.Path, medusa_dir: _pl.Path,
+def build_engine(base_model_dir: _pl.Path, medusa_model_dir: _pl.Path,
                  engine_dir: _pl.Path, *args):
 
     covert_cmd = [_sys.executable, "examples/medusa/convert_checkpoint.py"] + (
-        ['--model_dir', str(weight_dir)] if weight_dir else []) + [
-            '--medusa_model_dir', str(medusa_dir), \
-            '--output_dir', str(engine_dir), '--dtype=float16', '--fixed_num_medusa_heads=4'
+        ['--model_dir', str(base_model_dir)] if base_model_dir else []) + [
+            '--medusa_model_dir', str(medusa_model_dir), \
+            '--output_dir', str(engine_dir), '--dtype=float16', '--num_medusa_heads=4'
         ] + list(args)
 
     run_command(covert_cmd)
@@ -36,10 +41,15 @@ def build_engine(weight_dir: _pl.Path, medusa_dir: _pl.Path,
     build_args = ["trtllm-build"] + (
         ['--checkpoint_dir', str(engine_dir)] if engine_dir else []) + [
             '--output_dir',
-            str(engine_dir), '--gpt_attention_plugin=float16',
-            '--gemm_plugin=float16', '--max_batch_size=8',
-            '--max_input_len=512', '--max_output_len=20', '--log_level=error',
-            '--paged_kv_cache=enable', '--remove_input_padding=enable'
+            str(engine_dir),
+            '--gemm_plugin=float16',
+            '--max_batch_size=8',
+            '--max_input_len=12',
+            '--max_seq_len=140',
+            '--log_level=error',
+            '--paged_kv_cache=enable',
+            '--remove_input_padding=enable',
+            '--speculative_decoding_mode=medusa',
         ]
 
     run_command(build_args)
@@ -48,41 +58,51 @@ def build_engine(weight_dir: _pl.Path, medusa_dir: _pl.Path,
 def build_engines(model_cache: str):
     resources_dir = _pl.Path(__file__).parent.resolve().parent
     models_dir = resources_dir / 'models'
-    model_name = 'vicuna-7b-v1.3'
-    medusa_name = 'medusa-vicuna-7b-v1.3'
+    model_name = 'vicuna-7b-medusa'
+    base_model_name = 'vicuna-7b-v1.3'
+    medusa_model_name = 'medusa-vicuna-7b-v1.3'
 
     if model_cache:
-        print("Copy model from model_cache")
-        model_cache_dir = _pl.Path(model_cache) / model_name
-        medusa_cache_dir = _pl.Path(model_cache) / medusa_name
-        assert model_cache_dir.is_dir()
-        assert medusa_cache_dir.is_dir()
+        print(f"Copy model from {model_cache}")
+        base_model_cache_dir = _pl.Path(model_cache) / base_model_name
+        medusa_head_cache_dir = _pl.Path(model_cache) / medusa_model_name
+        assert base_model_cache_dir.is_dir(), base_model_cache_dir
+        assert medusa_head_cache_dir.is_dir(), medusa_head_cache_dir
 
         if _pf.system() == "Windows":
-            wincopy(source=str(model_cache_dir),
-                    dest=model_name,
+            wincopy(source=str(base_model_cache_dir),
+                    dest=base_model_name,
                     isdir=True,
                     cwd=models_dir)
-            wincopy(source=str(medusa_cache_dir),
-                    dest=medusa_name,
+            wincopy(source=str(medusa_head_cache_dir),
+                    dest=medusa_model_name,
                     isdir=True,
                     cwd=models_dir)
         else:
-            run_command(
-                ["rsync", "-av", str(model_cache_dir), "."], cwd=models_dir)
-            run_command(
-                ["rsync", "-av", str(medusa_cache_dir), "."], cwd=models_dir)
+            run_command(["rsync", "-rlptD",
+                         str(base_model_cache_dir), "."],
+                        cwd=models_dir)
+            run_command(["rsync", "-rlptD",
+                         str(medusa_head_cache_dir), "."],
+                        cwd=models_dir)
 
-    model_dir = models_dir / model_name
-    medusa_dir = models_dir / medusa_name
-    assert model_dir.is_dir()
-    assert medusa_dir.is_dir()
+    base_model_dir = models_dir / base_model_name
+    medusa_model_dir = models_dir / medusa_model_name
+    assert base_model_dir.is_dir()
+    assert medusa_model_dir.is_dir()
 
     engine_dir = models_dir / 'rt_engine' / model_name
 
-    print(f"\nBuilding fp16 engine")
-    build_engine(model_dir, medusa_dir,
-                 engine_dir / 'fp16-plugin-packed-paged/tp1-pp1-gpu')
+    model_spec_obj = model_spec.ModelSpec('input_tokens.npy', _tb.DataType.HALF)
+    model_spec_obj.use_gpt_plugin()
+    model_spec_obj.set_kv_cache_type(_tb.KVCacheType.PAGED)
+    model_spec_obj.use_packed_input()
+    model_spec_obj.use_medusa()
+
+    full_engine_path = engine_dir / model_spec_obj.get_model_path(
+    ) / 'tp1-pp1-gpu'
+    print(f"\nBuilding fp16 engine at {str(full_engine_path)}")
+    build_engine(base_model_dir, medusa_model_dir, full_engine_path)
 
     print("Done.")
 

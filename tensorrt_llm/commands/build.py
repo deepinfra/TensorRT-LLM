@@ -20,264 +20,329 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from importlib.machinery import SourceFileLoader
 from multiprocessing import get_context
-from typing import Union
+from typing import Optional, Union
 
 import torch
 
-from .._common import check_max_num_tokens
-from ..auto_parallel import infer_cluster_config
-from ..auto_parallel.cluster_info import cluster_infos
-from ..builder import BuildConfig, Engine, build
-from ..logger import logger
-from ..lora_manager import LoraBuildConfig
-from ..models import PretrainedConfig
-from ..models.modeling_utils import (WEIGHT_LOADER_MODELS, QuantConfig,
-                                     load_model)
-from ..plugin import PluginConfig, add_plugin_argument
-from ..quantization import QuantAlgo
+from tensorrt_llm.auto_parallel import infer_cluster_config
+from tensorrt_llm.auto_parallel.cluster_info import cluster_infos
+from tensorrt_llm.bindings import KVCacheType
+from tensorrt_llm.builder import BuildConfig, Engine, build
+from tensorrt_llm.logger import logger, severity_map
+from tensorrt_llm.lora_manager import LoraConfig, LoraManager
+from tensorrt_llm.models import MODEL_MAP, PretrainedConfig
+from tensorrt_llm.models.modeling_utils import SpeculativeDecodingMode
+from tensorrt_llm.plugin import PluginConfig, add_plugin_argument
+from tensorrt_llm.quantization.mode import QuantAlgo
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--checkpoint_dir', type=str, default=None)
-    parser.add_argument('--model_config', type=str, default=None)
-    parser.add_argument('--build_config', type=str, default=None)
-    parser.add_argument('--model_cls_file', type=str, default=None)
-    parser.add_argument('--model_cls_name', type=str, default=None)
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        '--input_timing_cache',
+        '--checkpoint_dir',
         type=str,
         default=None,
-        help=
-        'The path to read timing cache, will be ignored if the file does not exist'
-    )
-    parser.add_argument('--output_timing_cache',
-                        type=str,
-                        default='model.cache',
-                        help='The path to write timing cache')
-    parser.add_argument('--log_level', type=str, default='info')
+        help="The directory path that contains TensorRT-LLM checkpoint.")
     parser.add_argument(
-        '--profiling_verbosity',
+        '--model_config',
         type=str,
-        default='layer_names_only',
-        choices=['layer_names_only', 'detailed', 'none'],
-        help=
-        'The profiling verbosity for the generated TRT engine. Set to detailed can inspect tactic choices and kernel parameters.'
-    )
-    parser.add_argument('--enable_debug_output',
-                        default=False,
-                        action='store_true')
+        default=None,
+        help="The file path that saves TensorRT-LLM checkpoint config.")
+    parser.add_argument(
+        '--build_config',
+        type=str,
+        default=None,
+        help="The file path that saves TensorRT-LLM build config.")
+    parser.add_argument(
+        '--model_cls_file',
+        type=str,
+        default=None,
+        help="The file path that defines customized TensorRT-LLM model.")
+    parser.add_argument('--model_cls_name',
+                        type=str,
+                        default=None,
+                        help="The customized TensorRT-LLM model class name.")
     parser.add_argument(
         '--output_dir',
         type=str,
         default='engine_outputs',
-        help='The path to save the serialized engine files and model configs')
-    parser.add_argument('--workers',
+        help=
+        "The directory path to save the serialized engine files and engine config file."
+    )
+
+    parser.add_argument(
+        '--max_batch_size',
+        type=int,
+        default=2048,
+        help="Maximum number of requests that the engine can schedule.")
+    parser.add_argument('--max_input_len',
                         type=int,
-                        default='1',
-                        help='The number of workers for building in parallel')
-    parser.add_argument('--max_batch_size', type=int, default=1)
-    parser.add_argument('--max_input_len', type=int, default=1024)
-    parser.add_argument('--max_output_len', type=int, default=1024)
-    parser.add_argument('--max_beam_width', type=int, default=1)
-    parser.add_argument('--max_num_tokens', type=int, default=None)
+                        default=1024,
+                        help="Maximum input length of one request.")
+    parser.add_argument(
+        '--max_seq_len',
+        '--max_decoder_seq_len',
+        dest='max_seq_len',
+        type=int,
+        default=None,
+        help="Maximum total length of one request, including prompt and outputs. "
+        "If unspecified, the value is deduced from the model config.")
+    parser.add_argument(
+        '--max_beam_width',
+        type=int,
+        default=1,
+        help="Maximum number of beams for beam search decoding.")
+    parser.add_argument(
+        '--max_num_tokens',
+        type=int,
+        default=8192,
+        help=
+        "Maximum number of batched input tokens after padding is removed in each batch. "
+        "Currently, the input padding is removed by default; "
+        "you may explicitly disable it by specifying ``--remove_input_padding disable``."
+    )
     parser.add_argument(
         '--opt_num_tokens',
         type=int,
         default=None,
-        help='It equals to max_batch_size*max_beam_width by default, set this '
-        'value as close as possible to the actual number of tokens on your workload. '
-        'Note that this argument might be removed in the future.')
-    parser.add_argument('--tp_size', type=int, default=1)
-    parser.add_argument('--pp_size', type=int, default=1)
+        help=
+        "Optimal number of batched input tokens after padding is removed in each batch "
+        "It equals to ``max_batch_size * max_beam_width`` by default, set this "
+        "value as close as possible to the actual number of tokens on your workload. "
+        "Note that this argument might be removed in the future.")
+    parser.add_argument(
+        '--max_encoder_input_len',
+        type=int,
+        default=1024,
+        help="Maximum encoder input length for enc-dec models. "
+        "Set ``max_input_len`` to 1 to start generation from decoder_start_token_id of length 1."
+    )
     parser.add_argument(
         '--max_prompt_embedding_table_size',
         '--max_multimodal_len',
         type=int,
         default=0,
         help=
-        'Setting to a value > 0 enables support for prompt tuning or multimodal input.'
-    )
+        "Maximum prompt embedding table size for prompt tuning, or maximum multimodal input size for multimodal models. "
+        "Setting a value > 0 enables prompt tuning or multimodal input.")
     parser.add_argument(
-        '--use_fused_mlp',
-        default=False,
-        action='store_true',
+        '--kv_cache_type',
+        default=argparse.SUPPRESS,
+        type=KVCacheType,
         help=
-        'Enable horizontal fusion in GatedMLP, reduces layer input traffic and potentially improves performance. '
-        'For FP8 PTQ, the downside is slight reduction of accuracy because one of the quantization scaling factors are discarded. '
-        '(An example for reference only: 0.45734 vs 0.45755 for LLaMA-v2 7B using `ammo/examples/hf/instruct_eval/mmlu.py`).'
+        "Set KV cache type (continuous, paged, or disabled). For disabled case, KV cache is disabled and only context phase is allowed."
     )
     parser.add_argument(
-        '--gather_all_token_logits',
-        action='store_true',
-        default=False,
-        help='Enable both gather_context_logits and gather_generation_logits')
-    parser.add_argument('--gather_context_logits',
-                        action='store_true',
-                        default=False,
-                        help='Gather context logits')
-    parser.add_argument('--gather_generation_logits',
-                        action='store_true',
-                        default=False,
-                        help='Gather generation logits')
-    parser.add_argument(
-        '--strongly_typed',
-        action='store_true',
-        default=False,
+        '--paged_kv_cache',
+        type=str,
+        default=argparse.SUPPRESS,
         help=
-        'This option is introduced with TensorRT 9.1.0.1+ and will reduce the engine building time. '
-        'It\'s not expected to see performance or accuracy regression after enable this flag. '
-        'Note that, we may remove this flag in the future, and enable the feature by default.'
+        "Deprecated. Enabling this option is equvilient to ``--kv_cache_type paged`` for transformer based models."
     )
-    parser.add_argument('--builder_opt', type=int, default=None)
-    parser.add_argument('--logits_dtype',
-                        type=str,
-                        default=None,
-                        choices=['float16', 'float32'])
-    parser.add_argument('--weight_only_precision',
-                        type=str,
-                        default=None,
-                        choices=['int8', 'int4'])
-    parser.add_argument('--weight_sparsity', default=False, action='store_true')
+
     parser.add_argument(
-        '--max_draft_len',
-        type=int,
-        default=0,
-        help=
-        'Maximum lengths of draft tokens for speculative decoding target model.'
-    )
-    parser.add_argument(
-        '--lora_dir',
+        '--input_timing_cache',
         type=str,
         default=None,
-        nargs="+",
-        help="The directory of LoRA weights. "
-        "Use config from the first directory if multiple directories are provided."
-    )
-    parser.add_argument('--lora_ckpt_source',
-                        type=str,
-                        default="hf",
-                        choices=["hf", "nemo"],
-                        help="The source of lora checkpoint.")
-    parser.add_argument(
-        '--lora_target_modules',
-        nargs='+',
-        default=None,
-        choices=[
-            "attn_qkv",
-            "attn_q",
-            "attn_k",
-            "attn_v",
-            "attn_dense",
-            "mlp_h_to_4h",
-            "mlp_gate",
-            "mlp_4h_to_h",
-            "cross_attn_q",
-            "cross_attn_v",
-        ],
         help=
-        "Add lora in which modules. Only be activated when use_lora_plugin is enabled."
+        "The file path to read the timing cache. This option is ignored if the file does not exist."
+    )
+    parser.add_argument('--output_timing_cache',
+                        type=str,
+                        default='model.cache',
+                        help="The file path to write the timing cache.")
+    parser.add_argument('--builder_opt',
+                        type=int,
+                        default=None,
+                        choices=[0, 1, 2, 3, 4, 5],
+                        help="TensorRT builder optimization level.")
+    parser.add_argument(
+        '--profiling_verbosity',
+        type=str,
+        default='layer_names_only',
+        choices=['layer_names_only', 'detailed', 'none'],
+        help=
+        "The profiling verbosity for the generated TensorRT engine. Setting to detailed allows inspecting tactic choices and kernel parameters."
     )
     parser.add_argument(
-        '--max_lora_rank',
+        '--builder_force_num_profiles',
         type=int,
-        default=64,
-        help='maximum lora rank for different lora modules. '
-        'It is used to compute the workspace size of lora plugin.')
-    parser.add_argument('--auto_parallel',
+        default=None,
+        help="If specified, force to use the number of profiles.")
+    parser.add_argument(
+        '--strip_plan',
+        default=False,
+        action='store_true',
+        help=
+        "Enable stripping weights from the final TensorRT engine under the assumption that the refit weights are identical to those provided at build time."
+    )
+    parser.add_argument('--weight_sparsity',
+                        default=False,
+                        action='store_true',
+                        help="Enable weight sparsity.")
+    parser.add_argument(
+        '--weight_streaming',
+        default=False,
+        action='store_true',
+        help=
+        "Enable offloading weights to CPU and streaming loading at runtime.",
+    )
+    parser.add_argument(
+        '--fast_build',
+        default=False,
+        action='store_true',
+        help=
+        "Enable features for faster engine building. This may cause some performance degradation and is currently incompatible with int8/int4 quantization.",
+    )
+
+    parser.add_argument('--workers',
                         type=int,
                         default=1,
-                        help='MPI world size for auto parallel.')
-    parser.add_argument(
-        '--gpus_per_node',
-        type=int,
-        default=8,
-        help=
-        'Number of GPUs each node has in a multi-node setup. This is a cluster spec and can be greater/smaller than world size'
-    )
-    parser.add_argument(
-        '--cluster_key',
-        type=str,
-        default=None,
-        choices=cluster_infos.keys(),
-        help=
-        'Unique name for target GPU type. Inferred from current GPU type if not specified.'
-    )
-    parser.add_argument(
-        '--max_encoder_input_len',
-        type=int,
-        default=1024,
-        help=
-        'Specify max encoder input length when using enc-dec models. Set max_input_len to 1 to start generation from decoder_start_token_id of length 1.'
-    )
+                        help="The number of workers for building in parallel.")
+    parser.add_argument('--log_level',
+                        type=str,
+                        default='info',
+                        choices=severity_map.keys(),
+                        help="The logging level.")
+    parser.add_argument('--enable_debug_output',
+                        default=False,
+                        action='store_true',
+                        help="Enable debug output.")
     parser.add_argument(
         '--visualize_network',
         default=False,
         action='store_true',
         help=
-        'TRT Networks will be exported to ONNX prior to Engine build for debugging. '
-    )
+        "Export TensorRT Networks to ONNX prior to Engine build for debugging.")
     parser.add_argument(
         '--dry_run',
         default=False,
         action='store_true',
         help=
-        'Run through the build process except the actual Engine build for debugging. '
+        "Run through the build process except the actual Engine build for debugging."
     )
 
-    plugin_config_parser = parser.add_argument_group("plugin_config")
+    logits_parser = parser.add_argument_group("Logits arguments")
+    logits_parser.add_argument('--logits_dtype',
+                               type=str,
+                               default=None,
+                               choices=['float16', 'float32'],
+                               help="The data type of logits.")
+    logits_parser.add_argument('--gather_context_logits',
+                               action='store_true',
+                               default=False,
+                               help="Enable gathering context logits.")
+    logits_parser.add_argument('--gather_generation_logits',
+                               action='store_true',
+                               default=False,
+                               help="Enable gathering generation logits.")
+    logits_parser.add_argument(
+        '--gather_all_token_logits',
+        action='store_true',
+        default=False,
+        help=
+        "Enable both ``gather_context_logits`` and ``gather_generation_logits``."
+    )
+
+    lora_parser = parser.add_argument_group("LoRA arguments")
+    lora_parser.add_argument(
+        '--lora_dir',
+        type=str,
+        default=None,
+        nargs="+",
+        help="The directory of LoRA weights. "
+        "If multiple directories are provided, the first one is used for configuration."
+    )
+    lora_parser.add_argument('--lora_ckpt_source',
+                             type=str,
+                             default="hf",
+                             choices=["hf", "nemo"],
+                             help="The source type of LoRA checkpoint.")
+    lora_parser.add_argument(
+        '--lora_target_modules',
+        nargs='+',
+        default=None,
+        choices=LoraManager.LORA_MODULE_IDS.keys(),
+        help=
+        "The target module names that LoRA is applied. Only effective when ``lora_plugin`` is enabled."
+    )
+    lora_parser.add_argument(
+        '--max_lora_rank',
+        type=int,
+        default=64,
+        help="Maximum LoRA rank for different LoRA modules. "
+        "It is used to compute the workspace size of LoRA plugin.")
+
+    spec_parser = parser.add_argument_group("Speculative decoding arguments")
+    spec_parser.add_argument('--speculative_decoding_mode',
+                             default=None,
+                             choices=[
+                                 "draft_tokens_external",
+                                 "lookahead_decoding",
+                                 "medusa",
+                                 "explicit_draft_tokens",
+                             ],
+                             help="Mode of speculative decoding.")
+    spec_parser.add_argument(
+        '--max_draft_len',
+        type=int,
+        default=0,
+        help=
+        "Maximum lengths of draft tokens for speculative decoding target model."
+    )
+
+    autopp_parser = parser.add_argument_group("Auto parallel arguments")
+    autopp_parser.add_argument('--auto_parallel',
+                               type=int,
+                               default=1,
+                               help="MPI world size for auto parallel.")
+    autopp_parser.add_argument(
+        '--gpus_per_node',
+        type=int,
+        default=8,
+        help=
+        "Number of GPUs each node has in a multi-node setup. This is a cluster spec and can be greater/smaller than world size. "
+        "This option is only used for auto parallel specified with ``--auto_parallel``."
+    )
+    autopp_parser.add_argument(
+        '--cluster_key',
+        type=str,
+        default=None,
+        choices=cluster_infos.keys(),
+        help=
+        "Unique name for target GPU type. Inferred from current GPU type if not specified. "
+        "This option is only used for auto parallel specified with ``--auto_parallel``."
+    )
+
+    plugin_config_parser = parser.add_argument_group("Plugin config arguments")
     add_plugin_argument(plugin_config_parser)
-
-    args = parser.parse_args()
-    if args.gather_all_token_logits:
-        args.gather_context_logits = True
-        args.gather_generation_logits = True
-
-    return args
+    return parser
 
 
-def preprocess_model_config(model_config, **kwargs):
-    if model_config.architecture in WEIGHT_LOADER_MODELS:
-        model_config.mapping.tp_size = kwargs['tp_size']
-        model_config.mapping.pp_size = kwargs['pp_size']
-        model_config.mapping.world_size = kwargs['tp_size'] * kwargs['pp_size']
+def build_model(
+    build_config: BuildConfig,
+    rank: int = 0,
+    ckpt_dir: str = None,
+    model_config: Union[str, PretrainedConfig] = None,
+    model_cls=None,
+    dry_run:
+    bool = False,  # return the modified BuildConfig without actually building the engine
+    **kwargs
+) -> Union[Engine, BuildConfig]:
 
-
-def build_model(build_config: BuildConfig,
-                rank: int = 0,
-                ckpt_dir: str = None,
-                model_config: Union[str, PretrainedConfig] = None,
-                model_cls=None,
-                **kwargs) -> Engine:
-    if ckpt_dir is not None:
-        model_config = PretrainedConfig.from_json_file(
-            os.path.join(ckpt_dir, 'config.json'))
-    else:
-        assert model_config is not None
-        if isinstance(model_config, PretrainedConfig):
-            model_config = model_config
-        else:
-            model_config = PretrainedConfig.from_json_file(model_config)
-
-    preprocess_model_config(model_config, **kwargs)
+    model_config = copy.deepcopy(model_config)
 
     logits_dtype = kwargs.get('logits_dtype')
     if logits_dtype is not None:
         model_config.logits_dtype = logits_dtype
-
-    weight_only_precision = kwargs.get('weight_only_precision', None)
-    if not model_config.quant_mode.has_any_quant(
-    ) and weight_only_precision is not None:
-        if weight_only_precision == 'int4':
-            model_config.quantization = QuantConfig(QuantAlgo.W4A16)
-        else:
-            model_config.quantization = QuantConfig(QuantAlgo.W8A16)
 
     architecture = model_config.architecture
     assert not build_config.plugin_config.streamingllm or architecture == "LlamaForCausalLM", \
         "StreamingLLM is only supported in the llama model."
     real_rank = rank
 
+    model_config.mapping.gpus_per_node = build_config.auto_parallel_config.gpus_per_node
     if build_config.auto_parallel_config.enabled:
         assert rank < build_config.auto_parallel_config.world_size
         assert model_config.mapping.pp_size == 1 and model_config.mapping.tp_size == 1, \
@@ -289,13 +354,21 @@ def build_model(build_config: BuildConfig,
 
     rank_config = copy.deepcopy(model_config)
     rank_config.set_rank(rank)
-    model = load_model(rank_config, ckpt_dir, model_cls)
+
+    if model_cls is None:
+        assert architecture in MODEL_MAP, \
+            f"Unsupported model architecture: {architecture}"
+        model_cls = MODEL_MAP[architecture]
+    if ckpt_dir is None:
+        model = model_cls(rank_config)
+    else:
+        model = model_cls.from_checkpoint(ckpt_dir, config=rank_config)
+    is_checkpoint_pruned = getattr(rank_config, 'is_pruned', False)
 
     if build_config.plugin_config.lora_plugin is not None:
-        lora_config = LoraBuildConfig(
-            lora_dir=kwargs['lora_dir'] or [],
-            lora_ckpt_source=kwargs['lora_ckpt_source'],
-            max_lora_rank=kwargs['max_lora_rank'])
+        lora_config = LoraConfig(lora_dir=kwargs['lora_dir'] or [],
+                                 lora_ckpt_source=kwargs['lora_ckpt_source'],
+                                 max_lora_rank=kwargs['max_lora_rank'])
         if kwargs['lora_target_modules'] is not None:
             # command line options is preferred over the modules in the lora dir
             lora_config.lora_target_modules = kwargs['lora_target_modules']
@@ -305,6 +378,14 @@ def build_model(build_config: BuildConfig,
     # tells the low level build api to only build rank-th shard of the model
     if build_config.auto_parallel_config.enabled:
         model.config.mapping.rank = real_rank
+
+    if is_checkpoint_pruned or kwargs.pop('strip_plan', False):
+        build_config.use_strip_plan = True
+    build_config.use_refit = kwargs.get('refit', False)
+
+    if dry_run:
+        return build_config
+
     return build(model, build_config)
 
 
@@ -323,22 +404,14 @@ def build_and_save(rank, gpu_id, ckpt_dir, build_config, output_dir, log_level,
     return True
 
 
-def parallel_build(ckpt_dir_or_model_config: str,
+def parallel_build(model_config: PretrainedConfig,
+                   ckpt_dir: Optional[str],
                    build_config: BuildConfig,
                    output_dir: str,
                    workers: int = 1,
                    log_level: str = 'info',
                    model_cls=None,
                    **kwargs):
-    ckpt_dir = ckpt_dir_or_model_config
-    if ckpt_dir_or_model_config.lower().endswith('.json'):
-        model_config = PretrainedConfig.from_json_file(ckpt_dir_or_model_config)
-        ckpt_dir = None
-    else:
-        model_config = PretrainedConfig.from_json_file(
-            os.path.join(ckpt_dir_or_model_config, 'config.json'))
-
-    preprocess_model_config(model_config, **kwargs)
 
     if build_config.auto_parallel_config.enabled:
         if model_config.mapping.world_size > 1:
@@ -377,7 +450,17 @@ def parallel_build(ckpt_dir_or_model_config: str,
 
 
 def main():
-    args = parse_arguments()
+    parser = parse_arguments()
+    args = parser.parse_args()
+    if args.gather_all_token_logits:
+        args.gather_context_logits = True
+        args.gather_generation_logits = True
+    if args.gather_context_logits and args.max_draft_len > 0:
+        raise RuntimeError(
+            "Gather context logits is not support with draft len > 0. "
+            "If want to get the accepted tokens' logits from target model, please just enable gather_generation_logits"
+        )
+
     logger.set_level(args.log_level)
     tik = time.time()
 
@@ -393,40 +476,57 @@ def main():
 
     workers = min(torch.cuda.device_count(), args.workers)
 
+    if hasattr(args, 'paged_kv_cache'):
+        logger.warning(
+            'Option --paged_kv_cache is deprecated, use --kv_cache_type=paged/disabled instead.'
+        )
+
     plugin_config = PluginConfig.from_arguments(args)
+
+    if args.fast_build:
+        plugin_config.manage_weights = True
+
     kwargs = {
         'logits_dtype': args.logits_dtype,
         'use_fused_mlp': args.use_fused_mlp,
-        'weight_only_precision': args.weight_only_precision,
-        'tp_size': args.tp_size,
-        'pp_size': args.pp_size,
         'lora_dir': args.lora_dir,
         'lora_ckpt_source': args.lora_ckpt_source,
         'max_lora_rank': args.max_lora_rank,
         'lora_target_modules': args.lora_target_modules,
+        'strip_plan': args.strip_plan,
+        'refit': False,
     }
+    speculative_decoding_mode = SpeculativeDecodingMode.from_arguments(args)
+
+    ckpt_dir_or_model_config = args.checkpoint_dir if args.checkpoint_dir is not None else args.model_config
+    if ckpt_dir_or_model_config.lower().endswith('.json'):
+        config_path = ckpt_dir_or_model_config
+        ckpt_dir = None
+    else:
+        config_path = os.path.join(ckpt_dir_or_model_config, 'config.json')
+        ckpt_dir = ckpt_dir_or_model_config
+
+    model_config = PretrainedConfig.from_json_file(config_path)
+
+    # avoid ValueError if not supported quantization is chosen with use_fused_mlp
+    quant_algo = model_config.quantization.quant_algo
+    if quant_algo and quant_algo != QuantAlgo.FP8:
+        kwargs['use_fused_mlp'] = False
+
     if args.build_config is None:
         if args.multiple_profiles == "enable" and args.opt_num_tokens is not None:
             raise RuntimeError(
                 "multiple_profiles is enabled, while opt_num_tokens is set. "
                 "They are not supposed to be working in the same time for now.")
-        args.max_num_tokens, args.opt_num_tokens = check_max_num_tokens(
-            max_num_tokens=args.max_num_tokens,
-            opt_num_tokens=args.opt_num_tokens,
-            max_batch_size=args.max_batch_size,
-            max_input_len=args.max_input_len,
-            max_beam_width=args.max_beam_width,
-            remove_input_padding=(args.remove_input_padding == "enable"),
-            enable_context_fmha=(args.context_fmha == "enable"),
-            tokens_per_block=args.tokens_per_block)
         if args.cluster_key is not None:
             cluster_config = dict(cluster_key=args.cluster_key)
         else:
             cluster_config = infer_cluster_config()
+
         build_config = BuildConfig.from_dict(
             {
                 'max_input_len': args.max_input_len,
-                'max_output_len': args.max_output_len,
+                'max_seq_len': args.max_seq_len,
                 'max_batch_size': args.max_batch_size,
                 'max_beam_width': args.max_beam_width,
                 'max_num_tokens': args.max_num_tokens,
@@ -435,12 +535,14 @@ def main():
                 args.max_prompt_embedding_table_size,
                 'gather_context_logits': args.gather_context_logits,
                 'gather_generation_logits': args.gather_generation_logits,
-                'strongly_typed': args.strongly_typed,
+                'strongly_typed': True,
                 'builder_opt': args.builder_opt,
+                'force_num_profiles': args.builder_force_num_profiles,
                 'weight_sparsity': args.weight_sparsity,
                 'profiling_verbosity': args.profiling_verbosity,
                 'enable_debug_output': args.enable_debug_output,
                 'max_draft_len': args.max_draft_len,
+                'speculative_decoding_mode': speculative_decoding_mode,
                 'input_timing_cache': args.input_timing_cache,
                 'output_timing_cache': args.output_timing_cache,
                 'auto_parallel_config': {
@@ -460,15 +562,18 @@ def main():
                 'dry_run': args.dry_run,
                 'visualize_network': args.visualize_network,
                 'max_encoder_input_len': args.max_encoder_input_len,
+                'weight_streaming': args.weight_streaming,
             },
             plugin_config=plugin_config)
+
+        if hasattr(args, 'kv_cache_type'):
+            build_config.update_from_dict({'kv_cache_type': args.kv_cache_type})
     else:
         build_config = BuildConfig.from_json_file(args.build_config,
                                                   plugin_config=plugin_config)
 
-    source = args.checkpoint_dir if args.checkpoint_dir is not None else args.model_config
-    parallel_build(source, build_config, args.output_dir, workers,
-                   args.log_level, model_cls, **kwargs)
+    parallel_build(model_config, ckpt_dir, build_config, args.output_dir,
+                   workers, args.log_level, model_cls, **kwargs)
 
     tok = time.time()
     t = time.strftime('%H:%M:%S', time.gmtime(tok - tik))

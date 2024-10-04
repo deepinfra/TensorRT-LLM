@@ -16,6 +16,8 @@
 cmake_minimum_required(VERSION 3.1)
 
 set(TRTLLM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+include(${TRTLLM_DIR}/cpp/cmake/modules/set_ifndef.cmake)
+include(${TRTLLM_DIR}/cpp/cmake/modules/find_library_create_target.cmake)
 if(NOT TRTLLM_BUILD_DIR)
   set(TRTLLM_BUILD_DIR "${TRTLLM_DIR}/cpp/build")
 endif()
@@ -46,7 +48,7 @@ set(CMAKE_VERBOSE_MAKEFILE 1)
 project(executorExamples)
 
 # Compile options
-set(CMAKE_CXX_FLAGS "-Wall -pthread -lstdc++")
+set(CMAKE_CXX_FLAGS "-Wall -pthread -lstdc++ -DENABLE_MULTI_DEVICE=1")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_BUILD_TYPE release)
 
@@ -55,6 +57,20 @@ message(STATUS "CUDA library status:")
 message(STATUS "    version: ${CUDAToolkit_VERSION}")
 message(STATUS "    libraries: ${CUDAToolkit_LIBRARY_DIR}")
 message(STATUS "    include path: ${CUDAToolkit_INCLUDE_DIRS}")
+
+# TRT dependencies
+set_ifndef(TRT_LIB_DIR ${CMAKE_BINARY_DIR})
+set_ifndef(TRT_INCLUDE_DIR /usr/include/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+set(TRT_LIB nvinfer)
+# On Windows major version is appended to nvinfer libs.
+if(WIN32)
+  set(TRT_LIB_NAME nvinfer_10)
+else()
+  set(TRT_LIB_NAME nvinfer)
+endif()
+find_library_create_target(${TRT_LIB} ${TRT_LIB_NAME} SHARED ${TRT_LIB_DIR})
+message(${TRT_INCLUDE_DIR})
+include_directories("${TRT_INCLUDE_DIR}")
 
 if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "11")
   add_definitions("-DENABLE_BF16")
@@ -75,8 +91,9 @@ endif()
 # tensorrt_llm shared lib
 add_library(tensorrt_llm SHARED IMPORTED)
 set_property(TARGET tensorrt_llm PROPERTY IMPORTED_LOCATION ${TRTLLM_LIB_PATH})
-set_property(TARGET tensorrt_llm PROPERTY IMPORTED_LINK_INTERFACE_LIBRARIES
-                                          CUDA::cuda_driver CUDA::cudart_static)
+set_property(
+  TARGET tensorrt_llm PROPERTY IMPORTED_LINK_INTERFACE_LIBRARIES
+                               CUDA::cuda_driver CUDA::cudart_static CUDA::nvml)
 
 # nvinfer_plugin_tensorrt_llm shared lib
 add_library(nvinfer_plugin_tensorrt_llm SHARED IMPORTED)
@@ -91,6 +108,14 @@ include_directories(${TRTLLM_INCLUDE_DIR} ${CUDAToolkit_INCLUDE_DIRS})
 add_executable(executorExampleBasic executorExampleBasic.cpp)
 target_link_libraries(executorExampleBasic nvinfer_plugin_tensorrt_llm)
 
+add_executable(executorExampleDebug executorExampleDebug.cpp)
+target_link_libraries(executorExampleDebug nvinfer_plugin_tensorrt_llm)
+
+add_executable(executorExampleLogitsProcessor
+               executorExampleLogitsProcessor.cpp)
+target_link_libraries(executorExampleLogitsProcessor
+                      nvinfer_plugin_tensorrt_llm)
+
 # Advanced
 if(NOT TARGET cxxopts::cxxopts)
   set(CXXOPTS_SRC_DIR ${TRTLLM_DIR}/3rdparty/cxxopts)
@@ -100,3 +125,16 @@ endif()
 add_executable(executorExampleAdvanced executorExampleAdvanced.cpp)
 target_link_libraries(executorExampleAdvanced nvinfer_plugin_tensorrt_llm
                       cxxopts::cxxopts)
+
+# MultiInstance
+
+find_package(MPI REQUIRED)
+message(STATUS "Using MPI_C_INCLUDE_DIRS: ${MPI_C_INCLUDE_DIRS}")
+message(STATUS "Using MPI_C_LIBRARIES: ${MPI_C_LIBRARIES}")
+include_directories(${MPI_C_INCLUDE_DIRS})
+
+add_executable(executorExampleAdvancedMultiInstances
+               executorExampleAdvancedMultiInstances.cpp)
+target_link_libraries(
+  executorExampleAdvancedMultiInstances nvinfer_plugin_tensorrt_llm
+  cxxopts::cxxopts ${MPI_C_LIBRARIES})

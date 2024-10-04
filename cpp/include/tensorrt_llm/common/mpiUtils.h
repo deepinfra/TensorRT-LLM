@@ -18,6 +18,7 @@
 
 #include "tensorrt_llm/common/assert.h"
 #include "tensorrt_llm/runtime/utils/multiDeviceUtils.h"
+#include <limits>
 
 #ifdef ENABLE_FP8
 #include <cuda_fp8.h>
@@ -28,9 +29,31 @@
 
 #include <cstdlib>
 #include <memory>
+
+#if ENABLE_MULTI_DEVICE
 #include <mpi.h>
+#else
+// Dummy defines to avoid #if in wider places.
+typedef int MPI_Datatype;
+typedef int MPI_Comm;
+typedef int MPI_Request;
+typedef int MPI_Message;
+typedef int MPI_Op;
+
+typedef struct MPI_Status
+{
+    int dummy;
+} MPI_Status;
+
+#define MPI_THREAD_SINGLE 0
+#define MPI_THREAD_FUNNELED 1
+#define MPI_THREAD_SERIALIZED 2
+#define MPI_THREAD_MULTIPLE 3
+#define MPI_COMM_WORLD ((MPI_Comm) 0x44000000)
+#define MPI_COMM_NULL ((MPI_Comm) 0x04000000)
+#endif // ENABLE_MULTI_DEVICE
+
 #include <type_traits>
-#include <unordered_map>
 #include <vector>
 
 #define MPICHECK(cmd) TLLM_MPI_CHECK(cmd)
@@ -197,8 +220,12 @@ public:
 
     void wait()
     {
+#if ENABLE_MULTI_DEVICE
         // TODO: Don't ignore return status
         MPI_Wait(&mRequest, MPI_STATUS_IGNORE);
+#else
+        TLLM_THROW("Multi device support is disabled.");
+#endif
     }
 
     MPI_Request mRequest{};
@@ -232,7 +259,24 @@ public:
     static MpiComm const& world();
 
     //! \brief Corresponds to `world()` by default, but can be overridden per process.
-    static MpiComm& session();
+    static MpiComm const& session()
+    {
+        return mutableSession();
+    }
+
+    //! \brief Returns the MPI local communicator.
+    static MpiComm const& localSession()
+    {
+        return mutableLocalSession();
+    }
+
+    static MpiComm const& setSession(MpiComm comm)
+    {
+        auto& session = mutableSession();
+        session = std::move(comm);
+        refreshLocalSession();
+        return session;
+    }
 
     [[nodiscard]] MpiComm split(int color, int key) const;
 
@@ -264,24 +308,44 @@ public:
         auto vecSize = (rank == root) ? static_cast<int64_t>(vec.size()) : int64_t(0);
         bcast(&vecSize, 1, MpiType::kINT64, root);
         vec.resize(vecSize);
+        if (vec.empty())
+        {
+            return;
+        }
 
+        size_t bcastSize = vec.size() * sizeof(T);
         if constexpr (std::is_fundamental_v<std::remove_cv_t<T>>)
         {
-            auto const mpiType = MpiTypeConverter<std::remove_cv_t<T>>::value;
-            bcast(vec.data(), vec.size(), mpiType, root);
+            bcastSize = vec.size();
         }
-        else
+
+        // To prevent overflowing int32_t limit
+        size_t const maxChunkSize = std::numeric_limits<int32_t>::max();
+        for (size_t pos = 0; pos < bcastSize; pos += maxChunkSize)
         {
-            bcast(vec.data(), vec.size() * sizeof(T), MpiType::kBYTE, root);
+            auto chunkSize = std::min(bcastSize - pos, maxChunkSize);
+            auto intChunkSize = static_cast<int>(chunkSize);
+            if constexpr (std::is_fundamental_v<std::remove_cv_t<T>>)
+            {
+                bcast(vec.data() + pos, intChunkSize, MpiTypeConverter<std::remove_cv_t<T>>::value, root);
+            }
+            else
+            {
+                bcast(reinterpret_cast<char*>(vec.data()) + pos, intChunkSize, MpiType::kBYTE, root);
+            }
         }
     }
+
+    std::shared_ptr<MpiRequest> sendAsync(void const* buffer, std::size_t size, MpiType dtype, int dest, int tag) const;
+
+    std::shared_ptr<MpiRequest> sendAsync(runtime::IBuffer const& buf, int dest, int tag) const;
 
     void send(void const* buffer, std::size_t size, MpiType dtype, int dest, int tag) const;
 
     void send(runtime::IBuffer const& buf, int dest, int tag) const;
 
     template <typename T>
-    void send(T const& value, int dest, int tag) const
+    void sendValue(T const& value, int dest, int tag) const
     {
         if constexpr (std::is_fundamental_v<std::remove_cv_t<T>>)
         {
@@ -298,8 +362,9 @@ public:
     MPI_Status recv(runtime::IBuffer& buf, int source, int tag) const;
 
     template <typename T>
-    MPI_Status recv(T& value, int source, int tag) const
+    MPI_Status recvValue(T& value, int source, int tag) const
     {
+#if ENABLE_MULTI_DEVICE
         if constexpr (std::is_fundamental_v<std::remove_cv_t<T>>)
         {
             return recv(&value, 1, MpiTypeConverter<std::remove_cv_t<T>>::value, source, tag);
@@ -308,13 +373,26 @@ public:
         {
             return recv(&value, sizeof(T), MpiType::kBYTE, source, tag);
         }
+#else
+        TLLM_THROW("Multi device support is disabled.");
+#endif
     }
 
     void allreduce(void const* sendbuf, void* recvbuf, int count, MpiType dtype, MpiOp op) const;
     void allgather(void const* sendbuf, void* recvbuf, int count, MpiType dtype) const;
+
+    void allgatherv(void const* sendbuf, int sendcount, MpiType sendtype, void* recvbuf,
+        std::vector<int> const& recvcounts, std::vector<int> const& displs, MpiType recvtype) const;
+
     void barrier() const;
 
     void mprobe(int source, int tag, MPI_Message* msg, MPI_Status* status) const;
+
+    //! \brief Returns if a message with the specified source and tag is available
+    bool iprobe(int source, int tag, MPI_Status* status) const;
+
+    //! \brief Poll every periodMs until a message is available
+    void recvPoll(int source, int tag, int periodMs) const;
 
     bool operator==(MpiComm const& rhs) const
     {
@@ -327,12 +405,23 @@ public:
     }
 
 private:
+    //! \brief Corresponds to `world()` by default, but can be overridden per process.
+    static MpiComm& mutableSession();
+
+    //! \brief Returns the MPI local communicator.
+    static MpiComm& mutableLocalSession();
+
+    static void refreshLocalSession();
+
     MPI_Comm mComm;
     bool mFreeComm;
 };
 
-void initialize(MpiThreadSupport threadMode = MpiThreadSupport::THREAD_FUNNELED);
+std::vector<int> getWorldRanks(MpiComm const& comm);
+
+void initialize(MpiThreadSupport threadMode = MpiThreadSupport::THREAD_MULTIPLE, bool forwardAbortToParent = false);
 
 } // namespace tensorrt_llm::mpi
 
 #define COMM_SESSION tensorrt_llm::mpi::MpiComm::session()
+#define LOCAL_COMM_SESSION tensorrt_llm::mpi::MpiComm::localSession()

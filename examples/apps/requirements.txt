@@ -1,2 +1,5 @@
-fastapi
+fastapi==0.112
 uvicorn
+colorama
+httpx
+pytest-asyncio

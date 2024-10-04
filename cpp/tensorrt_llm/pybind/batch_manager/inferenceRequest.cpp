@@ -69,9 +69,9 @@ std::shared_ptr<tb::InferenceRequest> InferenceRequest::toTrtLlm() const
     auto inferenceRequest = std::make_shared<tb::InferenceRequest>(std::move(tensorMap), mRequestId);
     inferenceRequest->setIsStreaming(isStreaming());
 
-    if (mlogitsPostProcessor)
+    if (mLogitsPostProcessor)
     {
-        inferenceRequest->setLogitsPostProcessor(LlmRequest::callbackAdapter(mlogitsPostProcessor));
+        inferenceRequest->setLogitsPostProcessor(LlmRequest::callbackAdapter(mLogitsPostProcessor));
     }
 
     return inferenceRequest;
@@ -79,7 +79,7 @@ std::shared_ptr<tb::InferenceRequest> InferenceRequest::toTrtLlm() const
 
 std::string InferenceRequest::serialize() const
 {
-    TLLM_CHECK_WITH_INFO(mlogitsPostProcessor == std::nullopt,
+    TLLM_CHECK_WITH_INFO(mLogitsPostProcessor == std::nullopt,
         "Serializing InferenceRequest with logitsPostProcessor set is not supported."
         "Please set the callback after de-serialization");
     std::vector<std::int64_t> serialized{toTrtLlm()->serialize()};
@@ -105,6 +105,7 @@ void InferenceRequest::initBindings(py::module_& m)
             nullptr, // passing logits processor in the cpp->python direction doesn't work. getter is then undefined
             &InferenceRequest::setLogitsPostProcessor)
         .def_property("input_ids", &InferenceRequest::getInputIdsUnchecked, &InferenceRequest::setInputIds)
+        .def_property("position_ids", &InferenceRequest::getPositionIdsUnchecked, &InferenceRequest::setPositionIds)
         .def_property(
             "draft_input_ids", &InferenceRequest::getDraftInputIdsUnchecked, &InferenceRequest::setDraftInputIds)
         .def_property("draft_logits", &InferenceRequest::getDraftLogitsUnchecked, &InferenceRequest::setDraftLogits)
@@ -146,6 +147,8 @@ void InferenceRequest::initBindings(py::module_& m)
         .def_property("lora_weights", &InferenceRequest::getLoraWeightsUnchecked, &InferenceRequest::setLoraWeights)
         .def_property("lora_config", &InferenceRequest::getLoraConfigUnchecked, &InferenceRequest::setLoraConfig)
         .def_property("is_streaming", &InferenceRequest::isStreaming, &InferenceRequest::setIsStreaming)
+        .def_property("no_repeat_ngram_size", &InferenceRequest::getNoRepeatNgramSizeUnchecked,
+            &InferenceRequest::setNoRepeatNgramSize)
         .def_property_readonly("request_id", &InferenceRequest::getRequestId)
         .def(py::pickle(
             [](InferenceRequest const& p) { // __getstate__

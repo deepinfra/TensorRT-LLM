@@ -15,213 +15,158 @@
  * limitations under the License.
  */
 
-#include "tensorrt_llm/layers/samplingLayer.h"
 #include "tensorrt_llm/common/cudaUtils.h"
-#include "tensorrt_llm/common/memoryUtils.h"
 #include "tensorrt_llm/kernels/decodingCommon.h"
-#include "tensorrt_llm/kernels/samplingTopKKernels.h"
+#include "tensorrt_llm/layers/topKSamplingLayer.h"
+#include "tensorrt_llm/layers/topPSamplingLayer.h"
 
+#include "samplingLayer.h"
 #include <algorithm>
 
 using namespace tensorrt_llm::common;
 using namespace tensorrt_llm::kernels;
 using namespace tensorrt_llm::runtime;
 
-namespace tensorrt_llm
+namespace tensorrt_llm::layers
 {
-namespace layers
-{
+
 template <typename T>
-SamplingLayer<T>::SamplingLayer(DecodingMode const& mode, SizeType maxBatchSize, SizeType vocabSize,
-    SizeType vocabSizePadded, cudaStream_t stream, std::shared_ptr<IAllocator> allocator, cudaDeviceProp* prop)
-    : BaseSamplingLayer<T>(maxBatchSize, vocabSize, vocabSizePadded, stream, std::move(allocator), nullptr)
+SamplingLayer<T>::SamplingLayer(executor::DecodingMode const& mode, DecoderDomain const& decoderDomain,
+    std::shared_ptr<BufferManager> bufferManager)
+    : BaseLayer(decoderDomain, bufferManager)
     , mDecodingMode(mode)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
 
     TLLM_CHECK_WITH_INFO(!mDecodingMode.isBeamSearch(), "SamplingLayer does not support Beam search mode");
-    TLLM_CHECK_WITH_INFO(mDecodingMode.isTopKorTopP(), "SamplingLayer requires TopK nor TopP mode");
+    TLLM_CHECK_WITH_INFO(mDecodingMode.isTopKorTopP(), "SamplingLayer requires TopK or TopP mode");
     if (mDecodingMode.isTopK())
     {
-        mTopKDecode
-            = std::make_unique<TopKSamplingLayer<T>>(maxBatchSize, vocabSize, vocabSizePadded, mStream, mAllocator);
+        mSamplingLayers.emplace_back(std::make_unique<TopKSamplingLayer<T>>(decoderDomain, mBufferManager));
     }
 
     if (mDecodingMode.isTopP())
     {
-        mTopPDecode = std::make_unique<TopPSamplingLayer<T>>(
-            maxBatchSize, vocabSize, vocabSizePadded, mStream, mAllocator, prop, /* deterministic */ true);
+        mSamplingLayers.emplace_back(
+            std::make_unique<TopPSamplingLayer<T>>(decoderDomain, mBufferManager, /* deterministic */ true));
     }
 
-    allocateBuffer(maxBatchSize);
+    allocateBuffer(decoderDomain.getBatchSize());
 
     TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
 }
 
 template <typename T>
-void SamplingLayer<T>::allocateBuffer(SizeType batchSize)
+void SamplingLayer<T>::allocateBuffer(SizeType32 batchSize)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
 
-    mSamplingWorkspaceSize = 0;
-    if (mDecodingMode.isTopK())
+    size_t workspaceSize = 0;
+    for (auto&& layer : mSamplingLayers)
     {
-        mSamplingWorkspaceSize = std::max(mSamplingWorkspaceSize, mTopKDecode->getWorkspaceSize());
+        workspaceSize = std::max(workspaceSize, layer->getWorkspaceSize());
     }
-    if (mDecodingMode.isTopP())
-    {
-        mSamplingWorkspaceSize = std::max(mSamplingWorkspaceSize, mTopPDecode->getWorkspaceSize());
-    }
+    mWorkspaceSize = workspaceSize;
 
-    std::array<size_t, 4> deviceBufferSizes;
-    deviceBufferSizes[0] = sizeof(curandState_t) * batchSize;
-    deviceBufferSizes[1] = sizeof(uint64_t) * batchSize;
-    deviceBufferSizes[2] = sizeof(bool) * batchSize;
-    deviceBufferSizes[3] = mSamplingWorkspaceSize;
-
-    mCurandStatesDevice = mAllocator->reMalloc(mCurandStatesDevice, deviceBufferSizes[0], false);
-    mRandomSeedsDevice = mAllocator->reMalloc(mRandomSeedsDevice, deviceBufferSizes[1], false);
-    mSkipDecodeDevice = mAllocator->reMalloc(mSkipDecodeDevice, deviceBufferSizes[2], false);
-    mSamplingWorkspaceDevice = mAllocator->reMalloc(mSamplingWorkspaceDevice, deviceBufferSizes[3], false);
-
-    auto const bytesAllocated = std::accumulate(deviceBufferSizes.begin(), deviceBufferSizes.end(), 0);
-    TLLM_LOG_DEBUG("SamplingLayer allocated %d bytes on GPU", bytesAllocated);
-
-    mAllocatedSize = bytesAllocated;
-    if (mDecodingMode.isTopK())
-    {
-        mAllocatedSize += mTopKDecode->getAllocatedSize();
-    }
-    if (mDecodingMode.isTopP())
-    {
-        mAllocatedSize += mTopPDecode->getAllocatedSize();
-    }
+    auto const batchSizeShape = ITensor::makeShape({batchSize});
+    mSetupWorkspaceSize = DecodingLayerWorkspace::calculateRequiredWorkspaceSize(
+        std::make_pair(batchSizeShape, TRTDataType<uint64_t>::value));
+    mSkipDecodeDevice = mBufferManager->gpu(batchSizeShape, TRTDataType<bool>::value);
+    mCurandStatesDevice
+        = mBufferManager->gpu(ITensor::makeShape({batchSize, sizeof(curandState_t)}), TRTDataType<int8_t>::value);
 
     // host buffers.
-    mSkipDecodeHost = (bool*) std::realloc(mSkipDecodeHost, sizeof(bool) * batchSize);
+    mSkipDecodeHost = mBufferManager->pinnedPool(batchSizeShape, TRTDataType<bool>::value);
     TLLM_CHECK(mSkipDecodeHost != nullptr);
 
     TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
 }
 
 template <typename T>
-void SamplingLayer<T>::freeBuffer()
+void SamplingLayer<T>::setup(SizeType32 batchSize, SizeType32 beamWidth, TensorConstPtr batchSlots,
+    std::shared_ptr<BaseSetupParams> const& baseSetupParams,
+    std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
 
-    mAllocator->free((void**) (&mCurandStatesDevice));
-    mAllocator->free((void**) (&mRandomSeedsDevice));
-    mAllocator->free((void**) (&mSkipDecodeDevice));
-    mAllocator->free((void**) (&mSamplingWorkspaceDevice));
-    std::free(mSkipDecodeHost);
+    auto setupParams = std::dynamic_pointer_cast<SamplingSetupParams>(baseSetupParams);
 
-    TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
-}
+    workspace->initializeDeviceCurandStates(
+        setupParams->randomSeed, batchSize, workspace->getDeviceBatchSlots(), mCurandStatesDevice);
 
-template <typename T>
-void SamplingLayer<T>::setup(SizeType batchSize, SizeType const* batchSlots, SetupParams const& setupParams)
-{
-    TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
-
-    // If runtime argument has single random seed, using this random seed to
-    // initialize the random table of all sentences. If the argument has
-    // [batchSize] random seeds, initializing the random table by different
-    // random seeds respectively. If no random seed, initialize the random table
-    // of all sentences by 0 directly.
-    if (setupParams.randomSeed)
+    if (setupParams->outputLogProbs)
     {
-        if (setupParams.randomSeed->size() == 1)
-        {
-            invokeCurandInitialize(
-                mCurandStatesDevice, batchSlots, batchSize, setupParams.randomSeed->front(), mStream);
-            sync_check_cuda_error();
-        }
-        else
-        {
-            TLLM_CHECK_WITH_INFO(setupParams.randomSeed->size() == batchSize, "Random seed vector size mismatch.");
-            cudaAutoCpy(mRandomSeedsDevice, setupParams.randomSeed->data(), batchSize, mStream);
-            invokeCurandBatchInitialize(mCurandStatesDevice, batchSlots, batchSize, mRandomSeedsDevice, mStream);
-            sync_check_cuda_error();
-        }
-    }
-    else
-    {
-        // Initialize curand states using the default seed 0.
-        invokeCurandInitialize(mCurandStatesDevice, batchSlots, batchSize, 0, mStream);
+        // FIXME(nkorobov): monotonically growing
+        mOutputLogProbs = std::any_of(setupParams->outputLogProbs->begin(), setupParams->outputLogProbs->end(),
+            [this](bool outputLogProbs) { return this->mOutputLogProbs | outputLogProbs; });
     }
 
-    if (mDecodingMode.isTopK())
+    if (setupParams->cumLogProbs)
     {
-        mTopKDecode->setup(batchSize, batchSlots, setupParams);
+        // FIXME(nkorobov): monotonically growing
+        mCumLogProbs = std::any_of(setupParams->cumLogProbs->begin(), setupParams->cumLogProbs->end(),
+            [this](bool cumLogProbs) { return this->mCumLogProbs | cumLogProbs; });
     }
-    if (mDecodingMode.isTopP())
+
+    for (auto&& layer : mSamplingLayers)
     {
-        mTopPDecode->setup(batchSize, batchSlots, setupParams);
+        layer->setup(batchSize, beamWidth, batchSlots, setupParams, workspace);
     }
 
     TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
 }
 
 template <typename T>
-void SamplingLayer<T>::forward(DecodingOutputParams& outputs, ForwardParams& inputs)
+void SamplingLayer<T>::forwardAsync(std::shared_ptr<BaseDecodingOutputs> const& outputs,
+    std::shared_ptr<BaseDecodingInputs> const& baseInputs,
+    std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace)
 {
     TLLM_LOG_TRACE("%s start", __PRETTY_FUNCTION__);
 
-    auto const batchSize = inputs.logits.shape[0];
+    auto inputs = std::dynamic_pointer_cast<SamplingInputs>(baseInputs);
 
-    auto logits = inputs.logits.template getPtr<T>();
-    auto endIds = inputs.end_ids.template getPtr<TokenIdType const>();
-    auto batchSlots = inputs.batch_slots ? inputs.batch_slots->template getPtr<SizeType const>() : nullptr;
-    float* cumLogProbs = (outputs.cum_log_probs) ? outputs.cum_log_probs->template getPtr<float>() : nullptr;
-    float* outputLogProbs = (outputs.output_log_probs) ? outputs.output_log_probs->template getPtr<float>() : nullptr;
+    auto const batchSize = inputs->logits.value()->getDimension<0>();
 
-    FinishedState* finishedInput = (inputs.finished)
-        ? reinterpret_cast<FinishedState*>(inputs.finished->template getPtr<FinishedState::UnderlyingType>())
+    auto const* endIds = bufferCast<TokenIdType>(*inputs->endIds);
+
+    FinishedState const* finishedInput = (inputs->finished)
+        ? reinterpret_cast<FinishedState const*>(bufferCast<FinishedState::UnderlyingType>(*inputs->finished.value()))
         : nullptr;
 
-    std::vector<int32_t> batchSlotsVec(batchSize);
-    std::iota(batchSlotsVec.begin(), batchSlotsVec.end(), 0);
-    auto batchSlotsHost
-        = inputs.batch_slots ? inputs.batch_slots->template getPtr<SizeType const>() : batchSlotsVec.data();
-
-    bool skipTopK = !mDecodingMode.isTopK();
-    if (!skipTopK)
-    {
-        skipTopK = allOfBatchSlots(batchSlotsHost, mTopKDecode->getSkipDecodeHost(), batchSize, true);
-    }
-
-    bool skipTopP = !mDecodingMode.isTopP();
-    if (!skipTopP)
-    {
-        skipTopP = allOfBatchSlots(batchSlotsHost, mTopPDecode->getSkipDecodeHost(), batchSize, true);
-    }
+    auto const skipTopP = !mDecodingMode.isTopP();
 
     // Compute probabilities either for TopP or if cumLogProbs or outputLogProbs are specified
-    bool const skipSoftMax = skipTopP && cumLogProbs == nullptr && outputLogProbs == nullptr;
+    bool const skipSoftMax = skipTopP && !mOutputLogProbs && !mCumLogProbs;
 
-    inputs.curand_states = mCurandStatesDevice;
-    inputs.sampling_workspace = mSamplingWorkspaceDevice;
-    inputs.probs_computed = !skipSoftMax;
-
-    invokeAddBiasSoftMax(logits, (T**) nullptr, logits, (T*) (nullptr), endIds, finishedInput, batchSlots, batchSize,
-        mMaxBatchSize, /* bw */ 1, mVocabSize, mVocabSizePadded, skipSoftMax, /* batchSlotLogits */ false, mStream);
-    sync_check_cuda_error();
-
-    if (!skipTopK)
+    inputs->curandStates = reinterpret_cast<curandState_t*>(bufferCast<int8_t>(*mCurandStatesDevice));
+    inputs->probsComputed = !skipSoftMax;
+    if (!skipSoftMax)
     {
-        mTopKDecode->forward(outputs, inputs);
+        auto runtimeLogitsPtr = bufferCast<T>(*workspace->getDeviceRuntimeLogits());
+        auto logitsPtrsPtr = static_cast<T**>(nullptr);
+        auto biasPtr = static_cast<T*>(nullptr);
+        auto const* batchSlotsPtr = workspace->getDeviceBatchSlotsPtr();
+        invokeAddBiasSoftMax(runtimeLogitsPtr, logitsPtrsPtr, runtimeLogitsPtr, biasPtr, endIds, finishedInput,
+            batchSlotsPtr, batchSize, mDecoderDomain.getBatchSize(), /* bw */ 1, mDecoderDomain.getVocabSize(),
+            mDecoderDomain.getVocabSizePadded(), skipSoftMax, /* batchSlotLogits */ false, getStream());
+        sync_check_cuda_error();
     }
 
-    if (!skipTopP)
+    for (auto&& layer : mSamplingLayers)
     {
-        mTopPDecode->forward(outputs, inputs);
+        layer->forwardAsync(outputs, baseInputs, workspace);
     }
 
     TLLM_LOG_TRACE("%s stop", __PRETTY_FUNCTION__);
+}
+
+template <typename T>
+size_t SamplingLayer<T>::getWorkspaceSize() const noexcept
+{
+    return std::max(mWorkspaceSize, mSetupWorkspaceSize);
 }
 
 template class SamplingLayer<float>;
 template class SamplingLayer<half>;
 
-} // namespace layers
-} // namespace tensorrt_llm
+} // namespace tensorrt_llm::layers

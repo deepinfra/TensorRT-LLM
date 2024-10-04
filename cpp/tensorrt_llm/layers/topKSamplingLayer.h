@@ -17,63 +17,47 @@
 
 #pragma once
 
-#include "tensorrt_llm/common/memoryUtils.h"
-#include "tensorrt_llm/common/tensor.h"
-#include "tensorrt_llm/kernels/decodingCommon.h"
-#include "tensorrt_llm/layers/baseSamplingLayer.h"
+#include "tensorrt_llm/layers/baseLayer.h"
+#include "tensorrt_llm/runtime/common.h"
 
-namespace tensorrt_llm
-{
-namespace layers
+namespace tensorrt_llm::layers
 {
 
 //! \brief Layer to randomly sample tokens from TopK logits.
 //! When both TopK and TopP are specified, layer jointly samples using TopK and TopP.
 //! When no TopK param is specified, sampling is skipped for particular request.
 template <typename T>
-class TopKSamplingLayer : public BaseSamplingLayer<T>
+class TopKSamplingLayer : public BaseLayer
 {
+    using Base = BaseLayer;
+
 public:
-    using Base = BaseSamplingLayer<T>;
-    using SetupParams = typename Base::SetupParams;
-    using ForwardParams = typename Base::ForwardParams;
+    TopKSamplingLayer(DecoderDomain const& decoderDomain, std::shared_ptr<runtime::BufferManager> bufferManager);
 
-    TopKSamplingLayer(runtime::SizeType maxBatchSize, runtime::SizeType vocabSize, runtime::SizeType vocabSizePadded,
-        cudaStream_t stream, std::shared_ptr<tensorrt_llm::common::IAllocator> allocator);
-    ~TopKSamplingLayer();
+    void setup(runtime::SizeType32 batchSize, runtime::SizeType32 beamWidth, TensorConstPtr batchSlots,
+        std::shared_ptr<BaseSetupParams> const& setupParams,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace) override;
+    void forwardAsync(std::shared_ptr<BaseDecodingOutputs> const& outputs,
+        std::shared_ptr<BaseDecodingInputs> const& inputs,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace) override;
 
-    void setup(
-        runtime::SizeType batchSize, runtime::SizeType const* batchSlots, SetupParams const& setupParams) override;
-    void forward(DecodingOutputParams& outputs, ForwardParams& inputs) override;
-
-    bool const* getSkipDecodeHost() const
-    {
-        return mSkipDecodeHost;
-    }
+    //! @returns workspace needed for this layer in bytes
+    [[nodiscard]] size_t getWorkspaceSize() const noexcept override;
 
 protected:
-    bool mNormalizeLogProbs = true;
-    runtime::SizeType32 mRuntimeMaxTopK = 0;
-    runtime::SizeType32* mRuntimeTopKDevice = nullptr;
-    float* mRuntimeTopPDevice = nullptr;
-    void* mSetupWorkspaceDevice = nullptr;
-    bool* mSkipDecodeDevice = nullptr;
-    bool* mSkipDecodeHost = nullptr;
+    bool mNormalizeLogProbs{true};
+    size_t mWorkspaceSize{0};
+    size_t mSetupWorkspaceSize{0};
+    runtime::SizeType32 mRuntimeMaxTopK{0};
+    TensorPtr mRuntimeTopKDevice;
+    TensorPtr mRuntimeTopPDevice;
+    TensorPtr mSkipDecodeDevice;
+    TensorPtr mSkipDecodeHost;
 
-    using Base::mMaxBatchSize;
-    using Base::mVocabSize;
-    using Base::mVocabSizePadded;
-
-    using Base::mSamplingWorkspaceSize;
-    using Base::mAllocatedSize;
-
-    using Base::mStream;
-    using Base::mAllocator;
+    using Base::mDecoderDomain;
 
 private:
-    void allocateBuffer(runtime::SizeType batchSize);
-    void freeBuffer();
+    void allocateBuffer(runtime::SizeType32 batchSize);
 };
 
-} // namespace layers
-} // namespace tensorrt_llm
+} // namespace tensorrt_llm::layers

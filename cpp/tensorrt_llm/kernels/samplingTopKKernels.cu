@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-#include <stdexcept>
 #ifndef CUDART_VERSION
 #error CUDART_VERSION Undefined!
 #elif (CUDART_VERSION >= 11050)
@@ -27,22 +26,19 @@
 #include "tensorrt_llm/common/logger.h"
 #include "tensorrt_llm/common/memoryUtils.h"
 #include "tensorrt_llm/common/reduceKernelUtils.cuh"
-#include "tensorrt_llm/common/stringUtils.h"
 #include "tensorrt_llm/kernels/samplingTopKKernels.h"
 
 using namespace tensorrt_llm::common;
 using namespace tensorrt_llm::runtime;
 
-namespace tensorrt_llm
-{
-namespace kernels
+namespace tensorrt_llm::kernels
 {
 
 template <typename T, int32_t BLOCK_SIZE_, int32_t BLOCKS_PER_BEAM_>
 __global__ void topKStage1(T const* __restrict logProbs, T const* const* __restrict logProbsPtrs, T* tmpLogProbs,
     SizeType32* topKTmpIdBuf, T* topKTmpValBuf, FinishedState const* finished, SizeType32 maxTopK,
-    SizeType32 const* topKs, SizeType vocabSize, TokenIdType const* endIds, bool const* skipDecode,
-    SizeType32 const* batchSlots, SizeType32 const* tokensPerStep, SizeType maxTokensPerStep)
+    SizeType32 const* topKs, SizeType32 vocabSize, TokenIdType const* endIds, bool const* skipDecode,
+    SizeType32 const* batchSlots, SizeType32 const* tokensPerStep, SizeType32 maxTokensPerStep)
 {
     typedef cub::BlockReduce<TopK_2<T>, BLOCK_SIZE_> BlockReduce;
     __shared__ typename BlockReduce::TempStorage tempStorage;
@@ -52,7 +48,7 @@ __global__ void topKStage1(T const* __restrict logProbs, T const* const* __restr
     auto const tokenIdx = static_cast<SizeType32>(blockIdx.y);
 
     auto const batchId = bid / BLOCKS_PER_BEAM_; // row id for logProbs
-    auto const batchSlot = batchSlots != nullptr ? batchSlots[batchId] : batchId;
+    auto const batchSlot = batchSlots[batchId];
     if (tokensPerStep != nullptr && tokenIdx >= tokensPerStep[batchSlot])
     {
         return;
@@ -134,10 +130,10 @@ __global__ void topKStage1(T const* __restrict logProbs, T const* const* __restr
 template <typename T, int BLOCK_SIZE_, int BLOCKS_PER_BEAM_>
 __global__ void topKStage2Sampling(SizeType32 const* __restrict topKTmpIdBuf, T* topKTmpValBuf, TokenIdType** idsPtrs,
     TokenIdType* ids, SizeType32* sequenceLengths, FinishedState const* finishedInput, FinishedState* finishedOutput,
-    float* cumLogProbs, float* outputLogProbs, SizeType maxTopK, SizeType32 const* topKs, float topP,
-    float const* topPs, curandState_t* curandState, TokenIdType const* endIds, SizeType vocabSize,
-    bool const* skipDecode, SizeType32 const* batchSlots, SizeType maxBatchSize, bool normalizeLogProbs,
-    bool logitHasProbs, SizeType32 const* tokensPerStep, SizeType maxTokensPerStep, SizeType maxSeqLen,
+    float* cumLogProbs, float* outputLogProbs, SizeType32 maxTopK, SizeType32 const* topKs, float topP,
+    float const* topPs, curandState_t* curandState, TokenIdType const* endIds, SizeType32 vocabSize,
+    bool const* skipDecode, SizeType32 const* batchSlots, SizeType32 maxBatchSize, bool normalizeLogProbs,
+    bool logitHasProbs, SizeType32 const* tokensPerStep, SizeType32 maxTokensPerStep, SizeType32 maxSeqLen,
     bool returnAllTopK)
 {
     bool const IS_FP16 = std::is_same<T, half>::value;
@@ -146,7 +142,7 @@ __global__ void topKStage2Sampling(SizeType32 const* __restrict topKTmpIdBuf, T*
     auto const tid = static_cast<SizeType32>(threadIdx.x);
     auto const batchIdx = static_cast<SizeType32>(blockIdx.x);
     auto const tokenIdx = static_cast<SizeType32>(blockIdx.y);
-    auto const batchSlot = batchSlots != nullptr ? batchSlots[batchIdx] : batchIdx;
+    auto const batchSlot = batchSlots[batchIdx];
     FinishedState const finishState = finishedInput != nullptr ? finishedInput[batchSlot] : FinishedState::empty();
     if ((skipDecode != nullptr && skipDecode[batchSlot]) || (finishState.isSkipDecoding()))
     {
@@ -280,7 +276,7 @@ __global__ void topKStage2Sampling(SizeType32 const* __restrict topKTmpIdBuf, T*
     }
 }
 
-#define CASE_K(K_MAX, BLOCK_SIZE_1_, BLOCK_SIZE_2_, BLOCKS_PER_BEAM_, normalizeLogProbs)                               \
+#define CASE_K(K_MAX, BLOCK_SIZE_1_, BLOCK_SIZE_2_, BLOCKS_PER_BEAM_)                                                  \
     do                                                                                                                 \
     {                                                                                                                  \
         {                                                                                                              \
@@ -300,7 +296,7 @@ __global__ void topKStage2Sampling(SizeType32 const* __restrict topKTmpIdBuf, T*
                     params.finishedInput, params.finishedOutput, params.cumLogProbs, params.outputLogProbs,            \
                     params.maxTopK, params.topKs, params.maxTopP, params.topPs, params.curandState, params.endIds,     \
                     params.vocabSizePadded, params.skipDecode, params.batchSlots, params.maxBatchSize,                 \
-                    normalizeLogProbs, params.logitsHasProbs, params.tokensPerStep, params.maxTokensPerStep,           \
+                    params.normalizeLogProbs, params.logitsHasProbs, params.tokensPerStep, params.maxTokensPerStep,    \
                     params.maxSeqLen, params.returnAllTopK);                                                           \
         }                                                                                                              \
     } while (0)
@@ -341,19 +337,19 @@ void invokeBatchTopKSampling(TopKSamplingKernelParams<T> const& params, cudaStre
     case 1:
     case 2:
     case 3: // 0 < maxTopK <= 16
-        CASE_K(16, 128, 128, 8, params.normalizeLogProbs);
+        CASE_K(16, 128, 128, 8);
         break;
     case 4: // 16 < maxTopK <= 32
-        CASE_K(32, 256, 128, 8, params.normalizeLogProbs);
+        CASE_K(32, 256, 128, 8);
         break;
     case 5: // 32 < maxTopK <= 64
-        CASE_K(64, 256, 256, 8, params.normalizeLogProbs);
+        CASE_K(64, 256, 256, 8);
         break;
     case 6:
     case 7:
     case 8:
     case 9: // 64 < maxTopK <= 1024
-        CASE_K(1024, 256, 256, 8, params.normalizeLogProbs);
+        CASE_K(1024, 256, 256, 8);
         break;
     default: TLLM_CHECK_WITH_INFO(false, "TopK kernel supports 1 <= k <= 1024 but got k=%d", params.maxTopK);
     }
@@ -367,5 +363,47 @@ template void invokeBatchTopKSampling(TopKSamplingKernelParams<float> const& par
 
 template void invokeBatchTopKSampling(TopKSamplingKernelParams<half> const& params, cudaStream_t stream);
 
-} // namespace kernels
-} // namespace tensorrt_llm
+__global__ void setupTopKRuntimeArgs(SizeType32 batchSize, SizeType32 topK, SizeType32* topKs, SizeType32 topKsSize,
+    float topP, float* topPs, SizeType32 topPsSize, bool* skipDecode, SizeType32 const* batchSlots)
+{
+    auto const index = static_cast<SizeType32>(blockIdx.x * blockDim.x + threadIdx.x);
+    for (auto bi = index; bi < batchSize; bi += static_cast<SizeType32>(gridDim.x * blockDim.x))
+    {
+        auto const batchSlot = batchSlots[bi];
+        auto k = topKsSize > 1 ? topKs[batchSlot] : topK;
+        auto p = topPsSize > 1 ? topPs[batchSlot] : topP;
+
+        if (k == 0 && p == 0.0f)
+        {
+            // TensorRT-LLM's topp implementation does not support topp = 0.0f, but it
+            // equivalent to greedy search. So, we set the topk = 1 as an alternative
+            // solution.
+            k = 1;
+        }
+        if (k > 0 && p == 0.0f)
+        {
+            // This case corresponds to the old topk sampling, which is equivalent to
+            // the old topk_topp sampling with topp=1.0f. TopKSamplingLayer and
+            // TopKTopPSamplingLayer are now merged by TopKSamplingLayer. Thus, we
+            // replace the case topk>0 and topp=0.0f by topk>0 and topp=1.0f for the
+            // compatibility.
+            p = 1.0f;
+        }
+        topKs[batchSlot] = k;
+        topPs[batchSlot] = p;
+        skipDecode[batchSlot] = k == 0;
+    }
+}
+
+void invokeSetupTopKRuntimeArgs(SizeType32 batchSize, SizeType32 topK, SizeType32* runtimeTopKDevicePtr,
+    SizeType32 runtimeTopKSize, float topP, float* runtimeTopPDevicePtr, SizeType32 runtimeTopPSize,
+    bool* skipDecodeDevicePtr, SizeType32 const* batchSlotsDevicePtr, cudaStream_t stream)
+{
+    dim3 block(std::min(static_cast<uint32_t>(batchSize), 256u));
+    dim3 grid(divUp(static_cast<uint32_t>(batchSize), block.x));
+    // support topK up to TOP_K_MAX.
+    setupTopKRuntimeArgs<<<grid, block, 0, stream>>>(batchSize, topK, runtimeTopKDevicePtr, runtimeTopKSize, topP,
+        runtimeTopPDevicePtr, runtimeTopPSize, skipDecodeDevicePtr, batchSlotsDevicePtr);
+}
+
+} // namespace tensorrt_llm::kernels

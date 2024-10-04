@@ -19,18 +19,11 @@
 
 #include <curand_kernel.h>
 
-#include "tensorrt_llm/common/tensor.h"
 #include "tensorrt_llm/layers/baseLayer.h"
 #include "tensorrt_llm/layers/decodingParams.h"
 #include "tensorrt_llm/runtime/common.h"
-#include "tensorrt_llm/runtime/decodingMode.h"
-#include "tensorrt_llm/runtime/iTensor.h"
 
-namespace tc = tensorrt_llm::common;
-
-namespace tensorrt_llm
-{
-namespace layers
+namespace tensorrt_llm::layers
 {
 
 //! \brief
@@ -41,85 +34,56 @@ public:
     using Base = BaseLayer;
     using PathsVec = std::vector<std::vector<std::vector<runtime::SizeType32>>>;
 
-    class MedusaSetupParams : public DecodingSetupParams
-    {
-    public:
-        std::optional<std::vector<runtime::SizeType32>> runtimeTopK; // [1] or [batchSize] on cpu
-        std::optional<std::vector<std::vector<runtime::SizeType32>>>
-            runtimeHeadsTopK;                                        // [batchSize, maxMedusaHeads] on cpu
-        std::optional<std::vector<uint64_t>> randomSeed;             // [1] or [batchSize] on cpu
-    };
+    MedusaDecodingLayer(DecoderDomain const& decoderDomain, std::shared_ptr<runtime::BufferManager> bufferManager);
 
-    class MedusaForwardParams : public DecodingParams
-    {
-    public:
-        MedusaForwardParams(tc::Tensor logits, tc::Tensor endIds)
-            : DecodingParams{0, 0, std::move(logits), std::move(endIds)}
-        {
-        }
+    void setup(runtime::SizeType32 batchSize, runtime::SizeType32 beamWidth, TensorConstPtr batchSlots,
+        std::shared_ptr<BaseSetupParams> const& setupParams,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace) override;
 
-        tc::Tensor paths;                     // [maxBatchSize, maxTokensPerStep, maxNumHeads + 1] on gpu
-        std::vector<std::vector<tc::Tensor>>
-            medusaLogits;                     // [maxBatchSize][maxNumHeads][tokensPerStep, vocabSize] on gpu
-        tc::Tensor medusaCurTokensPerStep;    // [maxBatchSize] on gpu
-        tc::Tensor medusaTargetTokensPerStep; // [maxBatchSize] on gpu
-        tc::Tensor treeIds;                   // [maxBatchSize, maxTokensPerStep] on gpu
-    };
+    void forwardAsync(std::shared_ptr<BaseDecodingOutputs> const& outputs,
+        std::shared_ptr<BaseDecodingInputs> const& inputs,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace) override;
 
-    MedusaDecodingLayer(runtime::SizeType maxBatchSize, runtime::SizeType vocabSize, runtime::SizeType vocabSizePadded,
-        runtime::SizeType maxTokensPerStep, runtime::SizeType maxNumHeads, cudaStream_t stream,
-        std::shared_ptr<tensorrt_llm::common::IAllocator> allocator);
-
-    ~MedusaDecodingLayer() override;
-
-    void setup(runtime::SizeType batchSize, runtime::SizeType const* batchSlots, MedusaSetupParams const& setupParams);
-
-    void forward(DecodingOutputParams& outputs, MedusaForwardParams& inputs);
+    //! @returns workspace needed for this layer in bytes
+    [[nodiscard]] size_t getWorkspaceSize() const noexcept override;
 
 private:
     void allocateBuffer();
-    void freeBuffer();
 
-    void samplePrimeHeadTokens(DecodingOutputParams& outputs, MedusaForwardParams& inputs);
-    void acceptDraftTokens(DecodingOutputParams& outputs, MedusaForwardParams& inputs);
-    void sampleNewDraftTokens(DecodingOutputParams& outputs, MedusaForwardParams& inputs);
-    void scatterNewDraftTokens(DecodingOutputParams& outputs, MedusaForwardParams& inputs);
-    void packAcceptedPaths(DecodingOutputParams& outputs, MedusaForwardParams& inputs);
+    void samplePrimeHeadTokens(SpeculativeDecodingOutputs const& outputs, MedusaDecodingInputs const& inputs,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace);
+    void acceptDraftTokens(SpeculativeDecodingOutputs const& outputs, MedusaDecodingInputs const& inputs,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace);
+    void sampleNewDraftTokens(SpeculativeDecodingOutputs const& outputs, MedusaDecodingInputs const& inputs,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace);
+    void scatterNewDraftTokens(SpeculativeDecodingOutputs const& outputs, MedusaDecodingInputs const& inputs);
+    void packAcceptedPaths(SpeculativeDecodingOutputs const& outputs, MedusaDecodingInputs const& inputs,
+        std::shared_ptr<runtime::DecodingLayerWorkspace> const& workspace);
 
 private:
-    using Base::mStream;
-    using Base::mAllocator;
+    using Base::mDecoderDomain;
 
-    runtime::SizeType mMaxBatchSize;
-    runtime::SizeType mVocabSize;
-    runtime::SizeType mVocabSizePadded;
-
-    runtime::SizeType mMaxTokensPerStep;
-    runtime::SizeType mMaxNumHeads;
-
-    size_t mSamplingWorkspaceSize;
+    size_t mWorkspaceSize{0};
+    size_t mSetupWorkspaceSize{0};
     runtime::SizeType32 mRuntimeMaxTopK{0};
     runtime::SizeType32 mRuntimeMaxTopKPerRequestPerMedusaHead{0};
 
-    curandState_t* mCurandStatesDevice{nullptr};
-    void* mSetupWorkspaceDevice{nullptr};
-    void* mSamplingWorkspaceDevice{nullptr};
-    runtime::SizeType32* mRuntimeTopKDevice{nullptr};
-    runtime::TokenIdType* mTargetTokensDevice{nullptr};
-    uint64_t* mRandomSeedsDevice{nullptr};
-    T** mMedusaSelectedLogitsPtrsDevice{nullptr};
-    curandState_t* mCurandStatesMedusaLogitsDevice{nullptr};
-    runtime::SizeType32* mRuntimeTopKPerRequestPerMedusaHeadDevice{nullptr};
-    runtime::TokenIdType* mNewDraftTokensDevice{nullptr};
-    runtime::SizeType32* mBestPathIdsDevice{nullptr};
+    TensorPtr mCurandStatesDevice;
+    TensorPtr mRuntimeTopKDevice;
+    TensorPtr mTargetTokensDevice;
+    TensorPtr mRandomSeedsDevice;
+    TensorPtr mMedusaSelectedLogitsPtrsDevice;
+    TensorPtr mCurandStatesMedusaLogitsDevice;
+    TensorPtr mRuntimeTopKPerRequestPerMedusaHeadDevice;
+    TensorPtr mNewDraftTokensDevice;
+    TensorPtr mBestPathIdsDevice;
 
-    runtime::ITensor::UniquePtr mTiledBatchSlotsSetup;
-    runtime::ITensor::UniquePtr mTiledBatchSlotsForward;
-    runtime::ITensor::UniquePtr mDraftIdsPtrHost;
-    runtime::ITensor::UniquePtr mMedusaInputLogitsPtrs;
+    TensorPtr mTiledBatchSlotsSetup;
+    TensorPtr mTiledBatchSlotsForward;
+    TensorPtr mDraftIdsPtrHost;
+    TensorPtr mMedusaInputLogitsPtrs;
 
     std::vector<runtime::SizeType32> mCummulativeTopK;
 };
 
-} // namespace layers
-} // namespace tensorrt_llm
+} // namespace tensorrt_llm::layers

@@ -19,12 +19,11 @@ from argparse import ArgumentParser
 import torch
 # isort: on
 from cuda import cuda, cudart
-from mpi4py import MPI
 from polygraphy.backend.trt import CreateConfig, EngineFromNetwork
 
 import tensorrt_llm as tllm
 from tensorrt_llm import Mapping, Tensor
-from tensorrt_llm._ipc_utils import peer_access
+from tensorrt_llm._utils import OMPI_COMM_TYPE_HOST, mpi_comm
 from tensorrt_llm.functional import AllReduceStrategy, allreduce
 from tensorrt_llm.plugin.plugin import current_all_reduce_helper
 
@@ -35,11 +34,14 @@ def allreduce_benchmark(dtype: str,
     tllm.logger.set_level('error')
     world_size = tllm.mpi_world_size()
     rank = tllm.mpi_rank()
+    local_comm = mpi_comm().Split_type(split_type=OMPI_COMM_TYPE_HOST)
+    local_rank = local_comm.Get_rank()
+    gpus_per_node = local_comm.Get_size()
 
-    torch.cuda.set_device(rank)
-    cudart.cudaSetDevice(rank)
+    torch.cuda.set_device(local_rank)
+    cudart.cudaSetDevice(local_rank)
 
-    mapping = Mapping(world_size, rank, world_size, world_size)
+    mapping = Mapping(world_size, rank, gpus_per_node, world_size)
 
     if world_size == 1:
         raise RuntimeError("Benchmark must run with mpi_world_size > 1")
@@ -58,12 +60,13 @@ def allreduce_benchmark(dtype: str,
         input = torch.ones(size, dtype=torch_dtype, device="cuda")
 
         for strategy in [
-                AllReduceStrategy.NCCL, AllReduceStrategy.ONESHOT,
-                AllReduceStrategy.TWOSHOT
+                AllReduceStrategy.AUTO,
+                AllReduceStrategy.NCCL,
+                AllReduceStrategy.ONESHOT,
+                AllReduceStrategy.TWOSHOT,
         ]:
             builder = tllm.Builder()
             net = builder.create_network()
-            net.plugin_config.set_nccl_plugin(dtype, use_custom_all_reduce=True)
             _buffers, workspace = current_all_reduce_helper(
             ).allocate_workspace(mapping, size * dtype_size)
 
@@ -81,9 +84,9 @@ def allreduce_benchmark(dtype: str,
                     current = allreduce(current, mapping.tp_group, strategy)
                 output = current.trt_tensor
 
+                network.mark_output(output)
                 output.name = 'output'
                 output.dtype = tllm.str_dtype_to_trt(dtype)
-                network.mark_output(output)
 
             build_engine = EngineFromNetwork(
                 (builder.trt_builder, net.trt_network),
@@ -102,18 +105,18 @@ def allreduce_benchmark(dtype: str,
             _, start = cuda.cuEventCreate(0)
             _, stop = cuda.cuEventCreate(0)
             runtimes = []
-            with peer_access(mapping):
-                MPI.COMM_WORLD.barrier()
 
-                for _ in range(10):
-                    cuda.cuEventRecord(start, stream.cuda_stream)
-                    session.run(inputs=feed_dict,
-                                outputs={"output": output},
-                                stream=stream.cuda_stream)
-                    cuda.cuEventRecord(stop, stream.cuda_stream)
-                    torch.cuda.synchronize()
-                    _, ms = cuda.cuEventElapsedTime(start, stop)
-                    runtimes.append(ms)
+            tllm.mpi_barrier()
+
+            for _ in range(10):
+                cuda.cuEventRecord(start, stream.cuda_stream)
+                session.run(inputs=feed_dict,
+                            outputs={"output": output},
+                            stream=stream.cuda_stream)
+                cuda.cuEventRecord(stop, stream.cuda_stream)
+                torch.cuda.synchronize()
+                _, ms = cuda.cuEventElapsedTime(start, stop)
+                runtimes.append(ms)
 
             median_ms = sorted(runtimes)[len(runtimes) // 2]
             assert torch.allclose(output, (input * world_size)**inner_loop)

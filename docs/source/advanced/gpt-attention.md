@@ -88,8 +88,9 @@ for IA3.
 
 _The masked MHA kernel has a special version that distributes the work across
 multiple CUDA thread-blocks on the GPU for cases where the GPU occupancy is
-low. That mode called multi-block can be enabled using the `multi_block_mode`
-flag. Users are recommended to test that mode in scenarios where both the batch
+low. That mode called multi-block is turned on by default starting from TRT-LLM 0.13,
+and can be disabled using `--multi_block_mode=False` during runtime.
+Users are recommended to test that mode in scenarios where both the batch
 size and the number of heads in the model are relatively small. The exact
 definition of small in that context will depend on the model of the GPU and is
 hard to predict but to provide with a rule of thumb, it is worth testing that
@@ -140,7 +141,7 @@ TensorRT-LLM supports in-flight batching of requests (also known as continuous
 batching or iteration-level batching) for higher serving throughput. With this feature,
 sequences in context phase can be processed together with sequences in
 generation phase. The purpose of that technique is to better interleave
-requests to reduce latency as well as make better use the of the GPUs.
+requests to reduce latency as well as make better use of the GPUs.
 For efficiency reasons (1), the support for inflight batching ***requires the
 input tensors to be packed (no padding)***.
 
@@ -165,7 +166,7 @@ which is expected to increase the total throughput. Chunking contexts also remov
 constraints on input length. To enable this feature, the FMHA paged kv-cache also
 needs to be enabled. Except for the last one, the size of the context chunk needs
 to be an integer multiple of the kv-cache block size. Refer to
-[the performance best practices](perf_best_practices.md#chunked-context) for usage.
+[the performance best practices](../performance/perf-best-practices.md#chunked-context) for usage.
 
 ## KV Cache
 
@@ -235,15 +236,18 @@ the `sliding window_size`.
 This feature helps to reduce the memory footprint of the kv cache when
 dealing with very long sequences.
 
+The feature, which allows different `max_attention_window_size` values
+for each layer, is also supported. To utilize this feature, simply provide an
+`int32 torch.Tensor` or `list` to the `GenerationSession.setup` when using python
+runtime session, or provide a vector to the `KvCacheConfig` when using cpp runtime.
+If the number of the provided elements is less than the number of layers, the provided
+tensor/list/vector will be repeated multiple times to the number of layers and then be
+saved as a new tensor. This tensor will serve as the buffer for `max_attention_window_size`,
+setting unique values for each layer. However, it’s important to note that the
+memory allocation for the kv cache still relies on the buffer’s maximum value.
+
 _Note that the cyclic kv cache feature doesn't work with beam searching currently as
 the context kv cache are shared across beams.
-
-_The experimental feature, which allows different `max_attention_window_size` values
-for each layer, is also supported. To utilize this feature, simply provide an
-`int32 torch.Tensor` with a shape of `[num_layers]` to the `GenerationSession.setup`.
-This tensor will serve as the buffer for `max_attention_window_size`,
-setting unique values for each layer. However, it’s important to note that the
-memory allocation for the kv cache still relies on the buffer’s maximum value._
 
 ## StreamingLLM
 

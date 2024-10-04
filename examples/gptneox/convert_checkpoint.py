@@ -15,6 +15,8 @@ from transformers import AutoConfig, AutoModelForCausalLM
 import tensorrt_llm
 from tensorrt_llm._utils import str_dtype_to_torch
 from tensorrt_llm.mapping import Mapping
+from tensorrt_llm.models.convert_utils import (get_weight, get_weight_and_bias,
+                                               split_matrix_tp)
 from tensorrt_llm.quantization import QuantAlgo
 
 
@@ -50,7 +52,7 @@ def parse_arguments():
         'Define the precision for the weights when using weight-only quantization.'
         'You must also use --use_weight_only for that argument to have an impact.'
     )
-    parser.add_argument('--ammo_quant_ckpt_path',
+    parser.add_argument('--quant_ckpt_path',
                         type=str,
                         default=None,
                         help='Path of a quantized model checkpoint')
@@ -285,7 +287,8 @@ def load_from_gptq_gptneox(quant_ckpt_path,
         GPTQ_FLAG = 1
 
         qweight_interleaved = preprocessor(packer(qweight_unpacked_int8),
-                                           torch.quint4x2).view(torch.float16)
+                                           torch.quint4x2,
+                                           torch.float16).view(torch.float16)
 
         # zeros = zeros * scales
         zeros_x_scales_fp16 = (-qzeros_unpacked_int8 + 8 * UINT4_TO_INT4_FLAG -
@@ -487,31 +490,6 @@ def split_qkv_weight(weight: torch.Tensor,
         return weight[rank, ...].ravel().clone().contiguous()
 
 
-def split(v, tp_size, idx, dim=0):
-    if tp_size == 1:
-        return v
-    if len(v.shape) == 1:
-        return torch.chunk(v, tp_size)[idx].contiguous()
-    else:
-        return torch.chunk(v, tp_size, dim=dim)[idx].contiguous()
-
-
-def split_matrix_tp(v, tensor_parallel, rank, dim):
-    return split(v, tensor_parallel, rank, dim=dim)
-
-
-def get_weight(config, prefix, dtype):
-    return config[prefix + '.weight'].to(dtype).detach()
-
-
-def get_bias(config, prefix, dtype):
-    return config[prefix + '.bias'].to(dtype).detach()
-
-
-def get_weight_and_bias(config, prefix, dtype):
-    return get_weight(config, prefix, dtype), get_bias(config, prefix, dtype)
-
-
 def get_tllm_linear_weight(weight,
                            prefix,
                            bias=None,
@@ -685,7 +663,7 @@ if __name__ == '__main__':
         'num_attention_heads': hf_config.num_attention_heads,
         'hidden_size': hf_config.hidden_size,
         'vocab_size': hf_config.vocab_size,
-        'position_embedding_type': 'learned_absolute',
+        'position_embedding_type': 'rope_gpt_neox',
         'max_position_embeddings': hf_config.max_position_embeddings,
         'rotary_emb_base': hf_config.rotary_emb_base,
         'rotary_pct': hf_config.rotary_pct,
@@ -707,7 +685,7 @@ if __name__ == '__main__':
             'has_zero_point':
             True,
             'group_size':
-            get_gptq_gptneox_group_size(args.ammo_quant_ckpt_path, hf_config)
+            get_gptq_gptneox_group_size(args.quant_ckpt_path, hf_config)
         })
 
     with open(os.path.join(args.output_dir, 'config.json'), 'w') as f:
@@ -721,7 +699,7 @@ if __name__ == '__main__':
 
         if args.use_weight_only and args.weight_only_precision == 'int4_gptq':
             weights = load_from_gptq_gptneox(
-                args.ammo_quant_ckpt_path,
+                args.quant_ckpt_path,
                 hf_config,
                 use_parallel_embedding=args.use_parallel_embedding,
                 sharding_dim=args.embedding_sharding_dim,

@@ -16,6 +16,8 @@
  */
 #include "weightOnlyQuantMatmulPlugin.h"
 
+#include <numeric>
+
 using namespace nvinfer1;
 using namespace tensorrt_llm::common;
 using namespace tensorrt_llm::kernels::cutlass_kernels;
@@ -37,14 +39,14 @@ void WeightOnlyQuantGemmPluginProfiler::runTactic(int m, int n, int k,
     half* actPtr = reinterpret_cast<half*>(workspace);
     int8_t* weightPtr
         = reinterpret_cast<int8_t*>(nextWorkspacePtr(reinterpret_cast<int8_t*>(actPtr), m * k * sizeof(half)));
-    half* scalesPtr = reinterpret_cast<half*>(
-        nextWorkspacePtr(reinterpret_cast<int8_t*>(weightPtr), originalN * k * sizeof(int8_t)));
+    half* scalesPtr
+        = reinterpret_cast<half*>(nextWorkspacePtr(reinterpret_cast<int8_t*>(weightPtr), n * k * sizeof(int8_t)));
     half* outputPtr
         = reinterpret_cast<half*>(nextWorkspacePtr(reinterpret_cast<int8_t*>(scalesPtr), originalN * sizeof(half)));
     char* workspacePtr
         = reinterpret_cast<char*>(nextWorkspacePtr(reinterpret_cast<int8_t*>(outputPtr), m * originalN * sizeof(half)));
 
-    int const wsSize = mRunner->getWorkspaceSize(m, n, k);
+    int const wsSize = mRunner->getWorkspaceSize(m, originalN, k);
 
     if (mWeightTypeId == WeightTypeId::INT8)
     {
@@ -57,15 +59,15 @@ void WeightOnlyQuantGemmPluginProfiler::runTactic(int m, int n, int k,
     }
 }
 
-void WeightOnlyQuantGemmPluginProfiler::computeTmpSize(int maxM, int n, int k)
+void WeightOnlyQuantGemmPluginProfiler::computeTmpSize(size_t maxM, size_t n, size_t k)
 {
     int const originalN = n * getWeightTypeMultiplier(mWeightTypeId);
     std::vector<size_t> workspaces = {
-        maxM * k * sizeof(half),              // A
-        originalN * k * sizeof(int8_t),       // B
-        originalN * sizeof(half),             // scales
-        maxM * originalN * sizeof(half),      // C
-        mRunner->getWorkspaceSize(maxM, n, k) // workspace
+        maxM * k * sizeof(half),                      // A
+        n * k * sizeof(int8_t),                       // B
+        originalN * sizeof(half),                     // scales
+        maxM * originalN * sizeof(half),              // C
+        mRunner->getWorkspaceSize(maxM, originalN, k) // workspace
     };
     size_t bytes = calculateTotalWorkspaceSize(workspaces.data(), workspaces.size());
     setTmpWorkspaceSizeInBytes(bytes);
@@ -289,13 +291,17 @@ int WeightOnlyQuantMatmulPlugin::enqueue(nvinfer1::PluginTensorDesc const* input
     // outputs
     //     mat [M, N]
 
-    int m = 1;
+    int64_t m64 = 1;
     for (int ii = 0; ii < inputDesc[0].dims.nbDims - 1; ++ii)
     {
-        m *= inputDesc[0].dims.d[ii];
+        m64 *= inputDesc[0].dims.d[ii];
     }
-    int const n = inputDesc[1].dims.d[1];
-    int const k = inputDesc[0].dims.d[inputDesc[0].dims.nbDims - 1];
+    int const m = TLLM_INT32_CAST(m64);
+    int const n = TLLM_INT32_CAST(inputDesc[1].dims.d[1]);
+    int const k = TLLM_INT32_CAST(inputDesc[0].dims.d[inputDesc[0].dims.nbDims - 1]);
+
+    if (m == 0)
+        return 0;
 
     bool const use_cuda_kernel = m < SMALL_M_FAST_PATH && mCudaKernelEnabled;
 #if defined(ENABLE_BF16)

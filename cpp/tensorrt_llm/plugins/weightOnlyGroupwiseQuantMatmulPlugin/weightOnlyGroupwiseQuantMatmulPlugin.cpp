@@ -16,6 +16,8 @@
  */
 #include "weightOnlyGroupwiseQuantMatmulPlugin.h"
 
+#include <numeric>
+
 using namespace nvinfer1;
 using namespace tensorrt_llm::common;
 using namespace tensorrt_llm::kernels::cutlass_kernels;
@@ -66,24 +68,24 @@ void WeightOnlyGroupwiseQuantGemmPluginProfiler::runTactic(int m, int n, int k,
         biasesPtr = nullptr;
     }
 
-    int const wsSize = mRunner->getWorkspaceSize(m, n, k);
+    int const wsSize = mRunner->getWorkspaceSize(m, originalN, k);
 
     mRunner->gemm(actPtr, weightPtr, inputScalesPtr, zerosPtr, biasesPtr, outputPtr, m, originalN, k, mGroupSize,
         tactic, workspacePtr, wsSize, stream);
 }
 
-void WeightOnlyGroupwiseQuantGemmPluginProfiler::computeTmpSize(int maxM, int n, int k)
+void WeightOnlyGroupwiseQuantGemmPluginProfiler::computeTmpSize(size_t maxM, size_t n, size_t k)
 {
     // Quantized weights are packed in FP16 format (INT4*4 -> FP16)
     int const originalN = n * FP16_INT4_RATIO;
     std::vector<size_t> workspaces = {
-        maxM * k * sizeof(half),                   // A
-        k * n * sizeof(float),                     // B
-        k * originalN * sizeof(half) / mGroupSize, // scales
-        k * originalN * sizeof(half) / mGroupSize, // zeros
-        maxM * sizeof(half),                       // biases
-        maxM * originalN * sizeof(half),           // C
-        mRunner->getWorkspaceSize(maxM, n, k)      // workspace
+        maxM * k * sizeof(half),                      // A
+        k * n * sizeof(float),                        // B
+        k * originalN * sizeof(half) / mGroupSize,    // scales
+        k * originalN * sizeof(half) / mGroupSize,    // zeros
+        maxM * sizeof(half),                          // biases
+        maxM * originalN * sizeof(half),              // C
+        mRunner->getWorkspaceSize(maxM, originalN, k) // workspace
     };
     size_t bytes = calculateTotalWorkspaceSize(workspaces.data(), workspaces.size());
     setTmpWorkspaceSizeInBytes(bytes);
@@ -356,13 +358,14 @@ int WeightOnlyGroupwiseQuantMatmulPlugin::enqueue(nvinfer1::PluginTensorDesc con
     // outputs
     //   mat                [M, N]
 
-    int m = 1;
+    int64_t m64 = 1;
     for (int ii = 0; ii < inputDesc[0].dims.nbDims - 1; ++ii)
     {
-        m *= inputDesc[0].dims.d[ii];
+        m64 *= inputDesc[0].dims.d[ii];
     }
-    int const n = inputDesc[mWeightInputIdx].dims.d[1];
-    int const k = inputDesc[0].dims.d[inputDesc[0].dims.nbDims - 1];
+    int const m = TLLM_INT32_CAST(m64);
+    int const n = TLLM_INT32_CAST(inputDesc[mWeightInputIdx].dims.d[1]);
+    int const k = TLLM_INT32_CAST(inputDesc[0].dims.d[inputDesc[0].dims.nbDims - 1]);
 
     bool use_cuda_kernel = m < SMALL_M_FAST_PATH && mCudaKernelEnabled;
     bool use_pre_quant_scale = mQuantAlgo & PRE_QUANT_SCALE;
@@ -443,7 +446,7 @@ int WeightOnlyGroupwiseQuantMatmulPlugin::enqueue(nvinfer1::PluginTensorDesc con
     }
     else
     {
-        int const ws_bytes = m_weightOnlyGroupwiseGemmRunner->getWorkspaceSize(m, n, k);
+        int const ws_bytes = m_weightOnlyGroupwiseGemmRunner->getWorkspaceSize(m, real_n, k);
 
         int32_t* weight_ptr = const_cast<int32_t*>(reinterpret_cast<int32_t const*>(inputs[mWeightInputIdx]));
 
