@@ -123,9 +123,6 @@ DecoderXQAImpl* DecoderXQARunner::getImplFromXQAParams(XQAParams const& xqaParam
 
 bool DecoderXQARunner::shouldUse(XQAParams const& xqa_params, bool for_configure_plugin)
 {
-    if (xqa_params.data_type == DATA_TYPE_E4M3 || xqa_params.kv_cache_data_type == DATA_TYPE_E4M3) {
-	return false; 
-    }
     return getImplFromXQAParams(xqa_params, for_configure_plugin)->shouldUse(xqa_params, for_configure_plugin);
 }
 
