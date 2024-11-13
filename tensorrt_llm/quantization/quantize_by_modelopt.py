@@ -311,6 +311,7 @@ def get_calib_dataloader(dataset_name_or_dir="cnn_dailymail",
                          batch_size=1,
                          calib_size=512,
                          block_size=512,
+                         dataset_transform_fn=None,
                          device=None,
                          include_labels=False):
     logger.info("Loading calibration dataset")
@@ -342,9 +343,12 @@ def get_calib_dataloader(dataset_name_or_dir="cnn_dailymail",
         dataset = load_dataset(dataset_name_or_dir, split="train")
         dataset = dataset["text"][:calib_size]
     else:
-        raise NotImplementedError(
-            f"Unsupported dataset name or local repo directory: {dataset_name_or_dir}."
-        )
+        dataset = load_dataset(dataset_name_or_dir, split="train")
+        if dataset_transform_fn:
+            dataset = dataset_transform_fn(dataset, tokenizer, calib_size)
+        else:
+            dataset = dataset[:calib_size]
+    print(f"Calibration sample: {dataset[:8]}")
 
     is_multimodal = False
     for dataset_name in MULTIMODAL_DATASETS:
@@ -588,6 +592,7 @@ def quantize_and_export(*,
                         cp_size,
                         seed,
                         tokenizer_max_seq_length,
+                        dataset_transform_fn=None,
                         num_medusa_heads=None,
                         num_medusa_layers=None,
                         max_draft_len=None,
@@ -693,6 +698,7 @@ def quantize_and_export(*,
         calib_dataloader = get_calib_dataloader(
             dataset_name_or_dir=calib_dataset,
             tokenizer=tokenizer,
+            dataset_transform_fn=dataset_transform_fn,
             batch_size=batch_size,
             calib_size=calib_size,
             block_size=calib_max_seq_length,
