@@ -7,6 +7,34 @@ from tensorrt_llm.quantization import (quantize_and_export,
 
 mp.set_start_method("spawn", force=True)
 
+
+def convert_hermes_conv_to_raw_prompt(tokenizer, conv):
+    role_map = {
+        "human": "user",
+        "gpt": "assistant",
+        "system": "system"
+    }
+    messages = []
+    system = []
+    for a in conv:
+        if a["from"] == "system":
+            system.append(a["value"])
+            continue
+        if system and a["from"] == "human":
+            system.append(a["value"])
+            messages.append({'role': 'user', 'content': "\n".join(system)})
+            system = []
+        else:
+            messages.append({'role': role_map[a["from"]], 'content': a['value']})
+    return tokenizer.apply_chat_template(messages, tokenize=False)
+
+
+def transform_hermes(dataset, tokenizer, calib_size):
+    dataset = dataset.shuffle()
+    dataset = dataset["conversations"][:calib_size]
+    return [convert_hermes_conv_to_raw_prompt(tokenizer, conv) for conv in dataset]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model_dir",
@@ -147,6 +175,10 @@ if __name__ == "__main__":
             args.auto_quantize_bits = lower_bound
 
     if args.model_dir is not None:
+        dataset_transform_fn = None
+        if args.calib_dataset == "teknium/OpenHermes-2.5":
+            dataset_transform_fn = transform_hermes
+
         quantize_and_export(
             model_dir=args.model_dir,
             device=args.device,
@@ -165,6 +197,7 @@ if __name__ == "__main__":
             cp_size=args.cp_size,
             seed=args.seed,
             tokenizer_max_seq_length=args.tokenizer_max_seq_length,
+            dataset_transform_fn=dataset_transform_fn,
             num_medusa_heads=args.num_medusa_heads,
             num_medusa_layers=args.num_medusa_layers,
             max_draft_len=args.max_draft_len,
