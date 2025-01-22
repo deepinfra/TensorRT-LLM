@@ -209,10 +209,11 @@ class GenerationExecutorProxy(GenerationExecutor):
                                queue: Union[FusedIpcQueue, IntraProcessQueue],
                                result_singleton: IterationResult,
                                urgent: bool = False) -> bool:
-        if not urgent:
-            time.sleep(0.2)
+        # if not urgent:
+            # time.sleep(0.2)
 
         try:
+            queue.poll()
             data = queue.get()
         except:
             logger.debug(
