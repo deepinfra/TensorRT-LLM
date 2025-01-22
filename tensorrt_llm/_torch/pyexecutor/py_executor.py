@@ -52,8 +52,16 @@ from .llm_request import (ExecutorRequest, LlmRequest, LlmRequestState,
                           LlmResponse, get_draft_token_length)
 from .model_engine import ModelEngine
 from .resource_manager import ResourceManager
-from .sampler import Sampler, SampleState, SampleStateTensors
+from .sampler import Sampler, SampleState, SampleStateTensors, TorchSampler
 from .scheduler import RequestScheduler, ScheduledRequests
+from collections import defaultdict
+import array
+import json
+
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
+
+prom_metrics = defaultdict(float)
+prom_metrics_file = None
 
 # Environment variable to specify iteration ranges for profiling start/stop.
 # Format: "start1-stop1,start2-stop2,..." or single iterations "iter1,iter2,..."
@@ -67,9 +75,9 @@ PROFILE_RECORD_GC_ENV_VAR_NAME = "TLLM_PROFILE_RECORD_GC"
 # Set to a path to save detailed tracing of PyTorch operations.
 PROFILE_TRACE_ENV_VAR_NAME = "TLLM_TORCH_PROFILE_TRACE"
 
+
 # Unique tag base to avoid collisions with token/logits comms
 TERMINATION_COMM_TAG_BASE = 20000
-
 
 @functools.cache
 def _load_iteration_indexes(env_var: str):
@@ -580,6 +588,7 @@ class PyExecutor:
                                 f"trace saved to {torch_trace_path}")
                 torch.cuda.cudart().cudaProfilerStop()
                 enabled = False
+            last_start_time = start_time
 
             if start_time is not None and self.print_log and self.dist.rank == 0:
                 end_time = time.time()
@@ -633,6 +642,33 @@ class PyExecutor:
                 if start_event_2 is None:
                     start_event_2 = torch.cuda.Event(enable_timing=True)
                 start_event_2.record()
+
+            if last_start_time is not None and self.dist.rank == 0:
+                iter_states = self.model_engine.iter_states
+                total_running = iter_states['num_ctx_requests'] + iter_states['num_generation_tokens'] / (1 + self.model_engine.max_draft_len)
+                prom_metrics["num_requests_running"] = total_running
+                prom_metrics["num_requests_swapped"] = total_running - len(self.active_requests)
+                prom_metrics["iteration_tokens_total_sum"] += iter_states['num_ctx_tokens'] + iter_states['num_generation_tokens']
+                prom_metrics["iteration_tokens_total_count"] += 1
+                prom_metrics["time_per_output_token_seconds_sum"] += (start_time - last_start_time)
+                prom_metrics["time_per_output_token_seconds_count"] += 1
+                prom_metrics["prompt_tokens_total"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_sum"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_count"] += 1
+                prom_metrics["generation_tokens_total"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_sum"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_count"] += 1
+                global prom_metrics_file
+                try:
+                    if prom_metrics_file is None:
+                        prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                                    os.O_RDWR|os.O_CREAT)
+                    os.pwrite(prom_metrics_file, (
+                        json.dumps(list(prom_metrics.keys())).encode('UTF-8') +
+                        b'\0' +
+                        array.array('d',prom_metrics.values()).tobytes()), 0)
+                except:
+                    traceback.print_exc()
 
         try:
             yield profile_step

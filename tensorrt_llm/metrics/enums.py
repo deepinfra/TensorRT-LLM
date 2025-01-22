@@ -17,3 +17,6 @@ class RequestEventTiming(Enum):
     KV_CACHE_TRANSFER_START = "kv_cache_transfer_start"
     KV_CACHE_TRANSFER_END = "kv_cache_transfer_end"
     KV_CACHE_SIZE = "kv_cache_size"
+
+class RequestKVCacheStats(Enum):
+    NUM_REUSED_BLOCKS = "num_reused_blocks"

@@ -5,8 +5,9 @@ import time
 import weakref
 from dataclasses import dataclass, field
 from queue import Empty, Queue
+
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Literal,
-                    NamedTuple, Optional, TypeAlias, Union)
+                    NamedTuple, Optional, TypeAlias, Union, Tuple)
 from weakref import WeakMethod
 
 import torch
@@ -21,6 +22,9 @@ except ModuleNotFoundError:
 
 from .._ray_utils import unwrap_ray_errors
 from .._utils import mpi_disabled, nvtx_range_debug
+from tensorrt_llm.metrics.enums import RequestKVCacheStats
+
+from .._utils import nvtx_range_debug
 from ..bindings import executor as tllm
 from ..disaggregated_params import DisaggregatedParams
 from ..llmapi.tracer import global_tracer
@@ -114,8 +118,14 @@ class CompletionOutput:
     Attributes:
         length (int): The number of generated tokens.
         token_ids_diff (List[int]): Newly generated token ids.
+
         logprobs_diff (TokenLogprobs | List[float]): Logprobs of newly generated tokens.
         text_diff (str): Newly generated tokens.
+
+    Accessors:
+        token_ids_diff_safe(int) -> Tuple[List[int], int]: Newly generated token ids since the given length.
+        logprobs_diff_safe(int) -> Tuple[List[float], int]: Logprobs of newly generated tokens since the given length.
+        text_diff_safe(int) -> Tuple[str, int]: Newly generated tokens since the given length.
     """
     index: int
     text: str = ""
@@ -147,9 +157,21 @@ class CompletionOutput:
     def length(self) -> int:
         return len(self.token_ids)
 
-    @property
-    def text_diff(self) -> str:
-        return self.text[self._last_text_len:]
+    def text_diff_safe(self, last_text_len) -> Tuple[str, int]:
+        l = len(self.text)
+        return self.text[last_text_len:l], l
+
+    def logprobs_diff_safe(self, last_logprobs_len) -> Tuple[List[float], int]:
+        l = len(self.logprobs)
+        return self.logprobs[last_logprobs_len:l], l
+
+    def token_ids_diff_safe(self, last_token_ids_len) -> Tuple[List[int], int]:
+        l = len(self.token_ids)
+        return self.token_ids[last_token_ids_len:l], l
+
+    #@property
+    #def text_diff(self) -> str:
+    #    return self.text[self._last_text_len:]
 
     @property
     def token_ids_diff(self) -> List[int]:
@@ -269,6 +291,7 @@ class GenerationResultBase:
         # Average decoded tokens per runtime iteration; set when the first LLM response arrives.
         # None indicates not yet available (e.g., before first step/stream).
         self.avg_decoded_tokens_per_iter: Optional[float] = None
+        self.num_reused_blocks: Optional[int] = None
         self._done = False
         self.metrics_dict = {}
         self.trace_headers: Optional[dict[str, str]] = None
@@ -680,6 +703,8 @@ class GenerationResultBase:
                         RequestEventTiming.KV_CACHE_TRANSFER_END, 0.0) +
                                    time_correction) * 1e9))
 
+        if RequestKVCacheStats.NUM_REUSED_BLOCKS in req_perf_metrics_dict:
+            self.num_reused_blocks = req_perf_metrics_dict[RequestKVCacheStats.NUM_REUSED_BLOCKS]
 
 class DetokenizedGenerationResultBase(GenerationResultBase):
     ''' The base class for the generation result with detokenization support. '''
@@ -971,7 +996,7 @@ class IterationResult:
             try:
                 data = self.queue.get(timeout=self._timeout)
                 results.append(json.loads(data))
-            except Empty:
+            except (Empty, asyncio.QueueEmpty, asyncio.TimeoutError) as e:
                 self._done = True
         return results
 
@@ -987,7 +1012,7 @@ class IterationResult:
         try:
             data = await self.aqueue.get(timeout=self._timeout)
             return json.loads(data)
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, asyncio.QueueEmpty) as e:
             self._done = True
             raise StopAsyncIteration
 
