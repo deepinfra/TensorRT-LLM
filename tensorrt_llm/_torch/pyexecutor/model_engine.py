@@ -9,7 +9,11 @@ import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections import defaultdict
 
+import psutil
+import safetensors
+from tensorrt_llm._torch.pyexecutor.llm_request import LlmRequest
 import torch
 import torch._dynamo.config
 
@@ -141,7 +145,9 @@ class PyTorchModelEngine(ModelEngine):
                                                  torch.nn.Module]] = None,
         model: Optional[torch.nn.Module] = None,
     ):
+
         self.forward_pass_callable = None
+        torch.manual_seed(0)
         self.ub_buffers = None
         (
             max_beam_width,
@@ -322,7 +328,21 @@ class PyTorchModelEngine(ModelEngine):
             self.without_logits = self.spec_config.spec_dec_mode.without_logits(
             ) or self.model_is_wrapped
             self.max_draft_len = spec_config.max_draft_len
+
             self.max_total_draft_tokens = spec_config.max_total_draft_tokens
+
+            self.temperatures_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                               dtype=torch.float,
+                                               device='cuda')
+            self.top_k_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                          dtype=torch.int,
+                                          device='cuda')
+            self.top_p_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                          dtype=torch.float,
+                                          device='cuda')
+            self.min_p_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                          dtype=torch.float,
+                                          device='cuda')
         else:
             self.without_logits = False
             self.max_draft_len = 0
@@ -1278,6 +1298,46 @@ class PyTorchModelEngine(ModelEngine):
         multimodal_params_list = []
         mrope_position_ids = []
         num_accepted_draft_tokens = []  # per request
+        mrope_config = defaultdict(list)
+        temperatures = []
+        top_k = []
+        top_p = []
+        min_p = []
+
+        batch_idx = 0
+
+        def get_request_temperature(request: LlmRequest) -> float:
+            if not request.sampling_config.temperature:
+                return 0.7
+            temperature = request.sampling_config.temperature[0]
+            if 0 < temperature < 1e-2:
+                # temperature less than 0.01 may cause numerical errors
+                temperature = 0.01
+            return temperature
+
+        def get_request_top_k(request: LlmRequest) -> int:
+            if not request.sampling_config.top_k:
+                top_k = 0
+            else:
+                top_k = request.sampling_config.top_k[0]
+            # flashinfer expects k > d for no top_k filter
+            if top_k <= 0:
+                top_k = 2147483647
+            return top_k
+
+        def get_request_top_p(request: LlmRequest) -> float:
+            if not request.sampling_config.top_p:
+                top_p = 1.0
+            else:
+                top_p = request.sampling_config.top_p[0]
+            return top_p
+
+        def get_request_min_p(request: LlmRequest) -> float:
+            if not request.sampling_config.min_p:
+                min_p = 0.0
+            else:
+                min_p = request.sampling_config.min_p[0]
+            return min_p
 
         for request in scheduled_requests.context_requests:
             request_ids.append(request.py_request_id)
@@ -1306,6 +1366,19 @@ class PyTorchModelEngine(ModelEngine):
                 special_token_offsets=request.py_multimodal_data.get(
                     'special_token_offsets', []),
             ) if request.multimodal_hashes is not None else None
+            mrope_rotary_cos_sin = request.mrope_rotary_cos_sin
+            if mrope_rotary_cos_sin is not None:
+                mrope_rotary_cos_sin = mrope_rotary_cos_sin.pin_memory(
+                ) if mrope_rotary_cos_sin.device == 'cpu' else mrope_rotary_cos_sin
+                mrope_config['mrope_rotary_cos_sin'].append(
+                    mrope_rotary_cos_sin.to('cuda', non_blocking=True))
+            temperatures.append(get_request_temperature(request))
+            top_k.append(get_request_top_k(request))
+            top_p.append(get_request_top_p(request))
+            min_p.append(get_request_min_p(request))
+
+            request.py_batch_idx = batch_idx
+            batch_idx += 1
 
             multimodal_params = MultimodalParams(
                 multimodal_data=request.py_multimodal_data,
@@ -1407,6 +1480,10 @@ class PyTorchModelEngine(ModelEngine):
                               past_seen_token_num + 1 + num_draft_tokens)))
                 num_cached_tokens_per_seq.append(past_seen_token_num)
                 request.cached_tokens = num_cached_tokens_per_seq[-1]
+                temperatures.extend([get_request_temperature(request)] * (num_draft_tokens + 1))
+                top_k.extend([get_request_top_k(request)] * (num_draft_tokens + 1))
+                top_p.extend([get_request_top_p(request)] * (num_draft_tokens + 1))
+                min_p.extend([get_request_min_p(request)] * (num_draft_tokens + 1))
                 # update batch index
                 request.py_batch_idx = request.py_seq_slot
             else:
@@ -1446,6 +1523,10 @@ class PyTorchModelEngine(ModelEngine):
                     prompt_lengths.append(1 + self.runtime_draft_len)
                 else:
                     prompt_lengths.append(request.py_prompt_len)
+                temperatures.extend([get_request_temperature(request)] * (self.runtime_draft_len + 1))
+                top_k.extend([get_request_top_k(request)] * (self.runtime_draft_len + 1))
+                top_p.extend([get_request_top_p(request)] * (self.runtime_draft_len + 1))
+                min_p.extend([get_request_min_p(request)] * (self.runtime_draft_len + 1))
 
         for request in first_draft_requests:
             request_ids.append(request.py_request_id)
@@ -1470,6 +1551,11 @@ class PyTorchModelEngine(ModelEngine):
 
             # update batch index
             request.py_batch_idx = request.py_seq_slot
+
+            temperatures.extend([get_request_temperature(request)] * (self.max_draft_len + 1))
+            top_k.extend([get_request_top_k(request)] * (self.max_draft_len + 1))
+            top_p.extend([get_request_top_p(request)] * (self.max_draft_len + 1))
+            min_p.extend([get_request_min_p(request)] * (self.max_draft_len + 1))
 
         for request in generation_requests:
             request_ids.append(request.py_request_id)
@@ -1531,10 +1617,16 @@ class PyTorchModelEngine(ModelEngine):
                         multimodal_params_list.append(multimodal_params)
 
             request.py_batch_idx = request.py_seq_slot
+
             # Do not add a gen_request_seq_slot for CUDA graph dummy requests
             # to prevent access errors due to None values
             if not request.is_cuda_graph_dummy:
                 gen_request_seq_slots.append(request.py_seq_slot)
+
+            temperatures.extend([get_request_temperature(request)] * (self.max_draft_len + 1))
+            top_k.extend([get_request_top_k(request)] * (self.max_draft_len + 1))
+            top_p.extend([get_request_top_p(request)] * (self.max_draft_len + 1))
+            min_p.extend([get_request_min_p(request)] * (self.max_draft_len + 1))
 
         previous_batch_len = len(previous_batch_indices)
 
@@ -1675,6 +1767,18 @@ class PyTorchModelEngine(ModelEngine):
             self.gather_ids_cuda[:len(gather_ids)].copy_(torch.tensor(
                 gather_ids, dtype=torch.int, pin_memory=True),
                                                          non_blocking=True)
+            self.temperatures_cuda[:len(temperatures)].copy_(torch.tensor(
+                temperatures, dtype=torch.float, pin_memory=True),
+                                                        non_blocking=True)
+            self.top_k_cuda[:len(top_k)].copy_(torch.tensor(
+                top_k, dtype=torch.int, pin_memory=True),
+                                                        non_blocking=True)
+            self.top_p_cuda[:len(top_p)].copy_(torch.tensor(
+                top_p, dtype=torch.float, pin_memory=True),
+                                                        non_blocking=True)
+            self.min_p_cuda[:len(min_p)].copy_(torch.tensor(
+                min_p, dtype=torch.float, pin_memory=True),
+                                                        non_blocking=True)
 
         if not attn_metadata.is_cuda_graph:
             # Assumes seq lens do not change between CUDA graph invocations. This applies
@@ -1764,6 +1868,12 @@ class PyTorchModelEngine(ModelEngine):
                                                                 total_draft_lens]
             spec_metadata.request_ids = request_ids
             spec_metadata.gather_ids = self.gather_ids_cuda[:len(gather_ids)]
+            spec_metadata.temperatures = self.temperatures_cuda[:len(temperatures)]
+            spec_metadata.top_k = self.top_k_cuda[:len(top_k)]
+            spec_metadata.top_p = self.top_p_cuda[:len(top_p)]
+            spec_metadata.min_p = self.min_p_cuda[:len(min_p)]
+            # if attn_metadata.is_cuda_graph and not torch.cuda.is_current_stream_capturing():
+                # spec_metadata.generator = torch.Generator(device='cpu').manual_seed(0)
             spec_metadata.num_generations = len(
                 scheduled_requests.generation_requests)
             spec_metadata.num_tokens = total_num_tokens

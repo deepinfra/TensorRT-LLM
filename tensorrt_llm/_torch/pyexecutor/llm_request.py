@@ -1,6 +1,8 @@
 from copy import copy, deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from itertools import pairwise
+from typing import Any, Dict, List, Optional, TypeAlias, Union
+import copy
 
 import torch
 
@@ -206,7 +208,7 @@ class LogProbStorage:
                 self.cum_log_probs[beam_idx] = cum_log_probs[beam_idx]
             else:
                 self.cum_log_probs[beam_idx] += sum(
-                    next(iter(prob.values())).logprob for prob in probs)
+                    next(iter(prob.values())).logprob for prob in probs if prob)
 
     def set_log_probs(self, log_probs: list[TokenLogprobs],
                       cum_log_probs: list[float]):
@@ -332,7 +334,7 @@ class PyResult:
 
     @property
     def cum_log_probs(self) -> list[float] | None:
-        return self._log_probs and self._log_probs.cum_log_probs
+        return self._log_probs and getattr(self._log_probs, 'cum_log_probs', None)
 
     @property
     def mm_embedding_handle(self) -> Dict[str, Any] | None:
@@ -590,11 +592,10 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         """
         result, is_final = super().create_serialized_result(
             use_fast_logits, mpi_world_rank)
-
         # Performs a deep copy of py_result._log_probs to eliminate race conditions that may occur between IPC communication and the overriding of newly generated log_probs in streaming mode.
         if self.streaming and self.py_result.log_probs and self.sampling_config.beam_width <= 1:
-            py_result = copy(self.py_result)
-            py_result._log_probs = deepcopy(self.py_result._log_probs)
+            py_result = copy.copy(self.py_result)
+            py_result._log_probs = copy.deepcopy(self.py_result._log_probs)
 
             for log_prob in self.py_result.log_probs:
                 log_prob.clear()
