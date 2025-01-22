@@ -10,6 +10,7 @@ from typing import Callable, List, Optional, Union
 import zmq
 
 from tensorrt_llm.logger import logger
+from tensorrt_llm.metrics.enums import RequestKVCacheStats
 
 from .._utils import mpi_comm, mpi_rank
 from ..bindings import executor as tllm
@@ -108,7 +109,7 @@ class GenerationExecutorWorker(BaseWorker):
                                engine_get_result_api: Callable,
                                result_singleton: IterationResult,
                                result_serializer: Callable) -> bool:
-        time.sleep(0.2)
+        time.sleep(0.01)
         async_queues = []
         queue = result_singleton.queue if self._is_llm_executor and result_singleton else it_result_queue.queue
         try:
@@ -153,10 +154,9 @@ class GenerationExecutorWorker(BaseWorker):
                 events_api = lambda: [None]
             else:
                 events_api = event_manager.get_latest_events
-            return self._iteration_result_task(self.kv_events_queues,
-                                               events_api,
-                                               self._iter_kv_events_result,
-                                               self._kv_cache_events_serializer)
+            return self._iteration_result_task(
+                self.kv_events_queues, events_api, self._iter_kv_events_result,
+                lambda x: json.dumps(KVCacheEventSerializer.serialize(x)))
         else:
             return self._iteration_result_task(
                 self.kv_events_queues, self.engine.get_latest_kv_cache_events,
