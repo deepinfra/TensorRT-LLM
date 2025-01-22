@@ -9,6 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+import threading
+import traceback
+from datetime import datetime
+
 import click
 import torch
 import yaml
@@ -29,6 +33,7 @@ from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
                                               extract_disagg_cluster_config,
                                               parse_disagg_config_file,
                                               parse_metadata_server_config_file)
+from tensorrt_llm.llmapi.llm_args import CudaGraphConfig, AttentionDpConfig
 from tensorrt_llm.llmapi.llm_utils import update_llm_args_with_extra_dict
 from tensorrt_llm.llmapi.mpi_session import find_free_ipc_addr
 from tensorrt_llm.llmapi.reasoning_parser import ReasoningParserFactory
@@ -40,6 +45,63 @@ from tensorrt_llm.tools.importlib_utils import import_custom_module_from_dir
 
 # Global variable to store the Popen object of the child process
 _child_p_global: Optional[subprocess.Popen] = None
+
+
+def print_stack_trace(signum, frame):
+    """Signal handler for SIGUSR1 that prints stack traces of all threads."""
+    current_pid = os.getpid()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"SIGUSR1 received - Stack trace dump at {datetime.now()}")
+    logger.info(f"Process PID: {current_pid}")
+    logger.info(f"{'='*80}")
+
+    # Print stack trace of current thread
+    logger.info(f"\nMain thread stack trace (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Capture the stack trace as a string and log it
+    import io
+    string_io = io.StringIO()
+    traceback.print_stack(frame, file=string_io)
+    logger.info(string_io.getvalue())
+
+    # Print stack traces of all threads
+    logger.info(f"\nAll threads stack traces (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Sort threads by name for consistent output
+    thread_frames = list(sys._current_frames().items())
+    threads_info = []
+
+    for thread_id, frame in thread_frames:
+        thread = None
+        for t in threading.enumerate():
+            if t.ident == thread_id:
+                thread = t
+                break
+
+        thread_name = thread.name if thread else f"Thread-{thread_id}"
+        thread_daemon = thread.daemon if thread else "Unknown"
+        thread_alive = thread.is_alive() if thread else "Unknown"
+
+        threads_info.append((thread_name, thread_id, thread_daemon, thread_alive, frame))
+
+    # Sort by thread name for consistent output
+    threads_info.sort(key=lambda x: x[0])
+
+    for thread_name, thread_id, thread_daemon, thread_alive, frame in threads_info:
+        logger.info(f"\nThread: {thread_name} (ID: {thread_id}, PID: {current_pid})")
+        logger.info(f"  Daemon: {thread_daemon}, Alive: {thread_alive}")
+        logger.info("-" * 20)
+
+        # Capture each thread's stack trace as a string and log it
+        string_io = io.StringIO()
+        traceback.print_stack(frame, file=string_io)
+        logger.info(string_io.getvalue())
+
+    logger.info(f"\n{'='*80}")
+    logger.info(f"End of stack trace dump for PID: {current_pid}")
+    logger.info(f"{'='*80}\n")
 
 
 def _signal_handler_cleanup_child(signum, frame):
@@ -78,9 +140,9 @@ def _signal_handler_cleanup_child(signum, frame):
     # Standard exit code for signal termination
     sys.exit(128 + signum)
 
-
 def get_llm_args(
         model: str,
+        served_model_name: str,
         tokenizer: Optional[str] = None,
         backend: str = "pytorch",
         max_beam_width: int = BuildConfig.model_fields["max_beam_width"].
@@ -114,8 +176,6 @@ def get_llm_args(
                                max_num_tokens=max_num_tokens,
                                max_beam_width=max_beam_width,
                                max_seq_len=max_seq_len)
-    kv_cache_config = KvCacheConfig(
-        free_gpu_memory_fraction=free_gpu_memory_fraction, )
 
     dynamic_batch_config = DynamicBatchConfig(
         enable_batch_size_tuning=True,
@@ -150,7 +210,6 @@ def get_llm_args(
         "max_num_tokens": max_num_tokens,
         "max_beam_width": max_beam_width,
         "max_seq_len": max_seq_len,
-        "kv_cache_config": kv_cache_config,
         "backend": backend,
         "num_postprocess_workers": num_postprocess_workers,
         "postprocess_tokenizer_dir": tokenizer or model,
@@ -159,6 +218,8 @@ def get_llm_args(
         fail_fast_on_attention_window_too_large,
         "otlp_traces_endpoint": otlp_traces_endpoint,
         "enable_chunked_prefill": enable_chunked_prefill,
+        "served_model_name": served_model_name,
+        "cuda_graph_config": CudaGraphConfig(batch_sizes=list(range(1, max_batch_size + 1))),
     }
 
     return llm_args, llm_args_extra_dict
@@ -175,20 +236,24 @@ def launch_server(
         disagg_cluster_config: Optional[DisaggClusterConfig] = None,
         multimodal_server_config: Optional[MultimodalServerConfig] = None):
 
+    # Install the SIGUSR1 signal handler for debugging
+    signal.signal(signal.SIGUSR1, print_stack_trace)
+    logger.info("SIGUSR1 signal handler installed. Send 'kill -USR1 <pid>' to get stack traces.")
+
     backend = llm_args["backend"]
     model = llm_args["model"]
+    served_model_name = llm_args.pop("served_model_name")
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.bind((host, port))
         except OSError as e:
             raise RuntimeError(f"Failed to bind socket to {host}:{port}: {e}")
-
         if backend == 'pytorch':
             llm_args.pop("build_config", None)
             llm = PyTorchLLM(**llm_args)
         elif backend == '_autodeploy':
             from tensorrt_llm._torch.auto_deploy import LLM as AutoDeployLLM
-
             # AutoDeploy does not support build_config
             llm_args.pop("build_config", None)
             llm = AutoDeployLLM(**llm_args)
@@ -203,6 +268,7 @@ def launch_server(
         server = OpenAIServer(llm=llm,
                               model=model,
                               tool_parser=tool_parser,
+                              served_model_name=served_model_name,
                               server_role=server_role,
                               metadata_server_cfg=metadata_server_cfg,
                               disagg_cluster_config=disagg_cluster_config,
@@ -257,6 +323,11 @@ class ChoiceWithAlias(click.Choice):
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served-model-name",
+              type=str,
+              default=None,
+              help="HF model name."
+              "Model name to use. Defaults to model_path.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -366,8 +437,8 @@ class ChoiceWithAlias(click.Choice):
     type=str,
     default=None,
     help=
-    "Path to a YAML file that overwrites the parameters specified by trtllm-serve. "
-    "Can be specified as either --config or --extra_llm_api_options.")
+    "JSON that overwrites the parameters specified by trtllm-serve."
+)
 @click.option(
     "--reasoning_parser",
     type=click.Choice(ReasoningParserFactory.parsers.keys()),
@@ -425,6 +496,9 @@ def serve(model: str, tokenizer: Optional[str], host: str, port: int,
           context_parallel_size: int, moe_expert_parallel_size: Optional[int],
           moe_cluster_parallel_size: Optional[int],
           gpus_per_node: Optional[int], free_gpu_memory_fraction: float,
+          # --- deepinfra specific options
+          served_model_name: Optional[str],
+          # --- deepinfra specific options end
           num_postprocess_workers: int, trust_remote_code: bool,
           revision: Optional[str], extra_llm_api_options: Optional[str],
           reasoning_parser: Optional[str], tool_parser: Optional[str],
@@ -447,8 +521,11 @@ def serve(model: str, tokenizer: Optional[str], host: str, port: int,
             logger.error(
                 f"Failed to import custom module from {custom_module_dir}: {e}")
             raise e
+    assert max_seq_len is not None, "max_seq_len must be specified"
+
     llm_args, _ = get_llm_args(
         model=model,
+        served_model_name=served_model_name,
         tokenizer=tokenizer,
         backend=backend,
         max_beam_width=max_beam_width,
@@ -473,8 +550,7 @@ def serve(model: str, tokenizer: Optional[str], host: str, port: int,
 
     llm_args_extra_dict = {}
     if extra_llm_api_options is not None:
-        with open(extra_llm_api_options, 'r') as f:
-            llm_args_extra_dict = yaml.safe_load(f)
+        llm_args_extra_dict = json.loads(extra_llm_api_options)
     llm_args = update_llm_args_with_extra_dict(llm_args, llm_args_extra_dict)
 
     metadata_server_cfg = parse_metadata_server_config_file(
