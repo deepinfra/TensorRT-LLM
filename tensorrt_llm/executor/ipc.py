@@ -141,7 +141,7 @@ class ZeroMqQueue:
                 f"but accessed from thread {current_thread_id}. "
                 f"ZMQ sockets are not thread-safe!")
 
-    def poll(self, timeout: int) -> bool:
+    def poll(self, timeout: int | None = None) -> bool:
         """
         Parameters:
             timeout (int): Timeout in seconds
@@ -149,7 +149,9 @@ class ZeroMqQueue:
         self.setup_lazily()
         self._check_thread_safety()
 
-        events = dict(self.poller.poll(timeout=timeout * 1000))
+        if timeout:
+            timeout = timeout * 1000
+        events = dict(self.poller.poll(timeout=timeout))
         if self.socket in events and events[self.socket] == zmq.POLLIN:
             return True
         else:
@@ -501,6 +503,9 @@ class FusedIpcQueue:
 
     def get(self) -> Any:
         return self.queue.get()
+
+    def poll(self) -> bool:
+        return self.queue.poll()
 
     @property
     def address(self) -> tuple[str, Optional[bytes]]:

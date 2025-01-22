@@ -1,22 +1,27 @@
 import gc
+import json
 import os
+from time import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import zmq
 
+from tensorrt_llm.executor.executor import IterationResultQueue
+from tensorrt_llm.executor.result import IterationResult
 from tensorrt_llm.logger import logger
+from tensorrt_llm.metrics.enums import RequestKVCacheStats
 
-from .._utils import mpi_comm, mpi_rank
+from .._utils import KVCacheEventSerializer, mpi_comm, mpi_rank
 from ..bindings import executor as tllm
 from ..builder import Engine
 from ..llmapi.llm_args import BaseLlmArgs
 from ..llmapi.mpi_session import set_mpi_session_cpp
 from ..llmapi.tokenizer import TokenizerBase
 from ..llmapi.tracer import VizTracer, set_global_tracer
-from ..llmapi.utils import ManagedThread, logger_debug, print_traceback_on_error
+from ..llmapi.utils import _SyncQueue, AsyncQueue, ManagedThread, logger_debug, print_traceback_on_error
 from ..sampling_params import BatchedLogitsProcessor
 from .base_worker import BaseWorker, _init_hf_modules
 from .ipc import FusedIpcQueue, IpcQueue
@@ -78,10 +83,73 @@ class GenerationExecutorWorker(RpcWorkerMixin, BaseWorker):
     def await_response_task(self) -> bool:
         return self._await_response_helper()
 
+    def _iteration_result_task(self, it_result_queue: IterationResultQueue,
+                               engine_get_result_api: Callable,
+                               result_singleton: IterationResult,
+                               result_serializer: Callable) -> bool:
+        time.sleep(0.01)
+        async_queues = []
+        queue = result_singleton.queue if self._is_llm_executor and result_singleton else it_result_queue.queue
+        try:
+            for results in engine_get_result_api():
+                res = result_serializer(results)
+                if self._is_llm_executor and result_singleton:
+                    # In this case, there's no ExecutorBindingProxy.
+                    # Worker needs to take care of putting to result queue.
+                    while queue.full():
+                        queue.get()
+                    if isinstance(queue, _SyncQueue):
+                        queue.put_nowait(res)
+                        async_queues.append(queue)
+                    else:
+                        queue.put(res)
+                else:
+                    # Send to ExecutorBindingProxy via IPC
+                    queue.put(res)
+
+            if async_queues:
+                _SyncQueue.notify_many(queue.loop, async_queues)
+        except AsyncQueue.EventLoopShutdownError:
+            # This happens in the last results loop while the generate workflow is stopped.
+            logger.debug("worker.py: EventLoopShutdownError")
+        except Exception as e:
+            logger.error(f"worker.py: Error in _iteration_result_task: {e}")
+            raise e
+
+        return True  # success
+
+    def dispatch_stats_task(self) -> bool:
+        return self._iteration_result_task(self.stats_queues, self.fetch_stats,
+                                           self._iter_stats_result,
+                                           self._stats_serializer)
+
+    def dispatch_kv_cache_events_task(self) -> bool:
+        if isinstance(self.engine, tllm.Executor):
+            # Check if the engine has a kv cache event manager
+            # If not, return an empty list for the events which will cause the thread to exit early.
+            event_manager = self.engine.get_kv_cache_event_manager()
+            if event_manager is None:
+                events_api = lambda: [None]
+            else:
+                events_api = event_manager.get_latest_events
+            return self._iteration_result_task(
+                self.kv_events_queues, events_api, self._iter_kv_events_result,
+                lambda x: json.dumps(KVCacheEventSerializer.serialize(x)))
+        else:
+            return self._iteration_result_task(
+                self.kv_events_queues, self.engine.get_latest_kv_cache_events,
+                self._iter_kv_events_result, self._kv_cache_events_serializer)
+
     def start(self):
-        # Stats and KV events are now fetched on-demand via RPC,
-        # so we only need to start the response thread
+        # create iteration result queues
+        self._create_iteration_result_queue(self.stats_queues)
+        self._create_iteration_result_queue(self.kv_events_queues)
+ 
+         # start threads
         self.start_thread(self.await_response_thread)
+        self.start_thread(self.dispatch_kv_cache_events_thread)
+        if mpi_rank() == 0:
+            self.start_thread(self.dispatch_stats_thread)
 
     def shutdown(self):
 

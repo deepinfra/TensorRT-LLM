@@ -56,6 +56,14 @@ from .sampler import (AsyncWorkerMixin, Sampler, SamplerEvent, SampleState,
                       SampleStateTensors)
 from .scheduler import (RequestScheduler, ScheduledRequests,
                         SerializableSchedulerOutput)
+from collections import defaultdict
+import array
+import json
+
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
+
+prom_metrics = defaultdict(float)
+prom_metrics_file = None
 
 # Environment variable to specify iteration ranges for profiling start/stop.
 # Format: "start1-stop1,start2-stop2,..." or single iterations "iter1,iter2,..."
@@ -65,11 +73,11 @@ PROFILE_START_STOP_ENV_VAR_NAME = "TLLM_PROFILE_START_STOP"
 # Set to a path to save detailed tracing of PyTorch operations.
 PROFILE_TRACE_ENV_VAR_NAME = "TLLM_TORCH_PROFILE_TRACE"
 
+
 # Unique tag base to avoid collisions with token/logits comms
 TERMINATION_COMM_TAG_BASE = 20000
 PP_COMM_TAG_SCHEDULE_RESULT = 21000
 PP_COMM_TAG_SAMPLE_STATE_BASE = 21001
-
 
 @functools.cache
 def _load_iteration_indexes(env_var: str):
@@ -184,6 +192,7 @@ class PyExecutor:
         self.enable_iter_perf_stats = self.llm_args.enable_iter_perf_stats
         self.enable_iter_req_stats = self.llm_args.enable_iter_req_stats
         self.stream_interval = self.llm_args.stream_interval
+        self.stream_emit_interval_ms = self.llm_args.stream_emit_interval_ms
         self.attention_dp_enable_balance = (
             self.llm_args.attention_dp_config is not None
             and self.llm_args.attention_dp_config.enable_balance)
@@ -591,6 +600,7 @@ class PyExecutor:
                                 f"trace saved to {torch_trace_path}")
                 torch.cuda.cudart().cudaProfilerStop()
                 enabled = False
+            last_start_time = start_time
 
             if start_time is not None and self.print_log and self.dist.rank == 0:
                 end_time = time.time()
@@ -644,6 +654,33 @@ class PyExecutor:
                 if start_event_2 is None:
                     start_event_2 = torch.cuda.Event(enable_timing=True)
                 start_event_2.record()
+
+            if last_start_time is not None and self.dist.rank == 0:
+                iter_states = self.model_engine.iter_states
+                total_running = iter_states['num_ctx_requests'] + iter_states['num_generation_tokens'] / (1 + self.model_engine.max_draft_len)
+                prom_metrics["num_requests_running"] = total_running
+                prom_metrics["num_requests_swapped"] = total_running - len(self.active_requests)
+                prom_metrics["iteration_tokens_total_sum"] += iter_states['num_ctx_tokens'] + iter_states['num_generation_tokens']
+                prom_metrics["iteration_tokens_total_count"] += 1
+                prom_metrics["time_per_output_token_seconds_sum"] += (start_time - last_start_time)
+                prom_metrics["time_per_output_token_seconds_count"] += 1
+                prom_metrics["prompt_tokens_total"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_sum"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_count"] += 1
+                prom_metrics["generation_tokens_total"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_sum"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_count"] += 1
+                global prom_metrics_file
+                try:
+                    if prom_metrics_file is None:
+                        prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                                    os.O_RDWR|os.O_CREAT)
+                    os.pwrite(prom_metrics_file, (
+                        json.dumps(list(prom_metrics.keys())).encode('UTF-8') +
+                        b'\0' +
+                        array.array('d',prom_metrics.values()).tobytes()), 0)
+                except:
+                    traceback.print_exc()
 
         try:
             yield profile_step
@@ -2591,8 +2628,18 @@ class PyExecutor:
                 request.update_perf_metrics(self.iter_counter)
 
             request_done = False
-            if request.py_decoding_iter == 1 or request.is_finished or \
-                    request.py_decoding_iter % self.stream_interval == 0:
+            now = get_steady_clock_now_in_seconds()
+            should_emit = (
+                request.py_decoding_iter == 1
+                or request.is_finished
+                or request.py_decoding_iter % self.stream_interval == 0
+                or (self.stream_emit_interval_ms > 0
+                    and request.py_last_stream_emit_time
+                    and (now - request.py_last_stream_emit_time) * 1000 >
+                    self.stream_emit_interval_ms)
+            )
+            if should_emit:
+                request.py_last_stream_emit_time = now
                 response = request.create_response(False, self.dist.rank)
                 if response:
                     request_done = request.is_finished

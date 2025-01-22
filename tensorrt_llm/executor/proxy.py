@@ -207,8 +207,72 @@ class GenerationExecutorProxy(GenerationExecutor):
 
         return True  # success
 
-    # NOTE: _iteration_result_task, dispatch_stats_task, and dispatch_kv_cache_events_task
-    # have been removed as stats and kv_events are now fetched via RPC directly.
+    def _iteration_result_task(self,
+                               queue: Union[FusedIpcQueue, IntraProcessQueue],
+                               result_singleton: IterationResult,
+                               urgent: bool = False) -> bool:
+        # if not urgent:
+            # time.sleep(0.2)
+
+        try:
+            queue.poll()
+            data = queue.get()
+        except:
+            logger.debug(
+                "proxy.py: Error in _iteration_result_task: queue.get()")
+            return False
+
+        if data is None:
+            logger.debug("proxy.py: _iteration_result_task: data is None")
+            return False  # shutdown the thread
+
+        data = data if isinstance(data, list) else [data]
+        queue = result_singleton.queue
+        async_queues = []
+
+        while queue.full():
+            queue.get()
+
+        try:
+            for d in data:
+                if d is None:
+                    logger.debug("proxy.py: _iteration_result_task: d is None")
+                    return False
+
+                if isinstance(queue, _SyncQueue):
+                    queue.put_nowait(d)
+                    async_queues.append(queue)
+                else:
+                    queue.put(d)
+
+            if async_queues:
+                _SyncQueue.notify_many(queue.loop, async_queues)
+
+        except AsyncQueue.EventLoopShutdownError:
+            # This happens in the last loop while the generate workflow is
+            # stopped, or when get_stats() or aget_stats() are not called by users
+            # and therefore event loop can already be closed.
+            logger.debug("proxy.py: EventLoopShutdownError")
+        except Exception as e:
+            logger.debug(f"proxy.py: Error in _iteration_result_task: {e}")
+            raise e
+
+        return True  # success
+
+    def dispatch_stats_task(self) -> bool:
+        if not self._iter_stats_result:
+            # This can happen temporarily because the WAR in tensorrt_llm/bench/benchmark/throughput.py
+            # is not synchronized with self.dispatch_stats_thread.
+            logger.debug(
+                f"Skipping stats dispatch while self._iter_stats_result=None")
+            return True  # Intended behavior, not an error
+        return self._iteration_result_task(self.mp_stats_queue,
+                                           self._iter_stats_result)
+
+    def dispatch_kv_cache_events_task(self) -> bool:
+        return self._iteration_result_task(self.kv_cache_events_queue,
+                                           self._iter_kv_events_result,
+                                           urgent=True)
 
     def _start_dispatch_threads(self):
         if self.dispatch_result_thread is None:

@@ -1,6 +1,7 @@
 from copy import copy, deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from itertools import pairwise
+from typing import Any, Dict, List, Optional, TypeAlias, Union
 
 import torch
 
@@ -209,7 +210,7 @@ class LogProbStorage:
                 self.cum_log_probs[beam_idx] = cum_log_probs[beam_idx]
             else:
                 self.cum_log_probs[beam_idx] += sum(
-                    next(iter(prob.values())).logprob for prob in probs)
+                    next(iter(prob.values())).logprob for prob in probs if prob)
 
     def set_log_probs(self, log_probs: list[TokenLogprobs],
                       cum_log_probs: list[float]):
@@ -358,7 +359,7 @@ class PyResult:
 
     @property
     def cum_log_probs(self) -> list[float] | None:
-        return self._log_probs and self._log_probs.cum_log_probs
+        return self._log_probs and getattr(self._log_probs, 'cum_log_probs', None)
 
     @property
     def mm_embedding_handle(self) -> Dict[str, Any] | None:
@@ -529,6 +530,7 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         self.py_num_accepted_draft_tokens_indices = []
         self.py_rewind_draft_token_separate_adjustment = 0
         self.py_decoding_iter = 0
+        self.py_last_stream_emit_time = None
         self.is_attention_dp_dummy = False
         self.is_cuda_graph_dummy = False
         self.py_lora_task_layer_module_configs: list[
