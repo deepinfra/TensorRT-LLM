@@ -48,8 +48,8 @@ def _logit_bias_to_embedding_bias(logit_bias: Optional[Dict[str, float]],
 
 
 class OpenAIBaseModel(BaseModel):
-    # OpenAI API does not allow extra fields & allow to initialize by both alias and field name
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # OpenAI & allow to initialize by both alias and field name
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class StreamOptions(OpenAIBaseModel):
@@ -226,7 +226,7 @@ class CompletionRequest(OpenAIBaseModel):
     include_stop_str_in_output: bool = False
     ignore_eos: bool = False
     min_tokens: int = 0
-    skip_special_tokens: bool = True
+    skip_special_tokens: bool = False
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     return_context_logits: bool = False
@@ -262,14 +262,14 @@ class CompletionRequest(OpenAIBaseModel):
             max_tokens=self.max_tokens,
             n=self.n,
             presence_penalty=self.presence_penalty,
-            seed=self.seed,
+            seed=to_unsigned(self.seed, 64) if self.seed is not None else None,
             stop=self.stop,
             temperature=self.temperature,
             top_p=self.top_p,
 
             # completion-sampling-params
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k), # web users sometimes pass in -1
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
             repetition_penalty=self.repetition_penalty,
@@ -295,16 +295,10 @@ class CompletionRequest(OpenAIBaseModel):
             add_special_tokens=self.add_special_tokens,
 
             # TODO: migrate to use logprobs and prompt_logprobs
-            _return_log_probs=bool(self.logprobs),
+            _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_logprobs(cls, data):
-        if data.get("logprobs"):
-            raise ValueError("logprobs is not supported")
-        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -495,7 +489,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     include_stop_str_in_output: bool = False
     ignore_eos: bool = False
     min_tokens: int = 0
-    skip_special_tokens: bool = True
+    skip_special_tokens: bool = False
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     lora_request: Optional[LoRARequest] = None
@@ -560,14 +554,14 @@ class ChatCompletionRequest(OpenAIBaseModel):
             max_tokens=self.max_completion_tokens,
             n=self.n,
             presence_penalty=self.presence_penalty,
-            seed=self.seed,
+            seed=to_unsigned(self.seed, 64) if self.seed is not None else None,
             stop=self.stop,
             temperature=self.temperature,
 
             # chat-completion-sampling-params
             best_of=self.best_of,
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k), # web users sometimes pass in -1
             top_p=self.top_p,
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
@@ -592,7 +586,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             add_special_tokens=self.add_special_tokens,
 
             # TODO: migrate to use logprobs and prompt_logprobs
-            _return_log_probs=bool(self.logprobs),
+            _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
 
@@ -630,6 +625,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             raise ValueError("suffix is not supported")
         return data
 
+def to_unsigned(x: int, bits: int) -> int:
+    return x & (2 ** bits - 1)
 
 def encode_opaque_state(opaque_state: Optional[bytes]) -> Optional[str]:
     if opaque_state is None:
