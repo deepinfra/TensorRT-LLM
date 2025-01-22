@@ -58,20 +58,23 @@ def _logit_bias_to_embedding_bias(logit_bias: Optional[Dict[str, float]],
 
 
 class OpenAIBaseModel(BaseModel):
-    # OpenAI API does not allow extra fields & allow to initialize by both alias and field name
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # OpenAI & allow to initialize by both alias and field name
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class StreamOptions(OpenAIBaseModel):
     include_usage: Optional[bool] = True
     continuous_usage_stats: Optional[bool] = True
 
+class PromptTokensDetails(BaseModel):
+    cached_tokens: int | None = Field(default=None, description="number of input tokens read from cache")
+    cache_write_tokens: int | None = Field(default=None, description="number of input tokens used to create cache entry")
 
 class UsageInfo(OpenAIBaseModel):
     prompt_tokens: int = 0
     total_tokens: int = 0
     completion_tokens: Optional[int] = 0
-
+    prompt_tokens_details: PromptTokensDetails | None = Field(default=None, description="breakdown of prompt tokens usage")
 
 class ModelCard(OpenAIBaseModel):
     id: str
@@ -140,7 +143,6 @@ class CompletionResponseChoice(OpenAIBaseModel):
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
 
-
 class CompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{str(uuid.uuid4().hex)}")
     object: str = "text_completion"
@@ -151,7 +153,6 @@ class CompletionResponse(OpenAIBaseModel):
     # Add prompt_tokens_ids to the response to remove the tokenization
     # in the generation server in disaggreated serving
     prompt_token_ids: Optional[Union[List[List[int]], List[int]]] = None
-
 
 class CompletionResponseStreamChoice(OpenAIBaseModel):
     index: int
@@ -168,7 +169,6 @@ class CompletionResponseStreamChoice(OpenAIBaseModel):
     )
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
 
-
 class CompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{str(uuid.uuid4().hex)}")
     object: str = "text_completion"
@@ -176,7 +176,6 @@ class CompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
-
 
 def _response_format_to_guided_decoding_params(
     response_format: Optional[ResponseFormat]
@@ -206,6 +205,7 @@ class CompletionRequest(OpenAIBaseModel):
     # https://platform.openai.com/docs/api-reference/completions/create
     model: str
     prompt: Union[List[int], List[List[int]], str, List[str]]
+    prompt_token_ids: Optional[List[int]] = None
     best_of: Optional[int] = None
     echo: Optional[bool] = False
     frequency_penalty: Optional[float] = 0.0
@@ -236,7 +236,7 @@ class CompletionRequest(OpenAIBaseModel):
     include_stop_str_in_output: bool = False
     ignore_eos: bool = False
     min_tokens: int = 0
-    skip_special_tokens: bool = True
+    skip_special_tokens: bool = False
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     return_context_logits: bool = False
@@ -272,14 +272,14 @@ class CompletionRequest(OpenAIBaseModel):
             max_tokens=self.max_tokens,
             n=self.n,
             presence_penalty=self.presence_penalty,
-            seed=self.seed,
+            seed=to_unsigned(self.seed, 64) if self.seed is not None else None,
             stop=self.stop,
             temperature=self.temperature,
             top_p=self.top_p,
 
             # completion-sampling-params
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k), # web users sometimes pass in -1
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
             repetition_penalty=self.repetition_penalty,
@@ -306,15 +306,9 @@ class CompletionRequest(OpenAIBaseModel):
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=bool(self.logprobs),
+            logprobs=self.logprobs,
         )
         return sampling_params
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_logprobs(cls, data):
-        if data.get("logprobs"):
-            raise ValueError("logprobs is not supported")
-        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -428,7 +422,6 @@ class ChatCompletionResponseChoice(OpenAIBaseModel):
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
 
-
 class ChatCompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")
     object: Literal["chat.completion"] = "chat.completion"
@@ -439,7 +432,6 @@ class ChatCompletionResponse(OpenAIBaseModel):
     # Add prompt_tokens_ids to the response to remove the tokenization
     # in the generation server in disaggreated serving
     prompt_token_ids: Optional[List[int]] = None
-
 
 class DeltaMessage(OpenAIBaseModel):
     role: Optional[str] = None
@@ -457,7 +449,6 @@ class ChatCompletionResponseStreamChoice(OpenAIBaseModel):
     finish_reason: Optional[str] = None
     stop_reason: Optional[Union[int, str]] = None
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
-
 
 class ChatCompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")
@@ -537,7 +528,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     include_stop_str_in_output: bool = False
     ignore_eos: bool = False
     min_tokens: int = 0
-    skip_special_tokens: bool = True
+    skip_special_tokens: bool = False
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     lora_request: Optional[LoRARequest] = None
@@ -609,14 +600,14 @@ class ChatCompletionRequest(OpenAIBaseModel):
             max_tokens=self.max_completion_tokens,
             n=self.n,
             presence_penalty=self.presence_penalty,
-            seed=self.seed,
+            seed=to_unsigned(self.seed, 64) if self.seed is not None else None,
             stop=self.stop,
             temperature=self.temperature,
 
             # chat-completion-sampling-params
             best_of=self.best_of,
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k), # web users sometimes pass in -1
             top_p=self.top_p,
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
@@ -642,6 +633,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=bool(self.logprobs),
+            logprobs=self.logprobs,
         )
         return sampling_params
 
@@ -689,6 +681,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
                 )
         return v
 
+def to_unsigned(x: int, bits: int) -> int:
+    return x & (2 ** bits - 1)
 
 ResponseInputOutputItem: TypeAlias = Union[ResponseInputItemParam,
                                            ResponseReasoningItem,

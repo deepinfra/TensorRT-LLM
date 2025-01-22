@@ -245,7 +245,7 @@ class SamplingParams:
     return_generation_logits: bool = False
     exclude_input_from_output: bool = True
     return_encoder_output: bool = False
-    return_perf_metrics: bool = False
+    return_perf_metrics: bool = True
     additional_model_outputs: Optional[List[AdditionalModelOutput]] = None
 
     # Used in logprobs calculation in TRT flow to drop logits early if user did not explicitly request them.
