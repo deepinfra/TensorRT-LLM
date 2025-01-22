@@ -609,7 +609,6 @@ class AwaitResponseHelper:
 
     def __call__(self, timeout: Optional[float] = None) -> bool:
         ''' This method should be called by a ManagedThread. '''
-        timeout = timeout or 0.1
         responses = self.worker.engine.await_responses(
             timeout=datetime.timedelta(seconds=timeout))
         # filter since The _engine_response_callback may return None
@@ -846,7 +845,9 @@ def _get_metrics_dict(
                 req_perf_metrics.timing_metrics.first_scheduled_time.
                 total_seconds(),
                 RequestEventTiming.LAST_TOKEN_TIME:
-                req_perf_metrics.timing_metrics.last_token_time.total_seconds()
+                req_perf_metrics.timing_metrics.last_token_time.total_seconds(),
+                RequestKVCacheStats.NUM_REUSED_BLOCKS:
+                req_perf_metrics.kv_cache_metrics.num_reused_blocks
             }
     return metrics_dict
 

@@ -105,14 +105,15 @@ class ZeroMqQueue:
         self.poller = zmq.Poller()
         self.poller.register(self.socket, zmq.POLLIN)
 
-    def poll(self, timeout: int) -> bool:
+    def poll(self, timeout: int | None = None) -> bool:
         """
         Parameters:
             timeout (int): Timeout in seconds
         """
         self.setup_lazily()
-
-        events = dict(self.poller.poll(timeout=timeout * 1000))
+        if timeout:
+            timeout = timeout * 1000
+        events = dict(self.poller.poll(timeout=timeout))
         if self.socket in events and events[self.socket] == zmq.POLLIN:
             return True
         else:
@@ -370,6 +371,9 @@ class FusedIpcQueue:
 
     def get(self) -> Any:
         return self.queue.get()
+
+    def poll(self) -> bool:
+        return self.queue.poll()
 
     @property
     def address(self) -> tuple[str, Optional[bytes]]:
