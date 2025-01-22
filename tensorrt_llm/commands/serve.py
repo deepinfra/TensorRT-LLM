@@ -1,9 +1,14 @@
 import asyncio
+import json
 import os
 import signal  # Added import
 import subprocess  # nosec B404
 import sys
-from typing import Any, Optional
+
+import threading
+import traceback
+from datetime import datetime
+from typing import Any, List, Optional
 
 import click
 import torch
@@ -19,8 +24,9 @@ from tensorrt_llm._utils import mpi_rank
 from tensorrt_llm.executor.utils import LlmLauncherEnvs
 from tensorrt_llm.llmapi import (BuildConfig, CapacitySchedulerPolicy,
                                  DynamicBatchConfig, KvCacheConfig,
-                                 SchedulerConfig)
-from tensorrt_llm.llmapi.disagg_utils import (MetadataServerConfig, ServerRole,
+                                 SchedulerConfig, CudaGraphConfig)
+from tensorrt_llm.llmapi.disagg_utils import (CtxGenServerConfig,
+                                              MetadataServerConfig, ServerRole,
                                               parse_disagg_config_file,
                                               parse_metadata_server_config_file)
 from tensorrt_llm.llmapi.llm_utils import update_llm_args_with_extra_dict
@@ -31,6 +37,63 @@ from tensorrt_llm.serve import OpenAIDisaggServer, OpenAIServer
 
 # Global variable to store the Popen object of the child process
 _child_p_global: Optional[subprocess.Popen] = None
+
+
+def print_stack_trace(signum, frame):
+    """Signal handler for SIGUSR1 that prints stack traces of all threads."""
+    current_pid = os.getpid()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"SIGUSR1 received - Stack trace dump at {datetime.now()}")
+    logger.info(f"Process PID: {current_pid}")
+    logger.info(f"{'='*80}")
+
+    # Print stack trace of current thread
+    logger.info(f"\nMain thread stack trace (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Capture the stack trace as a string and log it
+    import io
+    string_io = io.StringIO()
+    traceback.print_stack(frame, file=string_io)
+    logger.info(string_io.getvalue())
+
+    # Print stack traces of all threads
+    logger.info(f"\nAll threads stack traces (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Sort threads by name for consistent output
+    thread_frames = list(sys._current_frames().items())
+    threads_info = []
+
+    for thread_id, frame in thread_frames:
+        thread = None
+        for t in threading.enumerate():
+            if t.ident == thread_id:
+                thread = t
+                break
+
+        thread_name = thread.name if thread else f"Thread-{thread_id}"
+        thread_daemon = thread.daemon if thread else "Unknown"
+        thread_alive = thread.is_alive() if thread else "Unknown"
+
+        threads_info.append((thread_name, thread_id, thread_daemon, thread_alive, frame))
+
+    # Sort by thread name for consistent output
+    threads_info.sort(key=lambda x: x[0])
+
+    for thread_name, thread_id, thread_daemon, thread_alive, frame in threads_info:
+        logger.info(f"\nThread: {thread_name} (ID: {thread_id}, PID: {current_pid})")
+        logger.info(f"  Daemon: {thread_daemon}, Alive: {thread_alive}")
+        logger.info("-" * 20)
+
+        # Capture each thread's stack trace as a string and log it
+        string_io = io.StringIO()
+        traceback.print_stack(frame, file=string_io)
+        logger.info(string_io.getvalue())
+
+    logger.info(f"\n{'='*80}")
+    logger.info(f"End of stack trace dump for PID: {current_pid}")
+    logger.info(f"{'='*80}\n")
 
 
 def _signal_handler_cleanup_child(signum, frame):
@@ -71,6 +134,7 @@ def _signal_handler_cleanup_child(signum, frame):
 
 
 def get_llm_args(model: str,
+                 served_model_name: str,
                  tokenizer: Optional[str] = None,
                  backend: str = "pytorch",
                  max_beam_width: int = BuildConfig.max_beam_width,
@@ -82,6 +146,11 @@ def get_llm_args(model: str,
                  moe_expert_parallel_size: Optional[int] = None,
                  gpus_per_node: Optional[int] = None,
                  free_gpu_memory_fraction: Optional[float] = None,
+                 event_buffer_max_size: int = 0,
+                 host_cache_size: int = 0,
+                 enable_chunked_prefill: bool = True,
+                 guided_decoding_backend: Optional[str] = None,
+                 disable_overlap_scheduler: bool = True,
                  num_postprocess_workers: int = 0,
                  trust_remote_code: bool = False,
                  reasoning_parser: Optional[str] = None,
@@ -97,7 +166,10 @@ def get_llm_args(model: str,
                                max_beam_width=max_beam_width,
                                max_seq_len=max_seq_len)
     kv_cache_config = KvCacheConfig(
-        free_gpu_memory_fraction=free_gpu_memory_fraction, )
+        free_gpu_memory_fraction=free_gpu_memory_fraction,
+        host_cache_size=host_cache_size,
+        event_buffer_max_size=event_buffer_max_size,
+    )
 
     dynamic_batch_config = DynamicBatchConfig(
         enable_batch_size_tuning=True,
@@ -111,6 +183,8 @@ def get_llm_args(model: str,
     llm_args = {
         "model":
         model,
+        "served_model_name":
+        served_model_name,
         "scheduler_config":
         scheduler_config,
         "tokenizer":
@@ -137,14 +211,24 @@ def get_llm_args(model: str,
         max_seq_len,
         "kv_cache_config":
         kv_cache_config,
+        "enable_chunked_prefill":
+        enable_chunked_prefill,
         "backend":
         backend,
         "num_postprocess_workers":
         num_postprocess_workers,
         "postprocess_tokenizer_dir":
         tokenizer or model,
+        "sampler_type":
+        "TRTLLMSampler",
         "reasoning_parser":
         reasoning_parser,
+        "cuda_graph_config":
+        CudaGraphConfig(batch_sizes=list(range(1, max_batch_size + 1))),
+        "guided_decoding_backend":
+        guided_decoding_backend,
+        "disable_overlap_scheduler":
+        disable_overlap_scheduler,
         "fail_fast_on_attention_window_too_large":
         fail_fast_on_attention_window_too_large,
     }
@@ -158,8 +242,15 @@ def launch_server(host: str,
                   metadata_server_cfg: Optional[MetadataServerConfig] = None,
                   server_role: Optional[ServerRole] = None):
 
+    # Install the SIGUSR1 signal handler for debugging
+    signal.signal(signal.SIGUSR1, print_stack_trace)
+    logger.info("SIGUSR1 signal handler installed. Send 'kill -USR1 <pid>' to get stack traces.")
+
     backend = llm_args["backend"]
     model = llm_args["model"]
+
+    served_model_name = llm_args.pop("served_model_name")
+
     if backend == 'pytorch':
         llm = PyTorchLLM(**llm_args)
     elif backend == '_autodeploy':
@@ -174,6 +265,7 @@ def launch_server(host: str,
 
     server = OpenAIServer(llm=llm,
                           model=model,
+                          served_model_name=served_model_name,
                           server_role=server_role,
                           metadata_server_cfg=metadata_server_cfg)
 
@@ -198,6 +290,11 @@ def launch_mm_encoder_server(
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served-model-name",
+              type=str,
+              default=None,
+              help="HF model name."
+              "Model name to use. Defaults to model_path.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -263,6 +360,27 @@ def launch_mm_encoder_server(
               default=0.9,
               help="Free GPU memory fraction reserved for KV Cache, "
               "after allocating model weights and buffers.")
+@click.option("--event_buffer_max_size",
+              type=int,
+              default=1000000,
+              help="Maximum size of the event buffer. If set to 0, the event buffer will not be used.")
+@click.option("--host_cache_size",
+                type=int,
+                default=0,
+                help="Size of the host cache in bytes. "
+                "Set to 0 to disable host cache. ")
+@click.option("--enable_chunked_prefill",
+              type=bool,
+              default=True,
+              help="Flag to control chunked prefill. ")
+@click.option("--guided_decoding_backend",
+              type=str,
+              default=None,
+              help="Backend for guided decoding.")
+@click.option("--disable_overlap_scheduler",
+              type=bool,
+              default=False,
+              help="Disable overlap scheduler. ")
 @click.option(
     "--num_postprocess_workers",
     type=int,
@@ -278,7 +396,7 @@ def launch_mm_encoder_server(
     type=str,
     default=None,
     help=
-    "Path to a YAML file that overwrites the parameters specified by trtllm-serve."
+    "JSON that overwrites the parameters specified by trtllm-serve."
 )
 @click.option(
     "--reasoning_parser",
@@ -303,24 +421,35 @@ def launch_mm_encoder_server(
     help=
     "Exit with runtime error when attention window is too large to fit even a single sequence in the KV cache."
 )
-def serve(
-        model: str, tokenizer: Optional[str], host: str, port: int,
-        log_level: str, backend: str, max_beam_width: int, max_batch_size: int,
-        max_num_tokens: int, max_seq_len: int, tp_size: int, pp_size: int,
-        ep_size: Optional[int], cluster_size: Optional[int],
-        gpus_per_node: Optional[int], kv_cache_free_gpu_memory_fraction: float,
-        num_postprocess_workers: int, trust_remote_code: bool,
-        extra_llm_api_options: Optional[str], reasoning_parser: Optional[str],
-        metadata_server_config_file: Optional[str], server_role: Optional[str],
-        fail_fast_on_attention_window_too_large: bool):
+def serve(model: str,
+          tokenizer: Optional[str], host: str, port: int,
+          log_level: str, backend: str, max_beam_width: int, max_batch_size: int,
+          max_num_tokens: int, max_seq_len: int, tp_size: int, pp_size: int,
+          ep_size: Optional[int], cluster_size: Optional[int],
+          gpus_per_node: Optional[int], kv_cache_free_gpu_memory_fraction: float,
+          # --- deepinfra specific options
+          event_buffer_max_size: int,
+          served_model_name: Optional[str],
+          host_cache_size: int,
+          enable_chunked_prefill: bool,
+          guided_decoding_backend: Optional[str],
+          disable_overlap_scheduler: bool,
+          # --- deepinfra specific options end
+          num_postprocess_workers: int, trust_remote_code: bool,
+          extra_llm_api_options: Optional[str], reasoning_parser: Optional[str],
+          metadata_server_config_file: Optional[str], server_role: Optional[str],
+          fail_fast_on_attention_window_too_large: bool):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
     """
     logger.set_level(log_level)
 
+    assert max_seq_len is not None, "max_seq_len must be specified"
+
     llm_args, _ = get_llm_args(
         model=model,
+        served_model_name=served_model_name,
         tokenizer=tokenizer,
         backend=backend,
         max_beam_width=max_beam_width,
@@ -333,16 +462,19 @@ def serve(
         moe_cluster_parallel_size=cluster_size,
         gpus_per_node=gpus_per_node,
         free_gpu_memory_fraction=kv_cache_free_gpu_memory_fraction,
+        event_buffer_max_size=event_buffer_max_size,
+        host_cache_size=host_cache_size,
+        enable_chunked_prefill=enable_chunked_prefill,
+        guided_decoding_backend=guided_decoding_backend,
+        disable_overlap_scheduler=disable_overlap_scheduler,
         num_postprocess_workers=num_postprocess_workers,
         trust_remote_code=trust_remote_code,
         reasoning_parser=reasoning_parser,
-        fail_fast_on_attention_window_too_large=
-        fail_fast_on_attention_window_too_large)
+        fail_fast_on_attention_window_too_large=fail_fast_on_attention_window_too_large)
 
     llm_args_extra_dict = {}
     if extra_llm_api_options is not None:
-        with open(extra_llm_api_options, 'r') as f:
-            llm_args_extra_dict = yaml.safe_load(f)
+        llm_args_extra_dict = json.loads(extra_llm_api_options)
     llm_args = update_llm_args_with_extra_dict(llm_args, llm_args_extra_dict)
 
     metadata_server_cfg = parse_metadata_server_config_file(
