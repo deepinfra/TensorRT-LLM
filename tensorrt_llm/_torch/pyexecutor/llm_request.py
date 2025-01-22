@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
+import copy
 
 import torch
 
@@ -382,10 +383,16 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
             mpi_world_rank=0) -> tensorrt_llm.bindings.executor.Response | None:
         result, is_final = super().create_serialized_result(
             use_fast_logits, mpi_world_rank)
+        py_result = None
+        if result:
+            py_result = copy.copy(self.py_result)
+            if self.py_result._log_probs:
+                self.py_result._log_probs = LogProbStorage()
+
         return LlmResponse(
             request_id=self.py_request_id
             if self.is_child else self.parent_request_id,
-            result=LlmResult(result, self.py_result, is_final),
+            result=LlmResult(result, py_result, is_final),
             client_id=self.py_client_id) if len(result) > 0 else None
 
     @property
