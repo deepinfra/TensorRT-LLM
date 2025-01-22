@@ -1,6 +1,8 @@
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from itertools import pairwise
+from typing import Any, Dict, List, Optional, TypeAlias, Union
+import copy
 
 import torch
 
@@ -308,11 +310,11 @@ class PyResult:
 
     @property
     def log_probs(self) -> list[TokenLogprobs] | None:
-        return self._log_probs and self._log_probs.log_probs
+        return self._log_probs and getattr(self._log_probs, 'log_probs', None)
 
     @property
     def cum_log_probs(self) -> list[float] | None:
-        return self._log_probs and self._log_probs.cum_log_probs
+        return self._log_probs and getattr(self._log_probs, 'cum_log_probs', None)
 
     @property
     def mm_embedding_handle(self) -> Dict[str, Any] | None:
@@ -521,10 +523,16 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         """
         result, is_final = super().create_serialized_result(
             use_fast_logits, mpi_world_rank)
+        py_result = None
+        if result:
+            py_result = copy.copy(self.py_result)
+            if self.py_result._log_probs:
+                self.py_result._log_probs = LogProbStorage()
+
         return LlmResponse(
             request_id=self.py_request_id
             if self.is_child else self.parent_request_id,
-            result=LlmResult(result, self.py_result, is_final),
+            result=LlmResult(result, py_result, is_final),
             client_id=self.py_client_id) if len(result) > 0 else None
 
     @property

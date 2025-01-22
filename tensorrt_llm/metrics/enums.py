@@ -13,3 +13,6 @@ class RequestEventTiming(Enum):
     FIRST_TOKEN_TIME = "first_token_time"  # nosec: B105
     FIRST_SCHEDULED_TIME = "first_scheduled_time"
     LAST_TOKEN_TIME = "last_token_time"  # nosec: B105
+
+class RequestKVCacheStats(Enum):
+    NUM_REUSED_BLOCKS = "num_reused_blocks"
