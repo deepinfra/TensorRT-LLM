@@ -1,3 +1,5 @@
+import datetime
+import enum
 import gc
 import json
 import os
@@ -11,28 +13,29 @@ from typing import Callable, List, Optional, Tuple, Union
 import zmq
 
 from tensorrt_llm.logger import logger
+from tensorrt_llm.metrics.enums import RequestEventTiming, RequestKVCacheStats
 
-from .._utils import KVCacheEventSerializer, mpi_comm, mpi_rank
+from .._utils import KVCacheEventSerializer, mpi_comm, mpi_rank, nvtx_range_debug
 from ..bindings import executor as tllm
 from ..builder import Engine
 from ..llmapi.llm_args import BaseLlmArgs, KvCacheConnectorConfig
 from ..llmapi.mpi_session import set_mpi_session_cpp
 from ..llmapi.tokenizer import TokenizerBase
-from ..llmapi.tracer import VizTracer, set_global_tracer
+from ..llmapi.tracer import VizTracer, global_tracer, set_global_tracer
 from ..llmapi.utils import (AsyncQueue, ManagedThread, _SyncQueue,
                             clear_sched_affinity, print_colored_debug,
                             print_traceback_on_error)
 from ..lora_helper import LoraConfig
-from ..sampling_params import BatchedLogitsProcessor
+from ..sampling_params import BatchedLogitsProcessor, SamplingParams
 from .base_worker import BaseWorker
 from .executor import IterationResultQueue
 from .ipc import FusedIpcQueue, IpcQueue
-from .postproc_worker import (PostprocWorker, PostprocWorkerConfig,
+from .postproc_worker import (PostprocParams, PostprocWorker, PostprocWorkerConfig,
                               postproc_worker_main)
 from .request import CancellingRequest, GenerationRequest
-from .result import IterationResult
+from .result import IterationResult, LogProbsResult, ResponseWrapper, compute_logprobs
 from .utils import (ErrorResponse, RequestError, WorkerCommIpcAddrs,
-                    has_event_loop)
+                    has_event_loop, is_llm_response)
 
 __all__ = [
     "GenerationExecutorWorker",
@@ -112,7 +115,7 @@ class GenerationExecutorWorker(BaseWorker):
                                engine_get_result_api: Callable,
                                result_singleton: IterationResult,
                                result_serializer: Callable) -> bool:
-        time.sleep(0.2)
+        time.sleep(0.01)
         async_queues = []
         queue = result_singleton.queue if self._is_llm_executor and result_singleton else it_result_queue.queue
         try:
@@ -173,6 +176,7 @@ class GenerationExecutorWorker(BaseWorker):
                 events_api = lambda: [None]
             else:
                 events_api = event_manager.get_latest_events
+
             return self._iteration_result_task(
                 self.kv_events_queues, events_api, self._iter_kv_events_result,
                 lambda x: json.dumps(KVCacheEventSerializer.serialize(x)))
@@ -465,3 +469,266 @@ def worker_main(
             logger.error(traceback.format_exc())
             # This will be captured by mpi4py and handled by future.done_callback
             raise e
+
+class AwaitResponseHelper:
+    ''' Multiple-implementations for await_response for performance. '''
+
+    class HandlerKind(enum.Enum):
+        unknown = 0
+        single_process_worker = 1
+        ipc_batched = 2
+
+    def __init__(self, worker: "GenerationExecutorWorker"):
+        # TODO: make worker weakref
+        self.worker = worker
+        self.handler_kind: AwaitResponseHelper.HandlerKind = AwaitResponseHelper.HandlerKind.unknown
+        self.enable_postprocprocess_parallel = self.worker.enable_postprocess_parallel
+        # The error responses when submit request failed will be put here
+        self.temp_error_responses = Queue()
+
+    def responses_handler(self, responses: List[tllm.Response]):
+        HandlerKind = AwaitResponseHelper.HandlerKind
+
+        if self.handler_kind is HandlerKind.unknown:
+            if not (self.worker.result_queue is not None
+                    or self.worker.postproc_queues is not None):
+                print_colored_debug(
+                    f"creating await_response helper for Worker\n",
+                    color="yellow")
+                # When ExecutorBindingWorker is used in the main process
+                # aka the single process mode
+                self.handler_kind = HandlerKind.single_process_worker
+            elif self.worker.result_queue is not None or self.worker.postproc_queues is not None:
+                # The ExecutorBindingProxy is used
+                print_colored_debug(f"creating await_response helper for IPC\n",
+                                    color="yellow")
+                self.handler_kind = HandlerKind.ipc_batched
+            else:
+                raise NotImplementedError
+
+        match self.handler_kind:
+            case HandlerKind.single_process_worker:
+                return self.handle_for_worker(responses)
+            case HandlerKind.ipc_batched:
+                return self.handle_for_ipc_batched(responses)
+            case _:
+                raise NotImplementedError
+
+    def __call__(self) -> bool:
+        ''' This method should be called by a ManagedThread. '''
+        responses = self.worker.engine.await_responses(
+            timeout=datetime.timedelta(milliseconds=100))
+        # filter since The _engine_response_callback may return None
+        responses = list(
+            filter(
+                lambda _: _,
+                [self.worker._engine_response_callback(r) for r in responses]))
+
+        # append the error responses to the temp_error_responses
+        while not self.temp_error_responses.empty():
+            responses.append(self.temp_error_responses.get())
+
+        with nvtx_range_debug(f"await_response-{len(responses)}",
+                              color="red",
+                              category="Worker"):
+            self.responses_handler(responses)
+        return True
+
+    def handle_for_worker(self, responses: List[tllm.Response]) -> None:
+        ''' Return the responses to asyncio.event_loop. '''
+        event_loop = None
+        async_queues = []
+        for response in responses:
+            assert response is not None
+            queue = self.worker.return_queue(response.client_id)
+
+            response = _maybe_wrap_response(self.worker, response,
+                                            self.worker._is_pytorch_backend)
+
+            # For AsyncQueue.sync_q, we will batch the events to avoid too many
+            # event notifications, thus put without wait here.
+            if isinstance(queue, _SyncQueue):
+                global_tracer().log_instant("worker-rsp.put")
+                queue.put_nowait(response)
+                async_queues.append(queue)
+                # all the loops are identical
+                event_loop = event_loop or queue.loop
+            else:
+                queue.put(response)
+
+            if response.has_error() or response.result.is_final:
+                self.worker._pop_result(response.client_id)
+
+        # Notify the events in bulk for performance.
+        if async_queues:
+            _SyncQueue.notify_many(event_loop, async_queues)
+
+    def handle_for_ipc_batched(self, responses: List[tllm.Response]) -> None:
+        ''' Perform the IPC in batch explicitly. '''
+        postproc_batches = [
+            []
+            for _ in range(self.worker.postproc_config.num_postprocess_workers)
+        ] if self.enable_postprocprocess_parallel else None
+        rsp_batch = [] if not self.enable_postprocprocess_parallel else None
+
+        for response in responses:
+
+            if isinstance(response, ErrorResponse):
+                pass  # send ErrorResponse directly
+            elif self.worker._has_background_error():
+                response = self.worker._create_error_response(response)
+            elif response.has_error():
+                # Convert to ErrorResponse, because tllm.Response cannot be
+                # serialized when it has error.
+                response = ErrorResponse(response.client_id, response.error_msg,
+                                         response.request_id)
+            else:
+                response = _maybe_wrap_response(self.worker, response,
+                                                self.worker._is_pytorch_backend)
+
+            _send_rsp(self.worker,
+                      response,
+                      postproc_batches=postproc_batches,
+                      rsp_batch=rsp_batch)
+
+        if postproc_batches:
+            for wid, batch in enumerate(postproc_batches):
+                if batch:
+                    self.worker.postproc_queues[wid].put(batch)
+
+        if rsp_batch:
+            self.worker.result_queue.put(rsp_batch)
+
+
+def _get_params_for_first_rsp(
+        worker,
+        client_id) -> Tuple[Optional[SamplingParams], Optional[PostprocParams]]:
+    res = worker._results.get(client_id, None)
+    assert res is not None
+    if not res._params_transmitted:
+        res._params_transmitted = True
+        return res.sampling_params, res.postproc_params
+    return None, None
+
+
+def _get_logprobs(worker,
+                  response: tllm.Response,
+                  is_pytorch_backend=False) -> Optional[LogProbsResult]:
+    """Compute logprob and prompt logprob and clear out logits if applicable.
+    """
+    if is_pytorch_backend:
+        # _get_logprobs() is a WAR for the TRT backend, where top-k logprobs are computed post runtime.
+        # In the PyTorch backend, logprobs are already computed during runtime if requested.
+        return None
+
+    logprobs_result = None
+    generation_result = worker._results.get(response.client_id, None)
+
+    if not generation_result:
+        return
+
+    logprob_params = getattr(generation_result, "_logprob_params", None)
+    if logprob_params:
+        logprobs_result = compute_logprobs(logprob_params.prompt_logprobs,
+                                           logprob_params.logprobs,
+                                           response.result.context_logits,
+                                           response.result.generation_logits,
+                                           response.result.output_token_ids[0])
+
+        if logprob_params.drop_context_logits:
+            response.clear_context_logits()
+
+        if logprob_params.drop_generation_logits:
+            response.clear_generation_logits()
+
+    if response.result.is_final:
+        generation_result.clear_logprob_params()
+
+    return logprobs_result
+
+
+def _send_rsp(
+        worker,
+        response: Union[tllm.Response, ResponseWrapper, ErrorResponse],
+        postproc_batches: Optional[List[List["PostprocWorker.Input"]]] = None,
+        rsp_batch: Optional[List[tllm.Response]] = None):
+    # if postproc_batches is set, append to batch instead of putting to IpcQueue
+
+    if worker.result_queue is not None:
+        if rsp_batch is not None:
+            rsp_batch.append(response)
+        else:
+            worker.result_queue.put(response)
+    else:
+        sampling_params, postproc_params = _get_params_for_first_rsp(
+            worker, response.client_id)
+        inp = PostprocWorker.Input(
+            response,
+            # sampling_params is necessary for creating fake GenerationResult
+            # instances in the postproc processes. They are for incremental
+            # detokenize. They should be transmitted only once for each
+            # Request.
+            sampling_params=sampling_params,
+            postproc_params=postproc_params,
+            streaming=worker._results.get(response.client_id, None)._streaming)
+
+        pid = response.client_id % worker.postproc_config.num_postprocess_workers
+
+        if not postproc_batches:
+            # Group the responses into buckets for the postprocessing steps.
+            # Bucketing is used instead of random dispatching because the
+            # incremental detokenization during postprocessing relies on the
+            # prior CompletionOutput of a given request.
+            worker.postproc_queues[pid].put(inp)
+        else:
+            postproc_batches[pid].append(inp)
+
+    # Eliminate the finished GenerationRequest instances timely, which may
+    # take considerable memory.
+    if is_llm_response(response):
+        if response.has_error() or response.result.is_final:
+            worker._pop_result(response.client_id)
+    elif isinstance(response, ErrorResponse):
+        worker._pop_result(response.client_id)
+    else:
+        raise ValueError(f"Unknown response type: {response}")
+
+
+def _get_metrics_dict(
+        response: tllm.Response) -> dict[RequestEventTiming, float]:
+    req_perf_metrics, metrics_dict = None, {}
+    res = response.result
+    if res:
+        if hasattr(res, '_result'):
+            if result := res.get_result():
+                req_perf_metrics = result.request_perf_metrics
+        else:
+            req_perf_metrics = res.request_perf_metrics
+        if req_perf_metrics and req_perf_metrics.timing_metrics:
+            metrics_dict = {
+                RequestEventTiming.ARRIVAL_TIME:
+                req_perf_metrics.timing_metrics.arrival_time.total_seconds(),
+                RequestEventTiming.FIRST_TOKEN_TIME:
+                req_perf_metrics.timing_metrics.first_token_time.total_seconds(
+                ),
+                RequestEventTiming.FIRST_SCHEDULED_TIME:
+                req_perf_metrics.timing_metrics.first_scheduled_time.
+                total_seconds(),
+                RequestEventTiming.LAST_TOKEN_TIME:
+                req_perf_metrics.timing_metrics.last_token_time.total_seconds(),
+                RequestKVCacheStats.NUM_REUSED_BLOCKS:
+                req_perf_metrics.kv_cache_metrics.num_reused_blocks
+            }
+    return metrics_dict
+
+
+def _maybe_wrap_response(
+        worker,
+        response: tllm.Response,
+        is_pytorch_backend=False) -> Union[tllm.Response, ResponseWrapper]:
+
+    logprobs_result = _get_logprobs(worker, response, is_pytorch_backend)
+    req_perf_metrics = _get_metrics_dict(response)
+    if logprobs_result or req_perf_metrics:
+        response = ResponseWrapper(response, logprobs_result, req_perf_metrics)
+    return response
