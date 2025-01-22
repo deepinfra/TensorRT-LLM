@@ -2956,6 +2956,12 @@ class TorchLlmArgs(BaseLlmArgs):
         "The iteration interval to create responses under the streaming mode. "
         "Set this to a larger value when the batch size is large, which helps reduce the streaming overhead.",
     )
+    stream_emit_interval_ms: int = Field(
+        default=0,
+        description=
+        "The time interval (milliseconds) to create responses under the streaming mode. "
+        "Set to 0 to disable time-based throttling.",
+    )
 
     force_dynamic_quantization: bool = Field(
         default=False,
@@ -3160,6 +3166,10 @@ class TorchLlmArgs(BaseLlmArgs):
         if self.stream_interval <= 0:
             raise ValueError(
                 f"stream_interval must be positive, got {self.stream_interval}")
+        if self.stream_emit_interval_ms < 0:
+            raise ValueError(
+                "stream_emit_interval_ms must be non-negative, got "
+                f"{self.stream_emit_interval_ms}")
         return self
 
     @model_validator(mode="after")
