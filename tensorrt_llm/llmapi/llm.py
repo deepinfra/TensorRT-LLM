@@ -322,6 +322,21 @@ class LLM:
             len(prompt_token_ids),
             len(query_token_ids) if query_token_ids is not None else 0,
             sampling_params)
+
+        # check if prompt token ids are more than the context size
+        max_seq_len = int(self.args.build_config.max_seq_len)
+        prompt_len = len(prompt_token_ids)
+        if prompt_len >= max_seq_len:
+            raise ValueError(
+                f"Requested input length {prompt_len} exceeds maximum input length {max_seq_len - 1}"
+            )
+
+        # clamp the max-tokens sampling param to be min(max-tokens, max_seq_len - prompt_len)
+        max_tokens = sampling_params.max_tokens
+        if max_tokens is not None:
+            max_tokens = min(max_tokens, max_seq_len - prompt_len)
+            sampling_params.max_tokens = max_tokens
+
         result = self._executor.generate_async(
             prompt_token_ids,
             query_token_ids=query_token_ids,

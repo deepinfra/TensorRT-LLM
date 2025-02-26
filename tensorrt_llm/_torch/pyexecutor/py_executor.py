@@ -25,6 +25,15 @@ from .model_engine import *
 from .resource_manager import *
 from .scheduler import *
 
+from collections import defaultdict
+import array
+import json
+
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
+
+prom_metrics = defaultdict(float)
+prom_metrics_file = None
+
 
 def _is_executor_request(req_queue_item) -> bool:
     return isinstance(req_queue_item, tuple)
@@ -229,6 +238,7 @@ class PyExecutor:
                 assert enabled, "Inconsistent CUDA profiling state"
                 torch.cuda.cudart().cudaProfilerStop()
                 enabled = False
+            last_start_time = start_time
 
             if start_time is not None and self.print_log and self.dist.rank == 0:
                 end_time = time.time()
@@ -243,6 +253,33 @@ class PyExecutor:
                 torch.cuda.cudart().cudaProfilerStart()
                 enabled = True
             start_time = time.time()
+
+            if last_start_time is not None and self.dist.rank == 0:
+                iter_states = self.model_engine.iter_states
+                total_running = iter_states['num_ctx_requests'] + iter_states['num_generation_tokens']
+                prom_metrics["num_requests_running"] = total_running
+                prom_metrics["num_requests_swapped"] = total_running - len(self.active_requests)
+                prom_metrics["iteration_tokens_total_sum"] += iter_states['num_ctx_tokens'] + iter_states['num_generation_tokens']
+                prom_metrics["iteration_tokens_total_count"] += 1
+                prom_metrics["time_per_output_token_seconds_sum"] += (start_time - last_start_time)
+                prom_metrics["time_per_output_token_seconds_count"] += 1
+                prom_metrics["prompt_tokens_total"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_sum"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_count"] += 1
+                prom_metrics["generation_tokens_total"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_sum"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_count"] += 1
+                global prom_metrics_file
+                try:
+                    if prom_metrics_file is None:
+                        prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                                    os.O_RDWR|os.O_CREAT)
+                    os.pwrite(prom_metrics_file, (
+                        json.dumps(list(prom_metrics.keys())).encode('UTF-8') + 
+                        b'\0' +
+                        array.array('d',prom_metrics.values()).tobytes()), 0)
+                except:
+                    traceback.print_exc()
 
         try:
             yield profile_step

@@ -196,7 +196,7 @@ class CompletionRequest(OpenAIBaseModel):
 
     def to_sampling_params(self) -> SamplingParams:
         sampling_params = SamplingParams(
-            top_k=self.top_k,
+            top_k=max(0, self.top_k), # web users sometimes pass in -1
             top_p=self.top_p,
             seed=self.seed,
             temperature=self.temperature,
@@ -273,8 +273,6 @@ class CompletionRequest(OpenAIBaseModel):
     @model_validator(mode="before")
     @classmethod
     def check_response_format(cls, data):
-        if data.get("response_format"):
-            raise ValueError("response_format is not supported")
         return data
 
     @model_validator(mode="before")
@@ -291,13 +289,6 @@ class CompletionRequest(OpenAIBaseModel):
             data.get("spaces_between_special_tokens"):
             raise ValueError(
                 "special_tokens related settings are not supported")
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_stream_options(cls, data):
-        if data.get("stream_options"):
-            raise ValueError("stream_options is not supported")
         return data
 
 

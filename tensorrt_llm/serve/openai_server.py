@@ -27,6 +27,21 @@ from tensorrt_llm.serve.openai_protocol import (
     CompletionStreamResponse, DeltaMessage, ErrorResponse, FunctionCall,
     ModelCard, ModelList, ToolCall, UsageInfo)
 from tensorrt_llm.version import __version__ as VERSION
+from tensorrt_llm._torch.pyexecutor.py_executor import PROM_METRICS_FILENAME
+
+from collections import defaultdict
+import array
+import json
+import os
+import traceback
+
+prom_metrics_file = None
+prom_metrics = defaultdict(float, {
+    "num_requests_running": 0,
+    "num_requests_waiting": 0,
+    "prompt_tokens_total": 0,
+    "generation_tokens_total": 0,
+})
 
 # yapf: enale
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
@@ -66,12 +81,15 @@ class OpenAIServer:
     def __init__(self,
                  llm: LLM,
                  model: str,
+                 served_model_name: str | None,
                  hf_tokenizer: PreTrainedTokenizer = None):
         self.llm = llm
         self.tokenizer = hf_tokenizer
 
         model_dir = Path(model)
-        if model_dir.exists() and model_dir.is_dir():
+        if served_model_name is not None:
+            self.model = served_model_name
+        elif model_dir.exists() and model_dir.is_dir():
             self.model = model_dir.name
         else:
             self.model = model
@@ -104,6 +122,8 @@ class OpenAIServer:
     def register_routes(self):
         self.app.add_api_route("/health", self.health, methods=["GET"])
         self.app.add_api_route("/version", self.version, methods=["GET"])
+        self.app.add_api_route("/metrics", self.metrics, methods=["GET"])
+        self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
         self.app.add_api_route("/v1/models", self.get_model, methods=["GET"])
         self.app.add_api_route("/v1/completions",
                                self.openai_completion,
@@ -118,6 +138,41 @@ class OpenAIServer:
     async def version(self) -> JSONResponse:
         ver = {"version": VERSION}
         return JSONResponse(content=ver)
+
+    async def metrics(self) -> Response:
+        global prom_metrics_file
+        bufs = None
+        try:
+            if prom_metrics_file is None:
+                prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                            os.O_RDWR|os.O_CREAT|os.O_TRUNC)
+            bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
+            if len(bufs) >= 2:
+                keybuf, valbuf = bufs
+                key_list = json.loads(keybuf.decode('UTF-8'))
+                value_list = array.array('d')
+                value_list.frombytes(valbuf)
+                for key, value in zip(key_list, value_list):
+                    prom_metrics[key] = value
+        except:
+            print(bufs)
+            traceback.print_exc()
+
+        # NOTE: metrics do not update if the other thread is not running any requests.
+        # Make sure to zero out running and waiting in this case.
+        if prom_metrics["request_started_total"] == (
+                prom_metrics["request_completed_total"] + prom_metrics["request_failed_total"]):
+            prom_metrics["num_requests_running"] = 0
+        prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
+                prom_metrics["num_requests_running"] +
+                prom_metrics["request_completed_total"] +
+                prom_metrics["request_failed_total"]))
+
+        resp = ''
+        for metric_key, metric_val in prom_metrics.items():
+            separator = ',' if '{' in metric_key else '{'
+            resp += f'vllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
+        return Response(status_code=200, content=resp)
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
@@ -226,6 +281,8 @@ class OpenAIServer:
                         choice.finish_reason = output.finish_reason
                         choice.stop_reason = output.stop_reason
                         finish_reason_sent[i] = True
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
                     chunk = ChatCompletionStreamResponse(
                         choices=[choice], model=self.model)
                     chunk.usage = stream_usage_info(
@@ -267,6 +324,9 @@ class OpenAIServer:
                         ])
                 else:
                     message = ChatMessage(role=role, content=output.text)
+                if output.finish_reason is not None:
+                    prom_metrics["request_completed_total"] += 1
+                    prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
                 choice = ChatCompletionResponseChoice(
                     index=output.index,
                     message=message,
@@ -302,6 +362,7 @@ class OpenAIServer:
             )
             return response
 
+        prom_metrics["request_started_total"] += 1
         try:
             conversation: List[ConversationMessage] = []
             for msg in request.messages:
@@ -336,6 +397,7 @@ class OpenAIServer:
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except Exception as e:
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
     async def openai_completion(self, request: CompletionRequest) -> Response:
@@ -361,6 +423,17 @@ class OpenAIServer:
 
             return consumer()
 
+        def stream_usage_info(prompt_tokens: int, completion_tokens: int):
+            if request.stream_options and request.stream_options.include_usage and \
+                    request.stream_options.continuous_usage_stats:
+                usage = UsageInfo(prompt_tokens=prompt_tokens,
+                                  completion_tokens=completion_tokens,
+                                  total_tokens=prompt_tokens +
+                                               completion_tokens)
+            else:
+                usage = None
+            return usage
+
         async def create_completion_generator(generator: AsyncIterator[Tuple[int, RequestOutput]],
                                               num_choices: int):
             num_repsonse_per_request = 1 if request.n is None else request.n
@@ -373,6 +446,9 @@ class OpenAIServer:
                     if request.echo and not echoed[response_idx]:
                         delta_text = prompt + delta_text
                         echoed[response_idx] = True
+                    if output.finish_reason is not None:
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
                     response = CompletionStreamResponse(
                         model=self.model,
                         choices=[
@@ -383,6 +459,10 @@ class OpenAIServer:
                                 finish_reason=output.finish_reason,
                             )
                         ])
+                    response.usage = stream_usage_info(
+                        len(requst_output.prompt_token_ids),
+                        len(output.token_ids)
+                    )
                     response_json = response.model_dump_json(
                         exclude_unset=False)
                     yield f"data: {response_json}\n\n"
@@ -402,6 +482,9 @@ class OpenAIServer:
                         output_text = request_output.prompt + output_text
                     idx = prompt_idx * num_repsonse_per_request + gen_idx
 
+                    if output.finish_reason is not None:
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
                     disaggregated_params = CompletionResponseChoice.to_disaggregated_params(output.disaggregated_params)
                     choice = CompletionResponseChoice(
                         index=idx,
@@ -424,6 +507,7 @@ class OpenAIServer:
             )
             return response
 
+        prom_metrics["request_started_total"] += 1
         try:
             if isinstance(request.prompt, str) or \
                 (isinstance(request.prompt, list) and isinstance(request.prompt[0], int)):
@@ -455,6 +539,7 @@ class OpenAIServer:
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except Exception as e:
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
     async def __call__(self, host, port):
