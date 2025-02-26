@@ -70,7 +70,8 @@ def create_logprobs(token_ids: List[int],
 
 
 @nvtx_range("chat_stream_post_processor")
-def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs) -> List[str]:
+def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs,
+                               prom_metrics: dict[str, int]) -> List[str]:
 
     def yield_first_chat(num_tokens: int,
                          idx: int,
@@ -133,6 +134,8 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
             choice.finish_reason = output.finish_reason
             choice.stop_reason = output.stop_reason
             finish_reason_sent[i] = True
+            prom_metrics["request_completed_total"] += 1
+            prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
         chunk = ChatCompletionStreamResponse(choices=[choice], model=args.model)
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
@@ -158,7 +161,8 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
 
 
 @nvtx_range("chat_response_post_processor")
-def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs) -> ChatCompletionResponse:
+def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs,
+                                 prom_metrics: dict[str, int]) -> ChatCompletionResponse:
     choices: List[ChatCompletionResponseChoice] = []
     role = args.role
     for output in rsp.outputs:
@@ -175,6 +179,9 @@ def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocAr
                 ])
         else:
             message = ChatMessage(role=role, content=output.text)
+        if output.finish_reason is not None:
+            prom_metrics["request_completed_total"] += 1
+            prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
         choice = ChatCompletionResponseChoice(
             index=output.index,
             message=message,
@@ -227,7 +234,8 @@ class CompletionPostprocArgs(PostprocArgs):
 
 
 @nvtx_range("completion_stream_post_processor")
-def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args: CompletionPostprocArgs) -> List[str]:
+def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args: CompletionPostprocArgs,
+                                     prom_metrics: dict[str, int]) -> List[str]:
     res: List[str] = []
     prompt_tokens = args.num_prompt_tokens
     if stream_option := args.stream_options:
@@ -252,6 +260,9 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
                                     completion_tokens=output.length,
                                     total_tokens=output.length + prompt_tokens)
+        if output.finish_reason is not None:
+            prom_metrics["request_completed_total"] += 1
+            prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
         data = chunk.model_dump_json(exclude_unset=False)
         res.append(f"data: {data}\n\n")
 
@@ -273,7 +284,8 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
 
 
 @nvtx_range("completion_response_post_processor")
-def completion_response_post_processor(rsp: GenerationResult, args: CompletionPostprocArgs) -> CompletionResponse:
+def completion_response_post_processor(rsp: GenerationResult, args: CompletionPostprocArgs,
+                                       prom_metrics: dict[str, int]) -> CompletionResponse:
     prompt_tokens = args.num_prompt_tokens
     completion_tokens = 0
     choices = []
@@ -281,6 +293,9 @@ def completion_response_post_processor(rsp: GenerationResult, args: CompletionPo
         text = output.text
         if args.echo:
             text = args.prompt + text
+        if output.finish_reason is not None:
+            prom_metrics["request_completed_total"] += 1
+            prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
         disaggregated_params = CompletionResponseChoice.to_disaggregated_params(
             output.disaggregated_params)
         choice = CompletionResponseChoice(

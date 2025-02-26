@@ -61,6 +61,7 @@ def get_llm_args(model: str,
 
     llm_args = {
         "model": model,
+        "served_model_name": served_model_name,
         "scheduler_config": scheduler_config,
         "tokenizer": tokenizer,
         "tensor_parallel_size": tensor_parallel_size,
@@ -85,19 +86,25 @@ def launch_server(host: str, port: int, llm_args: dict):
 
     backend = llm_args["backend"]
     model = llm_args["model"]
+    served_model_name = llm_args["served_model_name"]
 
     if backend == 'pytorch':
         llm = PyTorchLLM(**llm_args)
     else:
         llm = LLM(**llm_args)
 
-    server = OpenAIServer(llm=llm, model=model)
+    server = OpenAIServer(llm=llm, model=model, served_model_name=served_model_name)
 
     asyncio.run(server(host, port))
 
 
 @click.command("serve")
 @click.argument("model", type=str)
+@click.option("--served-model-name",
+              type=str,
+              default=None,
+              help="HF model name."
+              "Model name to use. Defaults to model_path.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -120,7 +127,7 @@ def launch_server(host: str, port: int, llm_args: dict):
               type=int,
               default=BuildConfig.max_beam_width,
               help="Maximum number of beams for beam search decoding.")
-@click.option("--max_batch_size",
+@click.option("--max_batch_size", "--max-num-seqs",
               type=int,
               default=BuildConfig.max_batch_size,
               help="Maximum number of requests that the engine can schedule.")
@@ -132,12 +139,12 @@ def launch_server(host: str, port: int, llm_args: dict):
     "Maximum number of batched input tokens after padding is removed in each batch."
 )
 @click.option(
-    "--max_seq_len",
+    "--max_seq_len", "--max-model-len",
     type=int,
     default=BuildConfig.max_seq_len,
     help="Maximum total length of one request, including prompt and outputs. "
     "If unspecified, the value is deduced from the model config.")
-@click.option("--tp_size", type=int, default=1, help='Tensor parallelism size.')
+@click.option("--tp_size", "--tensor-parallel-size", type=int, default=1, help='Tensor parallelism size.')
 @click.option("--pp_size",
               type=int,
               default=1,
@@ -162,10 +169,15 @@ def launch_server(host: str, port: int, llm_args: dict):
     default=0,
     help="[Experimental] Number of workers to postprocess raw responses "
     "to comply with OpenAI protocol.")
-@click.option("--trust_remote_code",
+@click.option("--trust_remote_code", "--trust-remote-code",
               is_flag=True,
               default=False,
               help="Flag for HF transformers.")
+@click.option("--load-format",
+              default="safetensors",
+              help="Currently unused. Set to safetensors.")
+@click.option("--max-log-len", type=int, default=-1,
+              help="Set to 0 to make logging less verbose. Currently unimplemented.")
 @click.option(
     "--extra_llm_api_options",
     type=str,
@@ -173,13 +185,15 @@ def launch_server(host: str, port: int, llm_args: dict):
     help=
     "Path to a YAML file that overwrites the parameters specified by trtllm-serve."
 )
-def serve(model: str, tokenizer: Optional[str], host: str, port: int,
+def serve(model: str, served_model_name: Optional[str],
+          tokenizer: Optional[str], host: str, port: int,
           log_level: str, backend: str, max_beam_width: int,
           max_batch_size: int, max_num_tokens: int, max_seq_len: int,
           tp_size: int, pp_size: int, ep_size: Optional[int],
           gpus_per_node: Optional[int],
           kv_cache_free_gpu_memory_fraction: float,
           num_postprocess_workers: int, trust_remote_code: bool,
+          load_format: str, max_log_len: int,
           extra_llm_api_options: Optional[str]):
     """Running an OpenAI API compatible server
 
@@ -194,6 +208,7 @@ def serve(model: str, tokenizer: Optional[str], host: str, port: int,
 
     llm_args = get_llm_args(
         model=model,
+        served_model_name=served_model_name,
         tokenizer=tokenizer,
         backend=backend,
         max_beam_width=max_beam_width,

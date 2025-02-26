@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import asyncio
+import logging
 import signal
 import traceback
 from contextlib import asynccontextmanager
@@ -33,6 +34,21 @@ from tensorrt_llm.serve.postprocess_handlers import (
     chat_stream_post_processor, completion_response_post_processor,
     completion_stream_post_processor)
 from tensorrt_llm.version import __version__ as VERSION
+from tensorrt_llm._torch.pyexecutor.py_executor import PROM_METRICS_FILENAME
+
+from collections import defaultdict
+import array
+import json
+import os
+import traceback
+
+prom_metrics_file = None
+prom_metrics = defaultdict(float, {
+    "num_requests_running": 0,
+    "num_requests_waiting": 0,
+    "prompt_tokens_total": 0,
+    "generation_tokens_total": 0,
+})
 
 # yapf: enale
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
@@ -71,12 +87,15 @@ class OpenAIServer:
 
     def __init__(self,
                  llm: LLM,
-                 model: str):
+                 model: str,
+                 served_model_name: str | None):
         self.llm = llm
         self.tokenizer = llm.tokenizer
 
         model_dir = Path(model)
-        if model_dir.exists() and model_dir.is_dir():
+        if served_model_name is not None:
+            self.model = served_model_name
+        elif model_dir.exists() and model_dir.is_dir():
             self.model = model_dir.name
         else:
             self.model = model
@@ -121,6 +140,8 @@ class OpenAIServer:
     def register_routes(self):
         self.app.add_api_route("/health", self.health, methods=["GET"])
         self.app.add_api_route("/version", self.version, methods=["GET"])
+        self.app.add_api_route("/metrics", self.metrics, methods=["GET"])
+        self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
         self.app.add_api_route("/v1/models", self.get_model, methods=["GET"])
         # TODO: the metrics endpoint only reports iteration stats, not the runtime stats for now
         self.app.add_api_route("/metrics", self.get_iteration_stats, methods=["GET"])
@@ -137,6 +158,41 @@ class OpenAIServer:
     async def version(self) -> JSONResponse:
         ver = {"version": VERSION}
         return JSONResponse(content=ver)
+
+    async def metrics(self) -> Response:
+        global prom_metrics_file
+        bufs = None
+        try:
+            if prom_metrics_file is None:
+                prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                            os.O_RDWR|os.O_CREAT|os.O_TRUNC)
+            bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
+            if len(bufs) >= 2:
+                keybuf, valbuf = bufs
+                key_list = json.loads(keybuf.decode('UTF-8'))
+                value_list = array.array('d')
+                value_list.frombytes(valbuf)
+                for key, value in zip(key_list, value_list):
+                    prom_metrics[key] = value
+        except:
+            print(bufs)
+            traceback.print_exc()
+
+        # NOTE: metrics do not update if the other thread is not running any requests.
+        # Make sure to zero out running and waiting in this case.
+        if prom_metrics["request_started_total"] == (
+                prom_metrics["request_completed_total"] + prom_metrics["request_failed_total"]):
+            prom_metrics["num_requests_running"] = 0
+        prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
+                prom_metrics["num_requests_running"] +
+                prom_metrics["request_completed_total"] +
+                prom_metrics["request_failed_total"]))
+
+        resp = ''
+        for metric_key, metric_val in prom_metrics.items():
+            separator = ',' if '{' in metric_key else '{'
+            resp += f'vllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
+        return Response(status_code=200, content=resp)
 
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
@@ -162,7 +218,7 @@ class OpenAIServer:
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
             async for res in promise:
-                pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
+                pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args, prom_metrics)
                 for pp_res in pp_results:
                     yield pp_res
             yield f"data: [DONE]\n\n"
@@ -175,8 +231,9 @@ class OpenAIServer:
                 return promise.outputs[0]._postprocess_result
             else:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                return post_processor(promise, args)
+                return post_processor(promise, args, prom_metrics)
 
+        prom_metrics["request_started_total"] += 1
         try:
             conversation: List[ConversationMessage] = []
             for msg in request.messages:
@@ -226,6 +283,7 @@ class OpenAIServer:
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except Exception as e:
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
     async def openai_completion(self, request: CompletionRequest, raw_request: Request) -> Response:
@@ -260,7 +318,7 @@ class OpenAIServer:
             async for request_output, postproc_params in generator:
                 if not self.postproc_worker_enabled:
                     post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                    pp_result = post_processor(request_output, args)
+                    pp_result = post_processor(request_output, args, prom_metrics)
                 else:
                     pp_result = request_output.outputs[0]._postprocess_result
                 for pp_res in pp_result:
@@ -275,7 +333,7 @@ class OpenAIServer:
                 pp_result: CompletionResponse
                 if not self.postproc_worker_enabled:
                     post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                    pp_result = post_processor(request_output, args)
+                    pp_result = post_processor(request_output, args, prom_metrics)
                 else:
                     pp_result = request_output.outputs[0]._postprocess_result
 
@@ -296,6 +354,7 @@ class OpenAIServer:
             )
             return response
 
+        prom_metrics["request_started_total"] += 1
         try:
             if isinstance(request.prompt, str) or \
                 (isinstance(request.prompt, list) and isinstance(request.prompt[0], int)):
@@ -347,6 +406,7 @@ class OpenAIServer:
         except Exception as e:
             print(f"Encountered an exception: {str(e)}")
             traceback.print_exc()
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
     async def __call__(self, host, port):
