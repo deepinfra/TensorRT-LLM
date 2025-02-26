@@ -225,7 +225,7 @@ class CompletionRequest(OpenAIBaseModel):
 
             # completion-sampling-params
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k), # web users sometimes pass in -1
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
             repetition_penalty=self.repetition_penalty,
@@ -263,6 +263,20 @@ class CompletionRequest(OpenAIBaseModel):
         if data.get("stream_options") and not data.get("stream"):
             raise ValueError(
                 "Stream options can only be defined when stream is true.")
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def verify_multi_responses(cls, data):
+        best_of = data.get("best_of")
+        n = data.get("n")
+        if best_of and n and best_of < n:
+            raise ValueError("best_of should not be smaller than n")
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def check_response_format(cls, data):
         return data
 
     @model_validator(mode="before")
