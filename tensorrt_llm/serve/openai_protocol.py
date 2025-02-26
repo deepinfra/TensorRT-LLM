@@ -227,7 +227,7 @@ class CompletionRequest(OpenAIBaseModel):
 
             # completion-sampling-params
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k), # web users sometimes pass in -1
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
             repetition_penalty=self.repetition_penalty,
