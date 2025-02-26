@@ -1,18 +1,23 @@
 #!/usr/bin/env python
 import asyncio
+import logging
 import signal
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
+from functools import wraps
 from http import HTTPStatus
 from pathlib import Path
-from typing import AsyncGenerator, AsyncIterator, List, Optional, Tuple
+from typing import (AsyncGenerator, AsyncIterator, List, Optional, Tuple,
+                    TypedDict, Callable, Awaitable, Any, Type)
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, HTTPException
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from transformers import AutoConfig, AutoProcessor
+from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 
 from tensorrt_llm._tensorrt_engine import LLM
 # yapf: disable
@@ -40,6 +45,21 @@ from tensorrt_llm.serve.postprocess_handlers import (
     chat_stream_post_processor, completion_response_post_processor,
     completion_stream_post_processor)
 from tensorrt_llm.version import __version__ as VERSION
+from tensorrt_llm._torch.pyexecutor.py_executor import PROM_METRICS_FILENAME
+
+from collections import defaultdict
+import array
+import json
+import os
+import traceback
+
+prom_metrics_file = None
+prom_metrics = defaultdict(float, {
+    "num_requests_running": 0,
+    "num_requests_waiting": 0,
+    "prompt_tokens_total": 0,
+    "generation_tokens_total": 0,
+})
 
 from .._utils import nvtx_mark
 
@@ -47,11 +67,79 @@ from .._utils import nvtx_mark
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 
 
+async def disconnect_poller(request: Request, result: Any):
+    """
+    Poll for a disconnect.
+    If the request disconnects, stop polling and return.
+    """
+    try:
+        while True:
+            message = await request.receive()
+            if message["type"] == "http.disconnect":
+                break
+
+        print("Request disconnected")
+
+        return result
+    except asyncio.CancelledError:
+        print("Stopping polling loop")
+
+
+def cancel_on_disconnect(model_type: Type[BaseModel]):
+    """
+    Decorator that will check if the client disconnects,
+    and cancel the task if required.
+    """
+
+    def cancel_on_disconnect_inner(handler: Callable):
+
+        @wraps(handler)
+        async def cancel_on_disconnect_decorator(self, request: model_type, raw_request: Request):
+            sentinel = object()
+
+            # Create two tasks, one to poll the request and check if the
+            # client disconnected, and another which is the request handler
+            poller_task = asyncio.ensure_future(disconnect_poller(raw_request, sentinel))
+            handler_task = asyncio.ensure_future(handler(self, request=request, raw_request=raw_request))
+
+            done, pending = await asyncio.wait(
+                [poller_task, handler_task], return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Cancel any outstanding tasks
+            for t in pending:
+                t.cancel()
+
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    print(f"{t} was cancelled")
+                except Exception as exc:
+                    print(f"{t} raised {exc} when being cancelled")
+
+            # Return the result if the handler finished first
+            if handler_task in done:
+                return await handler_task
+
+            # Otherwise, raise an exception
+            # This is not exactly needed, but it will prevent
+            # validation errors if your request handler is supposed
+            # to return something.
+            print("Raising an HTTP error because I was disconnected!!")
+
+            raise HTTPException(503)
+
+        return cancel_on_disconnect_decorator
+
+    return cancel_on_disconnect_inner
+
+
 class OpenAIServer:
 
     def __init__(self,
                  llm: LLM,
                  model: str,
+                 served_model_name: str | None,
                  server_role: Optional[ServerRole],
                  metadata_server_cfg: MetadataServerConfig):
         self.llm = llm
@@ -73,7 +161,9 @@ class OpenAIServer:
             self.model_config = None
 
         model_dir = Path(model)
-        if model_dir.exists() and model_dir.is_dir():
+        if served_model_name is not None:
+            self.model = served_model_name
+        elif model_dir.exists() and model_dir.is_dir():
             self.model = model_dir.name
         else:
             self.model = model
@@ -139,6 +229,8 @@ class OpenAIServer:
         self.app.add_api_route("/health", self.health, methods=["GET"])
         self.app.add_api_route("/health_generate", self.health_generate, methods=["GET"])
         self.app.add_api_route("/version", self.version, methods=["GET"])
+        self.app.add_api_route("/metrics", self.metrics, methods=["GET"])
+        self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
         self.app.add_api_route("/v1/models", self.get_model, methods=["GET"])
         # TODO: the metrics endpoint only reports iteration stats, not the runtime stats for now
         self.app.add_api_route("/metrics", self.get_iteration_stats, methods=["GET"])
@@ -192,6 +284,44 @@ class OpenAIServer:
         ver = {"version": VERSION}
         return JSONResponse(content=ver)
 
+    async def metrics(self) -> Response:
+        global prom_metrics_file
+        bufs = None
+        try:
+            if prom_metrics_file is None:
+                prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                            os.O_RDWR|os.O_CREAT|os.O_TRUNC)
+            bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
+            if len(bufs) >= 2:
+                keybuf, valbuf = bufs
+                key_list = json.loads(keybuf.decode('UTF-8'))
+                value_list = array.array('d')
+                value_list.frombytes(valbuf)
+                for key, value in zip(key_list, value_list):
+                    prom_metrics[key] = value
+        except:
+            print(bufs)
+            traceback.print_exc()
+
+        all_requests_done = (
+                prom_metrics["request_completed_total"] +
+                prom_metrics["request_cancelled_total"] +
+                prom_metrics["request_failed_total"])
+        # NOTE: metrics do not update if the other thread is not running any requests.
+        # Make sure to zero out running and waiting in this case.
+        if prom_metrics["request_started_total"] == all_requests_done:
+            prom_metrics["num_requests_running"] = 0
+
+        # Detect number of requests not being processed by the TensorRT-LLM engine.
+        prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
+                prom_metrics["num_requests_running"] + all_requests_done))
+
+        resp = ''
+        for metric_key, metric_val in prom_metrics.items():
+            separator = ',' if '{' in metric_key else '{'
+            resp += f'vllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
+        return Response(status_code=200, content=resp)
+
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
         return JSONResponse(content=model_list.model_dump())
@@ -212,7 +342,10 @@ class OpenAIServer:
             pass
         return JSONResponse(content=events)
 
+    @cancel_on_disconnect(ChatCompletionRequest)
     async def openai_chat(self, request: ChatCompletionRequest, raw_request: Request) -> Response:
+
+        did_complete = False
 
         def get_role() -> str:
             if request.add_generation_prompt:
@@ -223,14 +356,27 @@ class OpenAIServer:
 
         async def chat_stream_generator(
                 promise: RequestOutput, postproc_params: PostprocParams) -> AsyncGenerator[str, None]:
+            nonlocal did_complete
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-            async for res in promise:
-                pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
-                for pp_res in pp_results:
-                    yield pp_res
-            yield "data: [DONE]\n\n"
-            nvtx_mark("generation ends")
+            try:
+                async for res in promise:
+                    pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
+                    for pp_res in pp_results:
+                        for choice in pp_res.choices:
+                            if choice.finish_reason is not None:
+                                did_complete = True
+                                prom_metrics["request_completed_total"] += 1
+                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
+                        pp_res_json = pp_res.model_dump_json(exclude_unset=True)
+                        yield f"data: {pp_res_json}\n\n"
+                yield f"data: [DONE]\n\n"
+                nvtx_mark("generation ends")
+            finally:
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
+                    promise.abort()
 
         async def create_chat_response(
                 promise: RequestOutput, postproc_params: PostprocParams, disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> ChatCompletionResponse:
@@ -241,11 +387,18 @@ class OpenAIServer:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
                 chat_response = post_processor(promise, args)
 
+            for choice in chat_response.choices:
+                if choice.finish_reason is not None:
+                    prom_metrics["request_completed_total"] += 1
+                    prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
             # Add prompt_tokens_ids to the response
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
                 chat_response.prompt_token_ids = promise.prompt_token_ids
             return chat_response
 
+        prom_metrics["request_started_total"] += 1
+        promise: Optional[RequestOutput] = None
         try:
             check_multiple_response(request.n, self.llm.args.backend)
             conversation: List[ConversationMessage] = []
@@ -297,7 +450,6 @@ class OpenAIServer:
                 lora_request=request.lora_request,
                 disaggregated_params=disaggregated_params
             )
-            asyncio.create_task(self.await_disconnected(raw_request, promise))
             if not self.postproc_worker_enabled:
                 postproc_args.tokenizer = self.tokenizer
                 postproc_args.num_prompt_tokens = len(promise.prompt_token_ids)
@@ -313,10 +465,17 @@ class OpenAIServer:
             logger.error(traceback.format_exc())
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
+        except asyncio.CancelledError:
+            prom_metrics["request_cancelled_total"] += 1
+            if promise is not None:
+                promise.abort()
+            return self.create_error_response("cancelled")
         except Exception as e:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
+    @cancel_on_disconnect(CompletionRequest)
     async def openai_completion(self, request: CompletionRequest, raw_request: Request) -> Response:
 
         def merge_promises(
@@ -345,16 +504,31 @@ class OpenAIServer:
             return consumer()
 
         async def create_completion_generator(
-                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]]):
-            async for request_output, postproc_params in generator:
-                if not self.postproc_worker_enabled:
-                    post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                    pp_result = post_processor(request_output, args)
-                else:
-                    pp_result = request_output.outputs[0]._postprocess_result
-                for pp_res in pp_result:
-                    yield pp_res
-            yield "data: [DONE]\n\n"
+                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]],
+                promises: List[RequestOutput]):
+            did_complete = False
+            try:
+                async for request_output, postproc_params in generator:
+                    if not self.postproc_worker_enabled:
+                        post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
+                        pp_result = post_processor(request_output, args)
+                    else:
+                        pp_result = request_output.outputs[0]._postprocess_result
+                    for pp_res in pp_result:
+                        for choice in pp_res.choices:
+                            if choice.finish_reason is not None:
+                                did_complete = True
+                                prom_metrics["request_completed_total"] += 1
+                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+                        pp_res_json = pp_res.model_dump_json(exclude_unset=False)
+                        yield f"data: {pp_res_json}\n\n"
+                yield f"data: [DONE]\n\n"
+            finally:
+                print(f"Completion generator finally {did_complete=}")
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
+                    for promise in promises:
+                        promise.abort()
 
         async def create_completion_response(
                 generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]], disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> CompletionResponse:
@@ -368,6 +542,11 @@ class OpenAIServer:
                     pp_result = post_processor(request_output, args)
                 else:
                     pp_result = request_output.outputs[0]._postprocess_result
+
+                for choice in pp_result.choices:
+                    if choice.finish_reason is not None:
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
                 choices, usage = pp_result.choices, pp_result.usage
                 all_choices.extend(choices)
@@ -390,6 +569,7 @@ class OpenAIServer:
             )
             return response
 
+        prom_metrics["request_started_total"] += 1
         try:
             check_multiple_response(request.n, self.llm.args.backend)
             if isinstance(request.prompt, str) or \
@@ -420,7 +600,6 @@ class OpenAIServer:
                     lora_request=request.lora_request,
                     disaggregated_params=disaggregated_params
                 )
-                asyncio.create_task(self.await_disconnected(raw_request, promise))
                 if not self.postproc_worker_enabled:
                     postproc_args.tokenizer = self.tokenizer
                     postproc_args.num_prompt_tokens = len(promise.prompt_token_ids)
@@ -429,8 +608,7 @@ class OpenAIServer:
 
             generator = merge_promises(promises, postproc_params_collection)
             if request.stream:
-                response_generator = create_completion_generator(
-                    generator)
+                response_generator = create_completion_generator(generator, promises)
                 return StreamingResponse(content=response_generator,
                                             media_type="text/event-stream")
             else:
@@ -441,8 +619,14 @@ class OpenAIServer:
             logger.error(traceback.format_exc())
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
+        except asyncio.CancelledError:
+            prom_metrics["request_cancelled_total"] += 1
+            for promise in promises:
+                promise.abort()
+            return self.create_error_response("cancelled")
         except Exception as e:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
     async def __call__(self, host, port):
