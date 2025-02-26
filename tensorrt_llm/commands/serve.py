@@ -15,7 +15,22 @@ from tensorrt_llm.serve import OpenAIServer
 
 
 @click.command("trtllm-serve")
-@click.argument("model", type=str)
+@click.argument("model_path", type=str, required=False)
+@click.option("--model",
+              type=str,
+              default=None,
+              help="Path | HF model name."
+              "Model path to use (same as positional argument).")
+@click.option("--speculative-model",
+              type=str,
+              default=None,
+              help="Path | HF model name."
+              "Speculative model path to use.")
+@click.option("--served-model-name",
+              type=str,
+              default=None,
+              help="HF model name."
+              "Model name to use. Defaults to model_path.")
 @click.option("--tokenizer",
               type=str,
               default=None,
@@ -38,7 +53,7 @@ from tensorrt_llm.serve import OpenAIServer
               type=int,
               default=BuildConfig.max_beam_width,
               help="Maximum number of beams for beam search decoding.")
-@click.option("--max_batch_size",
+@click.option("--max_batch_size", "--max-num-seqs",
               type=int,
               default=BuildConfig.max_batch_size,
               help="Maximum number of requests that the engine can schedule.")
@@ -50,12 +65,12 @@ from tensorrt_llm.serve import OpenAIServer
     "Maximum number of batched input tokens after padding is removed in each batch."
 )
 @click.option(
-    "--max_seq_len",
+    "--max_seq_len", "--max-model-len",
     type=int,
     default=BuildConfig.max_seq_len,
     help="Maximum total length of one request, including prompt and outputs. "
     "If unspecified, the value is deduced from the model config.")
-@click.option("--tp_size", type=int, default=1, help='Tensor parallelism size.')
+@click.option("--tp_size", "--tensor-parallel-size", type=int, default=1, help='Tensor parallelism size.')
 @click.option("--pp_size",
               type=int,
               default=1,
@@ -80,10 +95,15 @@ from tensorrt_llm.serve import OpenAIServer
     default=0,
     help="[Experimental] Number of workers to postprocess raw responses "
     "to comply with OpenAI protocol.")
-@click.option("--trust_remote_code",
+@click.option("--trust_remote_code", "--trust-remote-code",
               is_flag=True,
               default=False,
               help="Flag for HF transformers.")
+@click.option("--load-format",
+              default="safetensors",
+              help="Currently unused. Set to safetensors.")
+@click.option("--max-log-len", type=int, default=-1,
+              help="Set to 0 to make logging less verbose. Currently unimplemented.")
 @click.option(
     "--extra_llm_api_options",
     type=str,
@@ -91,17 +111,20 @@ from tensorrt_llm.serve import OpenAIServer
     help=
     "Path to a YAML file that overwrites the parameters specified by trtllm-serve."
 )
-def main(model: str, tokenizer: Optional[str], host: str, port: int,
-         log_level: str, backend: str, max_beam_width: int, max_batch_size: int,
-         max_num_tokens: int, max_seq_len: int, tp_size: int, pp_size: int,
-         ep_size: Optional[int], gpus_per_node: Optional[int],
-         kv_cache_free_gpu_memory_fraction: float, num_postprocess_workers: int,
-         trust_remote_code: bool, extra_llm_api_options: Optional[str]):
+def main(model_path: Optional[str], model: Optional[str], served_model_name: Optional[str],
+         tokenizer: str, host: str, port: int, log_level: str, backend: str,
+         max_beam_width: int, max_batch_size: int, max_num_tokens: int,
+         max_seq_len: int, tp_size: int, pp_size: int, ep_size: Optional[int],
+         gpus_per_node: Optional[int], kv_cache_free_gpu_memory_fraction: float,
+         num_postprocess_workers: int, trust_remote_code: bool, load_format: str,
+         max_log_len: int, speculative_model: Optional[str],
+         extra_llm_api_options: Optional[str]):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
     """
     logger.set_level(log_level)
+    model = model_path or model
     build_config = BuildConfig(max_batch_size=max_batch_size,
                                max_num_tokens=max_num_tokens,
                                max_beam_width=max_beam_width,
@@ -120,9 +143,12 @@ def main(model: str, tokenizer: Optional[str], host: str, port: int,
         capacity_scheduler_policy=CapacitySchedulerPolicy.GUARANTEED_NO_EVICT,
         dynamic_batch_config=dynamic_batch_config,
     )
+    if speculative_model in ("", "true", "True"):
+        speculative_model = model
 
     llm_args = {
         "model": model,
+        "speculative_model": speculative_model,
         "scheduler_config": scheduler_config,
         "tokenizer": tokenizer,
         "tensor_parallel_size": tp_size,
@@ -149,7 +175,7 @@ def main(model: str, tokenizer: Optional[str], host: str, port: int,
 
     hf_tokenizer = AutoTokenizer.from_pretrained(tokenizer or model)
 
-    server = OpenAIServer(llm=llm, model=model, hf_tokenizer=hf_tokenizer)
+    server = OpenAIServer(llm=llm, model=model, served_model_name=served_model_name, hf_tokenizer=hf_tokenizer)
 
     asyncio.run(server(host, port))
 
