@@ -178,15 +178,18 @@ class OpenAIServer:
             print(bufs)
             traceback.print_exc()
 
+        all_requests_done = (
+                prom_metrics["request_completed_total"] +
+                prom_metrics["request_cancelled_total"] +
+                prom_metrics["request_failed_total"])
         # NOTE: metrics do not update if the other thread is not running any requests.
         # Make sure to zero out running and waiting in this case.
-        if prom_metrics["request_started_total"] == (
-                prom_metrics["request_completed_total"] + prom_metrics["request_failed_total"]):
+        if prom_metrics["request_started_total"] == all_requests_done:
             prom_metrics["num_requests_running"] = 0
+
+        # Detect number of requests not being processed by the TensorRT-LLM engine.
         prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
-                prom_metrics["num_requests_running"] +
-                prom_metrics["request_completed_total"] +
-                prom_metrics["request_failed_total"]))
+                prom_metrics["num_requests_running"] + all_requests_done))
 
         resp = ''
         for metric_key, metric_val in prom_metrics.items():
@@ -206,6 +209,8 @@ class OpenAIServer:
 
     async def openai_chat(self, request: ChatCompletionRequest, raw_request: Request) -> Response:
 
+        did_complete = False
+
         def get_role() -> str:
             if request.add_generation_prompt:
                 role = "assistant"
@@ -215,14 +220,27 @@ class OpenAIServer:
 
         async def chat_stream_generator(
                 promise: RequestOutput, postproc_params: PostprocParams) -> AsyncGenerator[str, None]:
+            nonlocal did_complete
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-            async for res in promise:
-                pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args, prom_metrics)
-                for pp_res in pp_results:
-                    yield pp_res
-            yield f"data: [DONE]\n\n"
-            nvtx_mark("generation ends")
+            try:
+                async for res in promise:
+                    pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
+                    for pp_res in pp_results:
+                        for choice in pp_res.choices:
+                            if choice.finish_reason is not None:
+                                did_complete = True
+                                prom_metrics["request_completed_total"] += 1
+                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
+                        pp_res_json = pp_res.model_dump_json(exclude_unset=True)
+                        yield f"data: {pp_res_json}\n\n"
+                yield f"data: [DONE]\n\n"
+                nvtx_mark("generation ends")
+            finally:
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
+                    promise.abort()
 
         async def create_chat_response(
                 promise: RequestOutput, postproc_params: PostprocParams) -> ChatCompletionResponse:
@@ -231,7 +249,13 @@ class OpenAIServer:
                 return promise.outputs[0]._postprocess_result
             else:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                return post_processor(promise, args, prom_metrics)
+                res = post_processor(promise, args)
+                for choice in res.choices:
+                    if choice.finish_reason is not None:
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+                return res
+
 
         prom_metrics["request_started_total"] += 1
         try:
@@ -314,16 +338,31 @@ class OpenAIServer:
             return consumer()
 
         async def create_completion_generator(
-                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]]):
-            async for request_output, postproc_params in generator:
-                if not self.postproc_worker_enabled:
-                    post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                    pp_result = post_processor(request_output, args, prom_metrics)
-                else:
-                    pp_result = request_output.outputs[0]._postprocess_result
-                for pp_res in pp_result:
-                    yield pp_res
-            yield f"data: [DONE]\n\n"
+                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]],
+                promises: List[RequestOutput]):
+            did_complete = False
+            try:
+                async for request_output, postproc_params in generator:
+                    if not self.postproc_worker_enabled:
+                        post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
+                        pp_result = post_processor(request_output, args)
+                    else:
+                        pp_result = request_output.outputs[0]._postprocess_result
+                    for pp_res in pp_result:
+                        for choice in pp_res.choices:
+                            if choice.finish_reason is not None:
+                                did_complete = True
+                                prom_metrics["request_completed_total"] += 1
+                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+                        pp_res_json = pp_res.model_dump_json(exclude_unset=False)
+                        yield f"data: {pp_res_json}\n\n"
+                yield f"data: [DONE]\n\n"
+            finally:
+                print(f"Completion generator finally {did_complete=}")
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
+                    for promise in promises:
+                        promise.abort()
 
         async def create_completion_response(
                 generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]]) -> CompletionResponse:
@@ -333,9 +372,14 @@ class OpenAIServer:
                 pp_result: CompletionResponse
                 if not self.postproc_worker_enabled:
                     post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                    pp_result = post_processor(request_output, args, prom_metrics)
+                    pp_result = post_processor(request_output, args)
                 else:
                     pp_result = request_output.outputs[0]._postprocess_result
+
+                for choice in pp_result.choices:
+                    if choice.finish_reason is not None:
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
                 choices, usage = pp_result.choices, pp_result.usage
                 all_choices.extend(choices)
@@ -392,8 +436,7 @@ class OpenAIServer:
 
             generator = merge_promises(promises, postproc_params_collection)
             if request.stream:
-                response_generator = create_completion_generator(
-                    generator)
+                response_generator = create_completion_generator(generator, promises)
                 return StreamingResponse(content=response_generator,
                                             media_type="text/event-stream")
             else:
