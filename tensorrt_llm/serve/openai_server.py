@@ -158,15 +158,18 @@ class OpenAIServer:
             print(bufs)
             traceback.print_exc()
 
+        all_requests_done = (
+                prom_metrics["request_completed_total"] +
+                prom_metrics["request_cancelled_total"] +
+                prom_metrics["request_failed_total"])
         # NOTE: metrics do not update if the other thread is not running any requests.
         # Make sure to zero out running and waiting in this case.
-        if prom_metrics["request_started_total"] == (
-                prom_metrics["request_completed_total"] + prom_metrics["request_failed_total"]):
+        if prom_metrics["request_started_total"] == all_requests_done:
             prom_metrics["num_requests_running"] = 0
+
+        # Detect number of requests not being processed by the TensorRT-LLM engine.
         prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
-                prom_metrics["num_requests_running"] +
-                prom_metrics["request_completed_total"] +
-                prom_metrics["request_failed_total"]))
+                prom_metrics["num_requests_running"] + all_requests_done))
 
         resp = ''
         for metric_key, metric_val in prom_metrics.items():
@@ -179,6 +182,8 @@ class OpenAIServer:
         return JSONResponse(content=model_list.model_dump())
 
     async def openai_chat(self, request: ChatCompletionRequest) -> Response:
+
+        did_complete = False
 
         def get_role() -> str:
             if request.add_generation_prompt:
@@ -215,6 +220,7 @@ class OpenAIServer:
             return chat_logprobs
 
         async def chat_stream_generator(promise: RequestOutput) -> AsyncGenerator[str, None]:
+            nonlocal did_complete
             first_iteration = True
             num_choices = 1 if request.n is None else request.n
             finish_reason_sent = [False] * num_choices
@@ -234,77 +240,84 @@ class OpenAIServer:
                     data = chunk.model_dump_json(exclude_unset=True)
                     return data
 
-            async for res in promise:
-                prompt_tokens = len(res.prompt_token_ids)
-                if first_iteration:
-                    yield f"data: {yield_first_chat(prompt_tokens, role=role)} \n\n"
+            try:
+                async for res in promise:
+                    prompt_tokens = len(res.prompt_token_ids)
+                    if first_iteration:
+                        yield f"data: {yield_first_chat(prompt_tokens, role=role)} \n\n"
 
-                    if request.echo:
-                        last_msg_content = ""
-                        if conversation and conversation[-1].get(
-                                "content") and conversation[-1].get(
-                                    "role") == role:
-                            last_msg_content = conversation[-1][
-                                "content"]
+                        if request.echo:
+                            last_msg_content = ""
+                            if conversation and conversation[-1].get(
+                                    "content") and conversation[-1].get(
+                                        "role") == role:
+                                last_msg_content = conversation[-1][
+                                    "content"]
 
-                        if last_msg_content:
-                            yield f"data: {yield_first_chat(prompt_tokens, content=last_msg_content)}\n\n"
-                first_iteration = False
+                            if last_msg_content:
+                                yield f"data: {yield_first_chat(prompt_tokens, content=last_msg_content)}\n\n"
+                    first_iteration = False
 
-                for output in res.outputs:
-                    i = output.index
+                    for output in res.outputs:
+                        i = output.index
 
-                    if finish_reason_sent[i]:
-                        continue
+                        if finish_reason_sent[i]:
+                            continue
 
-                    delta_text = output.text_diff
-                    if request.tool_choice and type(
-                            request.tool_choice
-                    ) is ChatCompletionNamedToolChoiceParam:
-                        delta_message = DeltaMessage(tool_calls=[
-                            ToolCall(function=FunctionCall(
-                                name=request.tool_choice.function.name,
-                                arguments=delta_text))
-                        ])
-                    else:
-                        delta_message = DeltaMessage(content=delta_text)
+                        delta_text = output.text_diff
+                        if request.tool_choice and type(
+                                request.tool_choice
+                        ) is ChatCompletionNamedToolChoiceParam:
+                            delta_message = DeltaMessage(tool_calls=[
+                                ToolCall(function=FunctionCall(
+                                    name=request.tool_choice.function.name,
+                                    arguments=delta_text))
+                            ])
+                        else:
+                            delta_message = DeltaMessage(content=delta_text)
 
-                    choice = ChatCompletionResponseStreamChoice(
-                        index=i,
-                        delta=delta_message,
-                        finish_reason=None)
-                    if request.logprobs:
-                        logprobs = output.logprobs_diff
-                        token_ids = output.token_ids_diff
-                        choice.logprobs = create_logprobs(token_ids, logprobs)
-                    if output.finish_reason is not None:
-                        choice.finish_reason = output.finish_reason
-                        choice.stop_reason = output.stop_reason
-                        finish_reason_sent[i] = True
-                        prom_metrics["request_completed_total"] += 1
-                        prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
-                    chunk = ChatCompletionStreamResponse(
-                        choices=[choice], model=self.model)
-                    chunk.usage = stream_usage_info(
-                        prompt_tokens, output.length)
-                    data = chunk.model_dump_json(exclude_unset=True)
-                    yield f"data: {data}\n\n"
+                        choice = ChatCompletionResponseStreamChoice(
+                            index=i,
+                            delta=delta_message,
+                            finish_reason=None)
+                        if request.logprobs:
+                            logprobs = output.logprobs_diff
+                            token_ids = output.token_ids_diff
+                            choice.logprobs = create_logprobs(token_ids, logprobs)
+                        if output.finish_reason is not None:
+                            choice.finish_reason = output.finish_reason
+                            choice.stop_reason = output.stop_reason
+                            finish_reason_sent[i] = True
+                            did_complete = True
+                            prom_metrics["request_completed_total"] += 1
+                            prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
+                        chunk = ChatCompletionStreamResponse(
+                            choices=[choice], model=self.model)
+                        chunk.usage = stream_usage_info(
+                            prompt_tokens, output.length)
+                        data = chunk.model_dump_json(exclude_unset=True)
+                        yield f"data: {data}\n\n"
 
-            if (request.stream_options
-                    and request.stream_options.include_usage):
-                completion_tokens = sum(output.length
-                                        for output in promise.outputs)
-                final_usage = UsageInfo(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=prompt_tokens + completion_tokens,
-                )
+                if (request.stream_options
+                        and request.stream_options.include_usage):
+                    completion_tokens = sum(output.length
+                                            for output in promise.outputs)
+                    final_usage = UsageInfo(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens,
+                    )
 
-                final_usage_chunk = ChatCompletionStreamResponse(
-                    choices=[], model=self.model, usage=final_usage)
-                final_usage_data = final_usage_chunk.model_dump_json()
-                yield f"data: {final_usage_data}\n\n"
-            yield f"data: [DONE]\n\n"
+                    final_usage_chunk = ChatCompletionStreamResponse(
+                        choices=[], model=self.model, usage=final_usage)
+                    final_usage_data = final_usage_chunk.model_dump_json()
+                    yield f"data: {final_usage_data}\n\n"
+                yield f"data: [DONE]\n\n"
+            finally:
+                print(f"Completion generator finally {did_complete=}")
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
+                    promise.abort()
 
         async def create_chat_response(promise: RequestOutput) -> ChatCompletionResponse:
             await promise.aresult()
@@ -325,6 +338,8 @@ class OpenAIServer:
                 else:
                     message = ChatMessage(role=role, content=output.text)
                 if output.finish_reason is not None:
+                    nonlocal did_complete
+                    did_complete = True
                     prom_metrics["request_completed_total"] += 1
                     prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
                 choice = ChatCompletionResponseChoice(
@@ -435,38 +450,48 @@ class OpenAIServer:
             return usage
 
         async def create_completion_generator(generator: AsyncIterator[Tuple[int, RequestOutput]],
-                                              num_choices: int):
+                                              num_choices: int,
+                                              promises: List[RequestOutput]):
             num_repsonse_per_request = 1 if request.n is None else request.n
             echoed = [False] * num_choices
-            async for prompt_idx, requst_output in generator:
-                prompt = requst_output.prompt
-                for gen_idx, output in enumerate(requst_output.outputs):
-                    response_idx = prompt_idx * num_repsonse_per_request + gen_idx
-                    delta_text = output.text_diff
-                    if request.echo and not echoed[response_idx]:
-                        delta_text = prompt + delta_text
-                        echoed[response_idx] = True
-                    if output.finish_reason is not None:
-                        prom_metrics["request_completed_total"] += 1
-                        prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
-                    response = CompletionStreamResponse(
-                        model=self.model,
-                        choices=[
-                            CompletionResponseStreamChoice(
-                                index=response_idx,
-                                text=delta_text,
-                                stop_reason=output.stop_reason,
-                                finish_reason=output.finish_reason,
-                            )
-                        ])
-                    response.usage = stream_usage_info(
-                        len(requst_output.prompt_token_ids),
-                        len(output.token_ids)
-                    )
-                    response_json = response.model_dump_json(
-                        exclude_unset=False)
-                    yield f"data: {response_json}\n\n"
-            yield f"data: [DONE]\n\n"
+            did_complete = False
+            try:
+                async for prompt_idx, requst_output in generator:
+                    prompt = requst_output.prompt
+                    for gen_idx, output in enumerate(requst_output.outputs):
+                        response_idx = prompt_idx * num_repsonse_per_request + gen_idx
+                        delta_text = output.text_diff
+                        if request.echo and not echoed[response_idx]:
+                            delta_text = prompt + delta_text
+                            echoed[response_idx] = True
+                        if output.finish_reason is not None:
+                            did_complete = True
+                            prom_metrics["request_completed_total"] += 1
+                            prom_metrics[f"request_success_total{{finished_reason=\"{output.finish_reason}\""] += 1
+                        response = CompletionStreamResponse(
+                            model=self.model,
+                            choices=[
+                                CompletionResponseStreamChoice(
+                                    index=response_idx,
+                                    text=delta_text,
+                                    stop_reason=output.stop_reason,
+                                    finish_reason=output.finish_reason,
+                                )
+                            ])
+                        response.usage = stream_usage_info(
+                            len(requst_output.prompt_token_ids),
+                            len(output.token_ids)
+                        )
+                        response_json = response.model_dump_json(
+                            exclude_unset=False)
+                        yield f"data: {response_json}\n\n"
+                yield f"data: [DONE]\n\n"
+            finally:
+                print(f"Completion generator finally {did_complete=}")
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
+                    for promise in promises:
+                        promise.abort()
 
         async def create_completion_response(generator: AsyncIterator[Tuple[int, RequestOutput]],
                                              num_choices: int):
@@ -529,7 +554,7 @@ class OpenAIServer:
             generator = merge_promises(promises)
             num_choices = len(prompts) if request.n is None else len(prompts) * request.n
             if request.stream:
-                response_generator = create_completion_generator(generator, num_choices)
+                response_generator = create_completion_generator(generator, num_choices, promises)
                 return StreamingResponse(content=response_generator,
                                          media_type="text/event-stream")
             else:
