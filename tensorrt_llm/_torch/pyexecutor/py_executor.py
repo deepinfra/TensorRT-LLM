@@ -204,8 +204,7 @@ class PyExecutor:
 
         self.inflight_req_ids = tensorrt_llm.bindings.internal.batch_manager.ReqIdsSet(
         )
-        self.canceled_req_ids = tensorrt_llm.bindings.internal.batch_manager.ReqIdsSet(
-        )
+        self.canceled_req_ids = set()
 
         self.model_engine.warmup(self.resource_manager)
 
@@ -1348,13 +1347,13 @@ class PyExecutor:
 
     @nvtx_range("_handle_cancelled_requests")
     def _handle_cancelled_requests(self):
-        if not self.canceled_req_ids:
-            return
-
         #TODO: properly handle canceled ids in pp case
-        if self.dist.has_tp and self.canceled_req_ids:
+        if self.dist.has_tp:
             self.canceled_req_ids = self.dist.broadcast(self.canceled_req_ids,
                                                         root=0)
+
+        if not self.canceled_req_ids:
+            return
 
         cancelled_responses = {}
         left_requests = []
@@ -1532,7 +1531,7 @@ class PyExecutor:
         return responses
 
     def cancel_request(self, id: int):
-        self.canceled_req_ids.insert(id)
+        self.canceled_req_ids.add(id)
 
     def get_num_responses_ready(self, id: Union[int, None]) -> int:
         with self.response_cv:
