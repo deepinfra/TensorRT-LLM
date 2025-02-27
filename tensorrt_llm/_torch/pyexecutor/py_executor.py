@@ -248,7 +248,7 @@ class PyExecutor:
         self.send_handles = [None] * self.num_micro_batches
 
         self.inflight_req_ids = ReqIdsSet()
-        self.canceled_req_ids = ReqIdsSet()
+        self.canceled_req_ids = set()
 
         self.model_engine.warmup(self.resource_manager)
         if self.draft_model_engine is not None:
@@ -354,7 +354,7 @@ class PyExecutor:
         Args:
             id (int): The request id for which to cancel the response
         """
-        self.canceled_req_ids.insert(id)
+        self.canceled_req_ids.add(id)
 
     def shutdown(self):
         """
@@ -1357,7 +1357,7 @@ class PyExecutor:
                 req = executor_request_to_llm_request(req_id, exe_req)
                 self.active_requests.append(req)
             elif _is_cancel_request(req_item):
-                self.canceled_req_ids.insert(req_item)
+                self.canceled_req_ids.add(req_item)
 
         return False
 
@@ -1500,7 +1500,7 @@ class PyExecutor:
                 req.query_id = query_token_ids
                 self.active_requests.append(req)
             elif _is_cancel_request(req_item):
-                self.canceled_req_ids.insert(req_item)
+                self.canceled_req_ids.add(req_item)
 
         return False
 
@@ -2017,7 +2017,7 @@ class PyExecutor:
                 cancelled_responses[req_id] = request.create_response(
                     False, self.dist.rank)
                 self.canceled_requests.append(request)
-                self.canceled_req_ids.erase(req_id)
+                self.canceled_req_ids.remove(req_id)
             else:
                 left_requests.append(request)
         self.active_requests = left_requests
