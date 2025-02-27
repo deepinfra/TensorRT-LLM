@@ -2,15 +2,17 @@
 import asyncio
 import signal
 from contextlib import asynccontextmanager
+from functools import wraps
 from http import HTTPStatus
 from pathlib import Path
-from typing import AsyncGenerator, AsyncIterator, List, Tuple, TypedDict
+from typing import AsyncGenerator, AsyncIterator, List, Tuple, TypedDict, Callable, Awaitable, Any, Type
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError, HTTPException
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 from transformers import PreTrainedTokenizer
 
 # yapf: disable
@@ -45,6 +47,76 @@ prom_metrics = defaultdict(float, {
 
 # yapf: enale
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
+
+
+async def disconnect_poller(request: Request, result: Any):
+    """
+    Poll for a disconnect.
+    If the request disconnects, stop polling and return.
+    """
+    try:
+        # while not await request.is_disconnected():
+        #     await asyncio.sleep(0.01)
+        while True:
+            message = await request.receive()
+            if message["type"] == "http.disconnect":
+                break
+
+        print("Request disconnected")
+
+        return result
+    except asyncio.CancelledError:
+        print("Stopping polling loop")
+
+
+def cancel_on_disconnect(model_type: Type[BaseModel]):
+    """
+    Decorator that will check if the client disconnects,
+    and cancel the task if required.
+    """
+
+    def cancel_on_disconnect_inner(handler: Callable):
+
+        @wraps(handler)
+        async def cancel_on_disconnect_decorator(self, fastapi_request: Request, request: model_type):
+            sentinel = object()
+            print(self, fastapi_request, request)
+
+            # Create two tasks, one to poll the request and check if the
+            # client disconnected, and another which is the request handler
+            poller_task = asyncio.ensure_future(disconnect_poller(fastapi_request, sentinel))
+            handler_task = asyncio.ensure_future(handler(self, fastapi_request=fastapi_request, request=request))
+
+            done, pending = await asyncio.wait(
+                [poller_task, handler_task], return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Cancel any outstanding tasks
+            for t in pending:
+                t.cancel()
+
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    print(f"{t} was cancelled")
+                except Exception as exc:
+                    print(f"{t} raised {exc} when being cancelled")
+
+            # Return the result if the handler finished first
+            if handler_task in done:
+                return await handler_task
+
+            # Otherwise, raise an exception
+            # This is not exactly needed, but it will prevent
+            # validation errors if your request handler is supposed
+            # to return something.
+            print("Raising an HTTP error because I was disconnected!!")
+
+            raise HTTPException(503)
+
+        return cancel_on_disconnect_decorator
+
+    return cancel_on_disconnect_inner
 
 
 class ConversationMessage(TypedDict):
@@ -181,7 +253,8 @@ class OpenAIServer:
         model_list = ModelList(data=[ModelCard(id=self.model)])
         return JSONResponse(content=model_list.model_dump())
 
-    async def openai_chat(self, request: ChatCompletionRequest) -> Response:
+    @cancel_on_disconnect(ChatCompletionRequest)
+    async def openai_chat(self, fastapi_request: Request, request: ChatCompletionRequest) -> Response:
 
         did_complete = False
 
@@ -378,6 +451,7 @@ class OpenAIServer:
             return response
 
         prom_metrics["request_started_total"] += 1
+        promise: Optional[RequestOutput] = None
         try:
             conversation: List[ConversationMessage] = []
             for msg in request.messages:
@@ -411,11 +485,17 @@ class OpenAIServer:
         except CppExecutorError:
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
+        except asyncio.CancelledError:
+            prom_metrics["request_cancelled_total"] += 1
+            if promise is not None:
+                promise.abort()
+            return self.create_error_response("cancelled")
         except Exception as e:
             prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
-    async def openai_completion(self, request: CompletionRequest) -> Response:
+    @cancel_on_disconnect(CompletionRequest)
+    async def openai_completion(self, fastapi_request: Request, request: CompletionRequest) -> Response:
 
         def merge_promises(promises: List[RequestOutput]) -> AsyncIterator[Tuple[int, RequestOutput]]:
             outputs = asyncio.Queue()
@@ -563,6 +643,11 @@ class OpenAIServer:
         except CppExecutorError:
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
+        except asyncio.CancelledError:
+            prom_metrics["request_cancelled_total"] += 1
+            for promise in promises:
+                promise.abort()
+            return self.create_error_response("cancelled")
         except Exception as e:
             prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
