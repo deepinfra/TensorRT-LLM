@@ -1,7 +1,4 @@
 enable_attention_dp: false
-enable_chunked_prefill: true
-kv_cache_config:
-  enable_block_reuse: true
 pytorch_backend_config:
   enable_overlap_scheduler: true
   use_cuda_graph: true
