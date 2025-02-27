@@ -564,7 +564,7 @@ class LlmArgs:
         # TODO[chunweiy]: Enable this option in the future
         # Currently we want LLMAPI to be consistent with the lower APIs in the model building, thus disable this to avoid
         # magics.
-        self.perform_config_arbitration = True
+        self.perform_config_arbitration = False
 
         if self.skip_tokenizer_init:
             self.tokenizer = None
