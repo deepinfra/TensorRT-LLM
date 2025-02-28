@@ -133,7 +133,9 @@ class Deepseekv3Gate(nn.Module):
     def noaux_tc(self, logits):
         n_group = self.n_group
         scores = F.sigmoid(logits)
-        scores_with_bias = scores + self.e_score_correction_bias
+        scores_with_bias = scores
+        if self.e_score_correction_bias is not None:
+            scores_with_bias = scores + self.e_score_correction_bias
         scores_shape = list(scores_with_bias.shape)
 
         if enable_llm_debug():
@@ -189,8 +191,11 @@ class Deepseekv3Gate(nn.Module):
     def load_weights(self, weights: List[Dict]):
         assert len(weights) == 1
         self.weight.copy_(weights[0]["weight"][:].to(torch.float32))
-        self.e_score_correction_bias.copy_(
-            weights[0]["e_score_correction_bias"][:].to(torch.float32))
+        if "e_score_correction_bias" in weights[0]:
+            self.e_score_correction_bias.copy_(
+                weights[0]["e_score_correction_bias"][:].to(torch.float32))
+        else: #v2 model
+            self.e_score_correction_bias = None
 
 
 class Deepseekv3MoE(nn.Module):
@@ -863,3 +868,9 @@ class DeepseekV3ForCausalLM(DecoderModelForCausalLM[DeepseekV3Model,
             else:
                 layer.next_layer_layernorm = self.model.layers[
                     idx + 1].input_layernorm
+
+@register_auto_model("DeepseekV2ForCausalLM")
+class DeepseekV2ForCausalLM(DeepseekV3ForCausalLM):
+
+    def __init__(self, model_config: ModelConfig[PretrainedConfig]):
+        super().__init__(model_config)
