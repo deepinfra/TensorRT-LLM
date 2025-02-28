@@ -131,7 +131,9 @@ class Deepseekv3RoutingImpl():
     def noaux_tc(self, logits, e_score_correction_bias):
         n_group = self.n_group
         scores = F.sigmoid(logits)
-        scores_with_bias = scores + e_score_correction_bias
+        scores_with_bias = scores
+        if e_score_correction_bias is not None:
+            scores_with_bias = scores + e_score_correction_bias
         scores_shape = list(scores_with_bias.shape)
 
         if enable_llm_debug():
@@ -235,8 +237,11 @@ class Deepseekv3Gate(BaseMoeRoutingMethod):
 
         self.weight.copy_(weights[0]["weight"][:])
 
-        self.e_score_correction_bias.copy_(
-            weights[0]["e_score_correction_bias"][:].to(torch.float32))
+        if "e_score_correction_bias" in weights[0]:
+            self.e_score_correction_bias.copy_(
+                weights[0]["e_score_correction_bias"][:].to(torch.float32))
+        else: #v2 model
+            self.e_score_correction_bias = None
 
     def apply(self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return self.routing_impl.apply(logits, self.e_score_correction_bias)
@@ -1206,3 +1211,9 @@ class DeepseekV3ForCausalLM(DecoderModelForCausalLM[DeepseekV3Model,
                 # layers[idx + 1] is MissingLayer for last layer in pp rank
                 layer.next_layer_layernorm = self.model.layers[
                     idx + 1].input_layernorm
+
+@register_auto_model("DeepseekV2ForCausalLM")
+class DeepseekV2ForCausalLM(DeepseekV3ForCausalLM):
+
+    def __init__(self, model_config: ModelConfig[PretrainedConfig]):
+        super().__init__(model_config)
