@@ -22,10 +22,9 @@ from tensorrt_llm.serve import OpenAIServer
               help="Path | HF model name."
               "Model path to use (same as positional argument).")
 @click.option("--speculative-model",
-              type=str,
-              default=None,
-              help="Path | HF model name."
-              "Speculative model path to use.")
+              type=bool,
+              default=False,
+              help="Flag to enable speculative execution")
 @click.option("--served-model-name",
               type=str,
               default=None,
@@ -117,7 +116,7 @@ def main(model_path: Optional[str], model: Optional[str], served_model_name: Opt
          max_seq_len: int, tp_size: int, pp_size: int, ep_size: Optional[int],
          gpus_per_node: Optional[int], kv_cache_free_gpu_memory_fraction: float,
          num_postprocess_workers: int, trust_remote_code: bool, load_format: str,
-         max_log_len: int, speculative_model: Optional[str],
+         max_log_len: int, speculative_model: Optional[bool],
          extra_llm_api_options: Optional[str]):
     """Running an OpenAI API compatible server
 
@@ -143,12 +142,9 @@ def main(model_path: Optional[str], model: Optional[str], served_model_name: Opt
         capacity_scheduler_policy=CapacitySchedulerPolicy.GUARANTEED_NO_EVICT,
         dynamic_batch_config=dynamic_batch_config,
     )
-    if speculative_model in ("", "true", "True"):
-        speculative_model = model
 
     llm_args = {
         "model": model,
-        "speculative_model": speculative_model,
         "scheduler_config": scheduler_config,
         "tokenizer": tokenizer,
         "tensor_parallel_size": tp_size,
@@ -167,6 +163,8 @@ def main(model_path: Optional[str], model: Optional[str], served_model_name: Opt
     if extra_llm_api_options is not None:
         llm_args = update_llm_args_with_extra_options(llm_args,
                                                       extra_llm_api_options)
+    if speculative_model:
+        llm_args['speculative_config']['speculative_model'] = model
 
     if backend == 'pytorch':
         llm = PyTorchLLM(**llm_args)
