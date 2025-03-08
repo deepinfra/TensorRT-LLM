@@ -85,7 +85,6 @@ def cancel_on_disconnect(model_type: Type[BaseModel]):
         @wraps(handler)
         async def cancel_on_disconnect_decorator(self, fastapi_request: Request, request: model_type):
             sentinel = object()
-            print(self, fastapi_request, request)
 
             # Create two tasks, one to poll the request and check if the
             # client disconnected, and another which is the request handler
