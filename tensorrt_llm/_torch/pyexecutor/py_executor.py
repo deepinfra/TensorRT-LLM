@@ -414,7 +414,7 @@ class PyExecutor:
 
             if last_start_time is not None and self.dist.rank == 0:
                 iter_states = self.model_engine.iter_states
-                total_running = iter_states['num_ctx_requests'] + iter_states['num_generation_tokens']
+                total_running = iter_states['num_ctx_requests'] + iter_states['num_generation_tokens'] / (1 + self.model_engine.max_draft_len)
                 prom_metrics["num_requests_running"] = total_running
                 prom_metrics["num_requests_swapped"] = total_running - len(self.active_requests)
                 prom_metrics["iteration_tokens_total_sum"] += iter_states['num_ctx_tokens'] + iter_states['num_generation_tokens']
