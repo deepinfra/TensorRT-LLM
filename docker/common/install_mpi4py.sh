@@ -63,5 +63,5 @@ index f14934d1..eebfb8fc 100644
 EOF
 
 cd ${OLDPWD}
-pip3 install /tmp/mpi4py-${MPI4PY_VERSION}
+( cd /tmp/mpi4py-${MPI4PY_VERSION} && python3 setup.py install )
 rm -rf /tmp/mpi4py*
