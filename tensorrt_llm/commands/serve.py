@@ -20,6 +20,7 @@ from tensorrt_llm.serve import OpenAIDisaggServer, OpenAIServer
 
 
 def get_llm_args(model: str,
+                 served_model_name: str,
                  tokenizer: Optional[str] = None,
                  backend: Optional[str] = None,
                  max_beam_width: int = BuildConfig.max_beam_width,
@@ -99,7 +100,12 @@ def launch_server(host: str, port: int, llm_args: dict):
 
 
 @click.command("serve")
-@click.argument("model", type=str)
+@click.argument("model_name", type=str, default=None)
+@click.option("--model",
+              type=str,
+              default=None,
+              help="model name or path."
+              "Model name to use. Defaults to model_path.")
 @click.option("--served-model-name",
               type=str,
               default=None,
@@ -185,7 +191,8 @@ def launch_server(host: str, port: int, llm_args: dict):
     help=
     "Path to a YAML file that overwrites the parameters specified by trtllm-serve."
 )
-def serve(model: str, served_model_name: Optional[str],
+def serve(model_name: Optional[str], model: Optional[str],
+          served_model_name: Optional[str],
           tokenizer: Optional[str], host: str, port: int,
           log_level: str, backend: str, max_beam_width: int,
           max_batch_size: int, max_num_tokens: int, max_seq_len: int,
@@ -200,6 +207,7 @@ def serve(model: str, served_model_name: Optional[str],
     MODEL: model name | HF checkpoint path | TensorRT engine path
     """
     logger.set_level(log_level)
+    model = model or model_name
 
     llm_args_dict = {}
     if extra_llm_api_options is not None:
