@@ -602,7 +602,6 @@ class MLA(nn.Module):
         compressed_kv: torch.Tensor,
         k_pe: torch.Tensor,
         attn_metadata: AttentionMetadata,
-        position_ids: Optional[torch.LongTensor] = None,
     ) -> torch.Tensor:
         latent_cache = torch.cat([compressed_kv, k_pe], dim=-1)
 
@@ -641,7 +640,7 @@ class MLA(nn.Module):
 
         return attn_output
 
-    def forward_paged_context_fmha_for_mla(
+    def forward_context_with_cached_kv(
         self,
         q: torch.Tensor,
         compressed_kv: torch.Tensor,
@@ -709,9 +708,9 @@ class MLA(nn.Module):
             self.num_heads * (self.qk_nope_head_dim + self.qk_rope_head_dim))
         assert q.is_contiguous()
 
-        # set compressed paged kv cache for mla
+        # append paged kv cache for mla
         # we may finish it inside the attention op by passing latent_cache
-        trtllm_attention.set_compressed_paged_kv_cache_for_mla(
+        trtllm_attention.append_paged_kv_cache_for_mla(
             compressed_kv,
             k_pe,
             attn_metadata,
@@ -769,15 +768,15 @@ class MLA(nn.Module):
         if isinstance(self.mha, TrtllmAttention):
             assert isinstance(attn_metadata, TrtllmAttentionMetadata)
             trtllm_attention = cast(TrtllmAttention, self.mha)
-            if trtllm_attention.use_paged_context_fmha_for_mla(attn_metadata):
-                return self.forward_paged_context_fmha_for_mla(
+            if trtllm_attention.has_cached_kv_for_mla_context(attn_metadata):
+                return self.forward_context_with_cached_kv(
                     q, compressed_kv, k_pe, attn_metadata, position_ids)
             else:
                 return self.forward_context_default(q, compressed_kv, k_pe,
-                                                    attn_metadata, position_ids)
+                                                    attn_metadata)
         else:
             return self.forward_context_default(q, compressed_kv, k_pe,
-                                                attn_metadata, position_ids)
+                                                attn_metadata)
 
     def forward_generation(
         self,
