@@ -154,6 +154,7 @@ class OpenAIServer:
             self.model = model_dir.name
         else:
             self.model = model
+        self.stats = {}
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
@@ -199,7 +200,7 @@ class OpenAIServer:
         self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
         self.app.add_api_route("/v1/models", self.get_model, methods=["GET"])
         # TODO: the metrics endpoint only reports iteration stats, not the runtime stats for now
-        self.app.add_api_route("/metrics", self.get_iteration_stats, methods=["GET"])
+        self.app.add_api_route("/metrics2", self.get_iteration_stats, methods=["GET"])
         # TODO: workaround before ETCD support
         self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["POST"])
         self.app.add_api_route("/v1/completions",
@@ -252,6 +253,53 @@ class OpenAIServer:
         for metric_key, metric_val in prom_metrics.items():
             separator = ',' if '{' in metric_key else '{'
             resp += f'vllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
+#   {
+#       "cpuMemUsage":0,
+#       "gpuMemUsage":150961324032,
+#       "inflightBatchingStats":{
+#          "avgNumDecodedTokensPerIter":0.0,
+#          "microBatchId":0,
+#          "numContextRequests":0,
+#          "numCtxTokens":0,
+#          "numGenRequests":137,
+#          "numPausedRequests":0,
+#          "numScheduledRequests":137
+#       },
+#       "iter":2137,
+#       "iterLatencyMS":0.27065086364746094,
+#       "kvCacheStats":{
+#          "allocNewBlocks":234229,
+#          "allocTotalBlocks":234229,
+#          "cacheHitRate":0.0,
+#          "freeNumBlocks":6426,
+#          "maxNumBlocks":25239,
+#          "missedBlocks":0,
+#          "reusedBlocks":0,
+#          "tokensPerBlock":32,
+#          "usedNumBlocks":18813
+#       },
+#       "maxBatchSizeRuntime":0,
+#       "maxBatchSizeStatic":0,
+#       "maxBatchSizeTunerRecommended":0,
+#       "maxNumActiveRequests":192,
+#       "maxNumTokensRuntime":0,
+#       "maxNumTokensStatic":0,
+#       "maxNumTokensTunerRecommended":0,
+#       "newActiveRequestsQueueLatencyMS":81.47549295425415,
+#       "numActiveRequests":189,
+#       "numCompletedRequests":0,
+#       "numNewActiveRequests":0,
+#       "numQueuedRequests":3,
+#       "pinnedMemUsage":0,
+#       "staticBatchingStats":null,
+#       "timestamp":""
+#    }
+        await self.get_iteration_stats()
+        if self.stat:
+           if "kvCacheStats" in self.stat:
+                kv_cache_stats = self.stat["kvCacheStats"]
+                for key, value in kv_cache_stats.items():
+                    resp += f'vllm:kv_cache_stats{{model_name="{self.model}",key="{key}"}} {float(value)}\n'
         return Response(status_code=200, content=resp)
 
     async def get_model(self) -> JSONResponse:
@@ -261,6 +309,7 @@ class OpenAIServer:
     async def get_iteration_stats(self) -> JSONResponse:
         stats = []
         async for stat in self.llm.get_stats_async(2):
+            self.stat = stat
             stats.append(stat)
         return JSONResponse(content=stats)
 
