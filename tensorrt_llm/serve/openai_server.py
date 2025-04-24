@@ -154,7 +154,7 @@ class OpenAIServer:
             self.model = model_dir.name
         else:
             self.model = model
-        self.stats = {}
+        self.stat = {}
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
@@ -202,7 +202,7 @@ class OpenAIServer:
         # TODO: the metrics endpoint only reports iteration stats, not the runtime stats for now
         self.app.add_api_route("/metrics2", self.get_iteration_stats, methods=["GET"])
         # TODO: workaround before ETCD support
-        self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["POST"])
+        self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["GET"])
         self.app.add_api_route("/v1/completions",
                                self.openai_completion,
                                methods=["POST"])
@@ -308,20 +308,21 @@ class OpenAIServer:
 
     async def get_iteration_stats(self) -> JSONResponse:
         stats = []
-        async for stat in self.llm.get_stats_async(2):
+        async for stat in self.llm.get_stats_async(0):
             self.stat = stat
             stats.append(stat)
         return JSONResponse(content=stats)
 
-    async def get_kv_cache_events(self) -> JSONResponse:
-        events = []
-        try:
-            async for event in self.llm.get_kv_cache_events_async(2):
-                events.append(event)
-        except IndexError:
-            # queue is empty, no more events
-            pass
-        return JSONResponse(content=events)
+    async def kv_cache_generator(self):
+        async for event in self.llm.get_kv_cache_events_async(None):
+            yield f'event: {event}\n\n'
+
+    async def get_kv_cache_events(self) -> StreamingResponse:
+        """
+        This endpoint is used to stream kv cache events.
+        """
+        return StreamingResponse(self.kv_cache_generator(),
+                                 media_type="text/event-stream")
 
     @cancel_on_disconnect(ChatCompletionRequest)
     async def openai_chat(self, request: ChatCompletionRequest, raw_request: Request) -> Response:
