@@ -313,9 +313,44 @@ class OpenAIServer:
             stats.append(stat)
         return JSONResponse(content=stats)
 
+    # Due to tritonserver quirkiness, single-element tensors are returned as plain numbers.
+    # kv_hashes: list[int] = int_or_list(kv_response["kv_hashes"])
+    # kv_root_hashes: list[int] = int_or_list(kv_response["kv_root_hashes"])
+    # kv_parent_hashes: list[int] = int_or_list(kv_response["kv_parent_hashes"])
+    # kv_cache_levels: list[int] = int_or_list(kv_response["kv_cache_levels"])
+
     async def kv_cache_generator(self):
         async for event in self.llm.get_kv_cache_events_async(None):
-            yield f'event: {event}\n\n'
+            kv_hashes = []
+            kv_root_hashes = []
+            kv_parent_hashes = []
+            kv_cache_levels = []
+
+            data = event['data']
+            parent_hash = data['parent_hash']
+            type = data['type']
+            block_hashes = []
+            if type == "stored":
+                blocks = data['blocks']
+                block_hashes = [block['block_hash'] for block in blocks]
+                cache_level = 0
+            elif type == "removed":
+                block_hashes = data['block_hashes']
+                cache_level = -1
+            elif type == "created":
+                num_blocks_per_cache_level = data['num_blocks_per_cache_level'] # e.g. [33445, 0]
+            for block_hash in block_hashes:
+                kv_hashes.append(block_hash)
+                kv_root_hashes.append(None)
+                kv_parent_hashes.append(parent_hash)
+                kv_cache_levels.append(cache_level)
+            ret_event = {
+                "kv_hashes": kv_hashes,
+                "kv_root_hashes": kv_root_hashes,
+                "kv_parent_hashes": kv_parent_hashes,
+                "kv_cache_levels": kv_cache_levels,
+            }
+            yield f'event: {ret_event}\n\n'
 
     async def get_kv_cache_events(self) -> StreamingResponse:
         """
