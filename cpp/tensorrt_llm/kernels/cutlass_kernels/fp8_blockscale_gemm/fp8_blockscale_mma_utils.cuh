@@ -457,39 +457,55 @@ struct SM90_64x192x32_F32E4M3E4M3_SS
 
 __device__ void warpgroup_arrive()
 {
-#ifdef CUTLASS_ARCH_MMA_SM90A_ENABLED
+#if defined(CUTLASS_ARCH_MMA_SM90A_ENABLED)
+    // Hopper-specific implementation
     asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
+#elif defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)
+    // Blackwell-specific implementation
+    warpgroup_arrive_sm100();
 #else
-    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a");
+    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a and SM100");
 #endif
 }
 
 __device__ void warpgroup_commit_batch()
 {
-#ifdef CUTLASS_ARCH_MMA_SM90A_ENABLED
+#if defined(CUTLASS_ARCH_MMA_SM90A_ENABLED)
+    // Hopper-specific implementation
     asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
+#elif defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)
+    // Blackwell-specific implementation
+    warpgroup_commit_batch_sm100();
 #else
-    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a");
+    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a and SM100");
 #endif
 }
 
 __device__ void warpgroup_fence_operand(float& reg)
 {
-#ifdef CUTLASS_ARCH_MMA_SM90A_ENABLED
+#if defined(CUTLASS_ARCH_MMA_SM90A_ENABLED)
+    // Hopper-specific implementation
     asm volatile("" : "+f"(reg)::"memory");
+#elif defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)
+    // Blackwell-specific implementation
+    warpgroup_fence_operand_sm100(reg);
 #else
-    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a");
+    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a and SM100");
 #endif
 }
 
 template <int N>
 __device__ void warpgroup_wait()
 {
-#ifdef CUTLASS_ARCH_MMA_SM90A_ENABLED
+#if defined(CUTLASS_ARCH_MMA_SM90A_ENABLED)
+    // Hopper-specific implementation
     static_assert(N >= 0 && N <= 7, "WGMMA wait: N must be in range [0, 7]");
     asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(N) : "memory");
+#elif defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)
+    // Blackwell-specific implementation
+    warpgroup_wait_sm100<N>();
 #else
-    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a");
+    CUTE_INVALID_CONTROL_PATH("wgmma is only available on SM90a and SM100");
 #endif
 }
 
@@ -566,6 +582,8 @@ struct Fp8MmaSelector
 {
     static constexpr auto select_type()
     {
+#if defined(CUTLASS_ARCH_MMA_SM90A_ENABLED)
+        // Hopper-specific implementation
         if constexpr (std::is_same_v<ElementA, __nv_fp8_e4m3> && std::is_same_v<ElementB, __nv_fp8_e4m3>)
         {
             if constexpr (N == 16)
@@ -605,6 +623,16 @@ struct Fp8MmaSelector
                 return SM90_64x192x32_F32E4M3E4M3_SS();
             }
         }
+#elif defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)
+        // Blackwell-specific implementation
+        if constexpr (std::is_same_v<ElementA, __nv_fp8_e4m3> && std::is_same_v<ElementB, __nv_fp8_e4m3>)
+        {
+            if constexpr (N == 128)
+            {
+                return SM100_64x128x32_F32E4M3E4M3_SS();
+            }
+        }
+#endif
     }
 
     using Type = decltype(select_type());

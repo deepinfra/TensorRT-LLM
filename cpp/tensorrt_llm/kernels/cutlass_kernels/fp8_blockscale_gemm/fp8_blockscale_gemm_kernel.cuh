@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "fp8_blockscale_mma_utils.cuh"
+#include "fp8_blockscale_mma_utils_sm100.cuh"
 #include "fp8_blockscale_tma_utils.cuh"
 #include "tensorrt_llm/common/cudaUtils.h"
 #include "tensorrt_llm/common/logger.h"
