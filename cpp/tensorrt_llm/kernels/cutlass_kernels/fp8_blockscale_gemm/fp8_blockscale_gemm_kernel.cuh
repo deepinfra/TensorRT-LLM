@@ -130,7 +130,7 @@ __inline__ __device__ __nv_bfloat16 warpReduceSum(__nv_bfloat16 val)
 __inline__ __device__ uint32_t elect_one_sync([[maybe_unused]] int lane_id)
 {
     uint32_t pred = 0;
-#if __CUDA_ARCH__ >= 900
+#if (__CUDA_ARCH__ >= 900) || (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)
     uint32_t laneid = 0;
     asm volatile(
         "\n\
@@ -336,7 +336,7 @@ __global__ void __launch_bounds__(TILE_M == 64 ? 256 : 384, 1) cooperative_1x128
     int shape_k, __grid_constant__ const CUtensorMap tensor_map_a, __grid_constant__ const CUtensorMap tensor_map_b,
     __grid_constant__ const CUtensorMap tensor_map_scales_a, int guessed_m)
 {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+#if (defined(__CUDA_ARCH__) && ((__CUDA_ARCH__ >= 900) || (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)))
     static_assert(sizeof(ElementA) == 1 && sizeof(ElementB) == 1);
     static_assert(TILE_K == 128);
     constexpr int ScaleGranMA = 1;
@@ -975,7 +975,7 @@ template <typename InputType, typename OutputType, typename ScaleType = float>
 __global__ void scale_1x128_kernel(
     OutputType* output, ScaleType* scales, InputType const* const input, int dim_x, int dim_y)
 {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+#if (defined(__CUDA_ARCH__) && ((__CUDA_ARCH__ >= 900) || (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)))
     size_t scales_along_dim_x = div_up(dim_x, 128);
     size_t scales_along_dim_y = div_up(dim_y, 1);
     size_t stride_scale_dim_y = div_up(dim_y, 4) * 4;
@@ -1093,7 +1093,7 @@ __global__ void scale_1x128_kernel(OutputType* output, float* scales, InputType 
     int64_t const* problem_m_offsets, int64_t* problem_m_padded_offsets, int num_problems, int dim_x,
     int64_t scale_leading_dim, uint32_t scale_dim_x_mul, uint32_t scale_dim_x_shr)
 {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+#if (defined(__CUDA_ARCH__) && ((__CUDA_ARCH__ >= 900) || (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)))
     extern __shared__ char shared_memory[];
     int64_t* smem_problem_m_boundaries = reinterpret_cast<int64_t*>(shared_memory);
     int64_t* smem_problem_m_padded_boundaries = smem_problem_m_boundaries + num_problems;
@@ -1256,7 +1256,7 @@ template <typename InputType, typename OutputType, typename ScaleType = float>
 __global__ void scale_1x128_reshape_kernel(
     OutputType* output, ScaleType* scales, InputType const* const input, int dim_x, int dim_h, int dim_y, int stride_x)
 {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+#if (defined(__CUDA_ARCH__) && ((__CUDA_ARCH__ >= 900) || (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)))
     size_t scales_along_dim_x = div_up(dim_x, 128);
     size_t scales_along_dim_y = div_up(dim_y, 1);
     size_t scales_along_dim_h = div_up(dim_h, 1);
@@ -1338,7 +1338,7 @@ template <typename InputType, typename OutputType, typename ScaleType = float>
 __global__ void scale_128x128_kernel(
     OutputType* output, ScaleType* scales, InputType const* const input, int dim_x, int dim_y)
 {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
+#if (defined(__CUDA_ARCH__) && ((__CUDA_ARCH__ >= 900) || (__CUDA_ARCH__ >= 100 && __CUDA_ARCH__ < 200)))
     int scales_along_dim_x = div_up(dim_x, 128);
     int scales_along_dim_y = div_up(dim_y, 128);
 

@@ -67,7 +67,7 @@ void CutlassFp8BlockScaleGemmRunner<ElementA, ElementB, ElementD>::gemm(void* ma
         ws_ptr += div_up(shape_n, 128) * div_up(shape_k, 128) * sizeof(float);
     }
 
-#ifdef COMPILE_HOPPER_TMA_GEMMS
+#if defined(COMPILE_HOPPER_TMA_GEMMS) || defined(COMPILE_BLACKWELL_TMA_GEMMS)
     if constexpr (internal_quantize_a && internal_quantize_b)
     {
         fp8_gemm_run(reinterpret_cast<__nv_bfloat16 const*>(mat_a), fp8_mat_a, shape_k, per_token_per_128c_scales,
@@ -83,9 +83,9 @@ void CutlassFp8BlockScaleGemmRunner<ElementA, ElementB, ElementD>::gemm(void* ma
             reinterpret_cast<__nv_bfloat16*>(mat_d), shape_n, shape_m, shape_n, shape_k, stream, internal_quantize_a,
             internal_quantize_b);
     }
-#else  // COMPILE_HOPPER_TMA_GEMMS
-    TLLM_THROW("fp8 blockscale gemm only support Hopper.");
-#endif // COMPILE_HOPPER_TMA_GEMMS
+#else
+    TLLM_THROW("fp8 blockscale gemm only supports Hopper and Blackwell architectures.");
+#endif
 }
 
 template <typename ElementA, typename ElementB, typename ElementD>
@@ -149,7 +149,7 @@ void CutlassFp8BlockScaleGemmRunner<ElementA, ElementB, ElementD>::moeGemm(void*
     problem_m_padded_offsets = reinterpret_cast<int64_t*>(ws_ptr);
     ws_ptr += (num_problems + 1) * sizeof(int64_t);
 
-#ifdef COMPILE_HOPPER_TMA_GEMMS
+#if defined(COMPILE_HOPPER_TMA_GEMMS) || defined(COMPILE_BLACKWELL_TMA_GEMMS)
     if constexpr (std::is_same_v<ElementA, __nv_bfloat16> && std::is_same_v<ElementB, __nv_bfloat16>)
     {
         fp8_grouped_gemm_run(reinterpret_cast<__nv_bfloat16 const*>(mat_a), fp8_mat_a, per_token_per_128c_scales,
@@ -178,7 +178,7 @@ void CutlassFp8BlockScaleGemmRunner<ElementA, ElementB, ElementD>::moeGemm(void*
         TLLM_THROW("fp8 blockscale gemm only support __nv_fp8_e4m3 or bfloat16 as dataType.");
     }
 #else
-    TLLM_THROW("fp8 blockscale gemm only support Hopper.");
+    TLLM_THROW("fp8 blockscale gemm only supports Hopper and Blackwell architectures.");
 #endif
 }
 

@@ -175,7 +175,7 @@ endfunction()
 
 foreach(
   target_name
-  ar_gemm_src;fpA_intB_gemm_src;fb_gemm_src;fp8_blockscale_gemm_src;gemm_swiglu_sm90_src
+  ar_gemm_src;gemm_swiglu_sm90_src
 )
   process_target(${target_name} true false) # Name, Hopper, Blackwell
 endforeach()
@@ -183,6 +183,8 @@ endforeach()
 foreach(target_name fpA_intB_gemm_src;fb_gemm_src)
   process_target(${target_name} false true) # Name, Hopper, Blackwell
 endforeach()
+
+process_target(fp8_blockscale_gemm_src true true) # Name, Hopper, Blackwell
 
 # foreach(target_name moe_gemm_src) process_target(${target_name} true true) #
 # Name, Hopper, Blackwell endforeach()
