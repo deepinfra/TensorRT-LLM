@@ -223,7 +223,7 @@ class CompletionPostprocArgs(PostprocArgs):
         )
 
 
-@nvtx_range_debug("completion_stream_post_processor")
+@nvtx_range("completion_stream_post_processor")
 def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args: CompletionPostprocArgs) -> List[CompletionStreamResponse]:
     res: List[CompletionStreamResponse] = []
     prompt_tokens = args.num_prompt_tokens
