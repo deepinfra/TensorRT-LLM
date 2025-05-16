@@ -300,6 +300,8 @@ class PyExecutor:
         Args:
             id (int): The request id for which to cancel the response
         """
+        if id is None:
+            return
         self.canceled_req_ids.add(id)
 
     def shutdown(self):
