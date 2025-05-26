@@ -352,16 +352,18 @@ class OpenAIServer:
                 promise: RequestOutput, postproc_params: PostprocParams) -> ChatCompletionResponse:
             await promise.aresult()
             if self.postproc_worker_enabled:
-                return promise.outputs[0]._postprocess_result
+                chat_response =promise.outputs[0]._postprocess_result
             else:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                res = post_processor(promise, args)
-                for choice in res.choices:
+                chat_response = post_processor(promise, args)
+                for choice in chat_response.choices:
                     if choice.finish_reason is not None:
                         prom_metrics["request_completed_total"] += 1
                         prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-                return res
 
+            # Add prompt_tokens_ids to the response
+            chat_response.prompt_token_ids = promise.prompt_token_ids
+            return chat_response
 
         prom_metrics["request_started_total"] += 1
         promise: Optional[RequestOutput] = None
@@ -376,16 +378,19 @@ class OpenAIServer:
 
             conversation, mm_coroutines = parse_chat_messages_coroutines(request.messages, self.model_config)
 
-            prompt: str = apply_chat_template(
-                tokenizer=self.tokenizer,
-                processor=self.processor,
-                conversation=conversation,
-                add_generation_prompt=request.add_generation_prompt,
-                tools=tool_dicts,
-                documents=request.documents,
-                chat_template=request.chat_template,
-                chat_template_kwargs=request.chat_template_kwargs or {},
-            )
+            if request.prompt_token_ids is not None:
+                prompt = request.prompt_token_ids
+            else:
+                prompt: str = apply_chat_template(
+                    tokenizer=self.tokenizer,
+                    processor=self.processor,
+                    conversation=conversation,
+                    add_generation_prompt=request.add_generation_prompt,
+                    tools=tool_dicts,
+                    documents=request.documents,
+                    chat_template=request.chat_template,
+                    chat_template_kwargs=request.chat_template_kwargs or {},
+                )
             prompt = prompt_inputs(prompt)
 
             mm_data = await mm_coroutines
@@ -490,6 +495,7 @@ class OpenAIServer:
         async def create_completion_response(
                 generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]]) -> CompletionResponse:
             all_choices: List[CompletionResponseChoice] = []
+            all_prompt_token_ids: List[List[int]] = []
             num_prompt_tokens = num_gen_tokens = 0
             async for request_output, postproc_params in generator:
                 pp_result: CompletionResponse
@@ -508,6 +514,7 @@ class OpenAIServer:
                 all_choices.extend(choices)
                 num_prompt_tokens += usage.prompt_tokens
                 num_gen_tokens += usage.completion_tokens
+                all_prompt_token_ids.append(request_output.prompt_token_ids)
 
             usage_info = UsageInfo(
                 prompt_tokens=num_prompt_tokens,
@@ -518,6 +525,7 @@ class OpenAIServer:
                 model=self.model,
                 choices=all_choices,
                 usage=usage_info,
+                prompt_token_ids=all_prompt_token_ids,
             )
             return response
 
