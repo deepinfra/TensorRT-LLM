@@ -72,8 +72,7 @@ def _get_from_request_queue(request_queue, timeout: datetime.timedelta,
             while req_count < max_req_count:
                 queue_item = request_queue.get_nowait()
                 items.append(queue_item)
-                if queue_item[0] != SHUTDOWN_REQUEST_ID:
-                    # if it is request, not shutdown signal
+                if not queue_item.is_shutdown_request():
                     req_count += 1
     except queue.Empty:
         pass
@@ -306,7 +305,8 @@ class PyExecutor:
             start_time = time.time()
             for request in requests:
                 self.start_times[self.next_req_id] = start_time
-                self.request_queue.put((self.next_req_id, request))
+                self.request_queue.put(
+                    RequestQueueItem(self.next_req_id, request))
                 req_ids.append(self.next_req_id)
                 self.next_req_id += 1
         finally:
@@ -351,7 +351,7 @@ class PyExecutor:
         """
         try:
             self.enqueue_lock.acquire()
-            self.request_queue.put((SHUTDOWN_REQUEST_ID, ))
+            self.request_queue.put(RequestQueueItem(SHUTDOWN_REQUEST_ID))
             self.active = False
         finally:
             self.enqueue_lock.release()
@@ -408,7 +408,7 @@ class PyExecutor:
                         request: ExecutorRequest,
                         query: Optional[List] = None):
         """
-        Enqueue a new request, only used in `StarAttention`.
+        Enqueue a new request, query is only used in `StarAttention`.
         """
         try:
             self.enqueue_lock.acquire()
@@ -418,9 +418,9 @@ class PyExecutor:
                 self.start_times[req_id] = time.time()
 
             if query is not None:
-                self.request_queue.put((req_id, request, query))
+                self.request_queue.put(RequestQueueItem(req_id, request, query))
             else:
-                self.request_queue.put((req_id, request))
+                self.request_queue.put(RequestQueueItem(req_id, request))
             self.next_req_id += 1
         finally:
             self.enqueue_lock.release()
@@ -1181,12 +1181,10 @@ class PyExecutor:
     def _update_new_active_requests_queue_latency(self, new_requests):
         if self.enable_iter_perf_stats and self.dist.rank == 0:
             now = time.time()
-            for req in new_requests:
-                if isinstance(req, tuple):
-                    req_id = req[0]
-                    if req_id in self.start_times:
-                        self.new_active_requests_queue_latency_ms += now - self.start_times.pop(
-                            req_id)
+            for req_item in new_requests:
+                if req_item.id in self.start_times:
+                    self.new_active_requests_queue_latency_ms += now - self.start_times.pop(
+                        req_item.id)
 
     @nvtx_range("_broadcast_new_requests")
     def _broadcast_new_requests(
@@ -1272,9 +1270,9 @@ class PyExecutor:
 
         self.has_context_request = False
         new_requests_cur_rank = []
-        if new_requests != [] and new_requests[0][
-                0] != SHUTDOWN_REQUEST_ID and self.expected_num_active_requests > all_ranks_num_active_requests[
-                    self.dist.tp_rank]:
+        if new_requests != [] and not new_requests[0].is_shutdown_request(
+        ) and self.expected_num_active_requests > all_ranks_num_active_requests[
+                self.dist.tp_rank]:
             # Balance context tokens across ranks
             HeapVal = namedtuple(
                 'HeapVal',
@@ -1297,15 +1295,16 @@ class PyExecutor:
             ]
             heapq.heapify(all_ranks_new_requests_heap)
             new_requests = sorted(new_requests,
-                                  key=lambda x: len(x[1].input_token_ids),
+                                  key=lambda x: len(x.request.input_token_ids),
                                   reverse=True)
-            for request in new_requests:
+            for request_item in new_requests:
                 val = heapq.heappop(all_ranks_new_requests_heap)
                 val = val._replace(
-                    num_tokens=val.num_tokens + len(request[1].input_token_ids),
+                    num_tokens=val.num_tokens +
+                    len(request_item.request.input_token_ids),
                     num_requests=val.num_requests - 1,
                 )
-                val.request_list.append(request)
+                val.request_list.append(request_item)
                 if val.num_requests > 0:
                     heapq.heappush(all_ranks_new_requests_heap, val)
                 elif val.rank == self.dist.tp_rank:
@@ -1314,8 +1313,8 @@ class PyExecutor:
             # In disaggregated serving, we might get either context request or
             # generation request. In IFB, we only get context request from request queue
             if self.kv_cache_transceiver:
-                for req in new_requests_cur_rank:
-                    if req[1].request_type == RequestType.REQUEST_TYPE_CONTEXT_ONLY:
+                for req_item in new_requests_cur_rank:
+                    if req_item.request.request_type == RequestType.REQUEST_TYPE_CONTEXT_ONLY:
                         self.has_context_request = True
                         break
             else:
@@ -1327,7 +1326,7 @@ class PyExecutor:
         self.num_fetch_requests_cur_rank = self.num_fetch_requests_cur_rank + len(
             new_requests_cur_rank)
 
-        if len(new_requests) == 1 and new_requests[0][0] == SHUTDOWN_REQUEST_ID:
+        if len(new_requests) == 1 and new_requests[0].is_shutdown_request():
             new_requests_cur_rank = new_requests
         return new_requests_cur_rank
 
@@ -1340,13 +1339,12 @@ class PyExecutor:
         # to be transferred to main thread when user needs them.
         kv_cache_manager.flush_iteration_events()
 
-    def _merge_tp_requests(self, new_requests: List[ExecutorRequest]):
-        for request in new_requests:
-            if request[0] == SHUTDOWN_REQUEST_ID:
+    def _merge_tp_requests(self, new_requests: List[RequestQueueItem]):
+        for req_item in new_requests:
+            if req_item.is_shutdown_request():
                 return True
         for req_item in new_requests:
-            req_id, exe_req = req_item
-            req = executor_request_to_llm_request(req_id, exe_req)
+            req = executor_request_to_llm_request(req_item.id, req_item.request)
             self.active_requests.append(req)
 
         return False
@@ -1365,7 +1363,8 @@ class PyExecutor:
                 self.active_requests.remove(req)
 
     def _collect_py_objects_from_requests(
-            self, requests, attribute_name: str) -> Optional[tuple[str, dict]]:
+            self, requests: list[RequestQueueItem],
+            attribute_name: str) -> Optional[tuple[str, dict]]:
         """WAR to gather dynamic Python-only attributes (e.g., custom logits processors)
         that cannot be handled by pybind serialization during MP communication.
 
@@ -1374,26 +1373,25 @@ class PyExecutor:
         """
         req_id_to_obj = {}
         for item in requests:
-            if item[0] == SHUTDOWN_REQUEST_ID:
+            if item.is_shutdown_request():
                 continue
-            req_id, req = item[:2]
-            obj = getattr(req, attribute_name, None)
+            obj = getattr(item.request, attribute_name, None)
             if obj is not None:
-                req_id_to_obj[req_id] = obj
+                req_id_to_obj[item.id] = obj
         return None if not req_id_to_obj else (attribute_name, req_id_to_obj)
 
-    def _attach_py_objects_to_requests(self, requests, attribute_name: str,
+    def _attach_py_objects_to_requests(self, requests: list[RequestQueueItem],
+                                       attribute_name: str,
                                        py_request_objects: dict):
         """Attaches Python-only objects (e.g., dynamic attributes not handled by pybind)
         to each request.
         """
         for item in requests:
-            if item[0] == SHUTDOWN_REQUEST_ID:
+            if item.is_shutdown_request():
                 continue
-            req_id, req = item[:2]
-            py_obj = py_request_objects.get(req_id)
+            py_obj = py_request_objects.get(item.id)
             if py_obj is not None:
-                setattr(req, attribute_name, py_obj)
+                setattr(item.request, attribute_name, py_obj)
 
     def _partition_context(self, ctx_ids_list):
         ctx_ids = torch.tensor(ctx_ids_list).unsqueeze(0)
@@ -1434,12 +1432,12 @@ class PyExecutor:
         return ctx_blocks, position_blocks, padding
 
     def _merge_star_attention_requests(self,
-                                       new_requests: List[ExecutorRequest]):
-        for request in new_requests:
-            if request[0] == SHUTDOWN_REQUEST_ID:
+                                       new_requests: list[RequestQueueItem]):
+        for req_item in new_requests:
+            if req_item.is_shutdown_request():
                 return True
         for req_item in new_requests:
-            req_id, exe_req, query_token_ids = req_item
+            req_id, exe_req, query_token_ids = req_item.id, req_item.request, req_item.query
             ctx_len0 = len(exe_req.input_token_ids)
             ctx_blocks, position_blocks, last_block_padding_num = [
                 exe_req.input_token_ids
@@ -1491,7 +1489,7 @@ class PyExecutor:
         return False
 
     @nvtx_range("_merge_requests")
-    def _merge_requests(self, new_requests: List[ExecutorRequest]):
+    def _merge_requests(self, new_requests: list[RequestQueueItem]):
         cp_config = self.dist.cp_config
         if 'cp_type' in cp_config:
             cp_type = cp_config['cp_type']
