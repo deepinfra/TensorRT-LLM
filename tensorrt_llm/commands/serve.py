@@ -139,7 +139,7 @@ def launch_server(host: str,
 
     backend = llm_args["backend"]
     model = llm_args["model"]
-    served_model_name = llm_args["served_model_name"]
+    served_model_name = llm_args.pop("served_model_name")
 
     if backend == 'pytorch':
         llm = PyTorchLLM(**llm_args)
