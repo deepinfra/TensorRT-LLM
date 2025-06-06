@@ -273,6 +273,7 @@ class TorchSampler(Sampler):
             token_log_probs = [{
                 token: Logprob(logprob=logprob, rank=1)
             } for token, logprob in zip(tokens, log_probs.tolist())]
+            print(token_log_probs)
             request.py_result.append_log_probs([token_log_probs])
 
         if hasattr(scheduled_requests, 'chunked_requests'):
