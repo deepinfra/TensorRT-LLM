@@ -279,8 +279,7 @@ def serve(model_name: Optional[str], model: Optional[str],
           extra_llm_api_options: Optional[str], reasoning_parser: Optional[str],
           metadata_server_config_file: Optional[str],
           server_role: Optional[str],
-          load_format: str, max_log_len: int,
-          extra_llm_api_options: Optional[str]):
+          load_format: str, max_log_len: int):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
