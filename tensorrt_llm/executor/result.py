@@ -237,7 +237,7 @@ class GenerationResultBase:
 
         if response_tensors.log_probs is not None:
             output._last_logprobs_len = len(output.logprobs)
-            output.logprobs = response_tensors.log_probs[src_idx]
+            output.logprobs.extend(response_tensors.log_probs[src_idx])
             # overcome some WAR in the cpp executor
             if finish_reasons[src_idx] != tllm.FinishReason.CANCELLED:
                 assert len(output.logprobs) == output.length
