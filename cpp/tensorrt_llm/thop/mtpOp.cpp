@@ -92,8 +92,8 @@ std::tuple<th::Tensor, th::Tensor> mtp_prepare_drafter_inputs_op(th::Tensor& inp
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
-std::tuple<th::Tensor, th::Tensor> mtp_sampling_and_accepted_draft_tokens_op(th::Tensor& logits,
-    th::Tensor& draftTokens, th::Tensor& targetTokens, int64_t numMTPModules, int64_t batchSize,
+std::tuple<th::Tensor, th::Tensor, th::Tensor> mtp_sampling_and_accepted_draft_tokens_op(th::Tensor& logits,
+    th::Tensor& draftTokens, th::Tensor& targetTokens, th::Tensor& targetTokenLogprobs, int64_t numMTPModules, int64_t batchSize,
     int64_t numContextRequest, int64_t vocabSize)
 {
     int const numGenerationRequest = batchSize - numContextRequest;
@@ -111,6 +111,8 @@ std::tuple<th::Tensor, th::Tensor> mtp_sampling_and_accepted_draft_tokens_op(th:
     auto stream = at::cuda::getCurrentCUDAStream(logits.get_device());
     auto acceptedTokens = torch::empty(
         {batchSize, numMTPModules + 1}, at::TensorOptions().dtype(torch::kInt32).device(logits.device()));
+    auto logprobs = torch::empty(
+        {batchSize, numMTPModules + 1}, at::TensorOptions().dtype(torch::kFloat32).device(logits.device()));
     auto numAcceptedTokens = torch::ones({batchSize}, at::TensorOptions().dtype(torch::kInt32).device(logits.device()));
 
     // Fill params
@@ -122,6 +124,8 @@ std::tuple<th::Tensor, th::Tensor> mtp_sampling_and_accepted_draft_tokens_op(th:
     params.draftTokens = reinterpret_cast<int*>(draftTokens.data_ptr());
     params.targetTokens = reinterpret_cast<int*>(targetTokens.data_ptr());
     params.acceptedTokens = reinterpret_cast<int*>(acceptedTokens.data_ptr());
+    params.targetTokenLogprobs = reinterpret_cast<float*>(targetTokenLogprobs.data_ptr());
+    params.logprobs = reinterpret_cast<float*>(logprobs.data_ptr());
     params.numAcceptedTokens = reinterpret_cast<int*>(numAcceptedTokens.data_ptr());
     params.logits = logits.data_ptr();
 
@@ -145,7 +149,7 @@ std::tuple<th::Tensor, th::Tensor> mtp_sampling_and_accepted_draft_tokens_op(th:
         break;
     }
 
-    return std::make_tuple(acceptedTokens, numAcceptedTokens);
+    return std::make_tuple(acceptedTokens, numAcceptedTokens, logprobs);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
