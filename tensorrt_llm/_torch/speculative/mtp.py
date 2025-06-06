@@ -879,14 +879,18 @@ class MTPWorker(nn.Module):
 
         # Strict acceptance
         else:
-            if False:
+            if self.is_thop:
                 # Temporary buffer
                 target_tokens_cache = torch.zeros(batch_size *
                                                   (mtp_num_modules + 1),
                                                   dtype=torch.int,
                                                   device=logits.device)
+                target_token_logprobs_cache = torch.zeros(batch_size *
+                                                  (mtp_num_modules + 1),
+                                                  dtype=torch.float32,
+                                                  device=logits.device)
                 accepted_tokens, num_accepted_tokens = torch.ops.trtllm.mtp_sampling_and_accepted_draft_tokens_op(
-                    logits, spec_metadata.draft_tokens, target_tokens_cache,
+                    logits, spec_metadata.draft_tokens, target_tokens_cache, target_token_logprobs_cache,
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
             else:
                 # Do greedy sampling for the input logits
