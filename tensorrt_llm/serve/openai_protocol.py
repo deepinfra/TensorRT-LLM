@@ -247,15 +247,9 @@ class CompletionRequest(OpenAIBaseModel):
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_logprobs(cls, data):
-        if data.get("logprobs"):
-            raise ValueError("logprobs is not supported")
-        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -537,6 +531,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
 
