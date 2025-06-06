@@ -448,7 +448,7 @@ class SamplingParams:
             config_kwargs["return_log_probs"] = bool(self.logprobs)
         else:
             config_kwargs["return_log_probs"] = self._return_log_probs
-
+        print(config_kwargs)
         return tllme.OutputConfig(**config_kwargs)
 
     def _get_guided_decoding_params(self) -> tllme.GuidedDecodingParams:
