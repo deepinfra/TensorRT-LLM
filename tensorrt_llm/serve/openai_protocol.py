@@ -244,6 +244,7 @@ class CompletionRequest(OpenAIBaseModel):
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
 
@@ -553,6 +554,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
 

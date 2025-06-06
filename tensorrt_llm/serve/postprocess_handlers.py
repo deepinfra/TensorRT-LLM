@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Tuple, Union
 
+from tensorrt_llm.executor.result import TokenLogprobs
+
 from .._utils import nvtx_range_debug
 from ..executor import (DetokenizedGenerationResultBase, GenerationResult,
                         GenerationResultBase)
@@ -59,16 +61,17 @@ class ChatPostprocArgs(PostprocArgs):
 
 def create_logprobs(token_ids: List[int],
                     tokenizer: TransformersTokenizer,
-                    logprobs: List[float]) -> ChatCompletionLogProbs:
+                    logprobs: TokenLogprobs) -> ChatCompletionLogProbs:
     assert len(token_ids) == len(logprobs), \
             "token_ids and logprobs have different lengths"
     content: List[ChatCompletionLogProbsContent] = []
-    for token_id, logprob in zip(token_ids, logprobs):
+    for logprob in logprobs:
+        token_id, lp = list(logprob.items())[0]
         token = tokenizer.decode(token_id)
         # returning multiple logprobs is not supported
         first_logprob = ChatCompletionLogProbsContent(
             token=token,
-            logprob=max(logprob, -9999.0),
+            logprob=max(lp.logprob, -9999.0),
             bytes=list(token.encode("utf-8", errors="replace")))
         content.append(first_logprob)
     chat_logprobs = ChatCompletionLogProbs(content=content)
