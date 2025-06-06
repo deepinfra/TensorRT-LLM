@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional
 
+from tensorrt_llm.executor.result import Logprob
 import torch
 from torch import nn
 
@@ -9,7 +10,7 @@ from ..distributed.ops import allgather
 from ..model_config import ModelConfig
 from ..pyexecutor.llm_request import LlmRequest, LlmRequestState
 from ..pyexecutor.resource_manager import BaseResourceManager, SlotManager
-from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler,
+from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler, greedy_search_sampling_batch
                                   add_token, int_tensor)
 from ..pyexecutor.scheduler import ScheduledRequests
 from .interface import SpecMetadata
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 class SampleStateTensorsMTP(SampleStateTensors):
     new_tokens_lens: torch.Tensor
     next_draft_tokens: torch.Tensor
+    next_tokens_log_probs: Optional[torch.Tensor] = None
 
 
 @dataclass(kw_only=True)
@@ -249,60 +251,92 @@ class MTPSampler(TorchSampler):
         new_tokens = state.host.new_tokens
         new_tokens_lens = state.host.new_tokens_lens
         next_draft_tokens_list = state.host.next_draft_tokens.tolist()
+        next_tokens_log_probs_list = state.host.next_tokens_log_probs.tolist()
+
+        def handle_logprobs(request: LlmRequest, tokens, log_probs):
+            token_log_probs = [{
+                token: Logprob(logprob=logprob, rank=1)
+            } for token, logprob in zip(tokens, log_probs)]
+            request.py_result.append_log_probs([token_log_probs])
+
+        idx = 0
         beam_idx = self.BEAM
-        for req in state.scheduled_requests.context_requests:
+        for request in state.scheduled_requests.context_requests:
+            assert not request.py_return_context_logits, "return_context_logits not implemented for MTPSampler"
+            assert not request.py_return_generation_logits, "return_generation_logits not implemented for MTPSampler"
+            # assert not request.py_return_log_probs, "return_log_probs not implemented for MTPSampler"
             if req.state == LlmRequestState.GENERATION_COMPLETE or req.context_remaining_length != 0:
+                idx += 1
                 continue
             new_token = add_token(req, new_tokens, beam=beam_idx)
             self._handle_stop_criteria(req, new_token)
             self._request_common_handling(req, next_draft_tokens_list)
 
-        for req in state.scheduled_requests.generation_requests:
-            if req.state == LlmRequestState.GENERATION_COMPLETE:
-                continue
-            num_new_tokens = new_tokens_lens[req.py_seq_slot]
-            for i in range(num_new_tokens):
-                new_token = add_token(req, new_tokens, beam=beam_idx, step=i)
-                if self._handle_stop_criteria(req, new_token):
-                    break
-            req.py_rewind_len = self.draft_len - (num_new_tokens - 1)
-            self._request_common_handling(req, next_draft_tokens_list)
+            if request.state != LlmRequestState.GENERATION_COMPLETE:
+                new_token = new_tokens_list[idx][0]
+                new_token_log_prob = next_tokens_log_probs_list[idx][0]
+                num_tokens = request.add_new_token(new_token, beam_idx)
+                handle_logprobs(request, [new_token], [new_token_log_prob])
+                should_stop = self._handle_stop_criteria(
+                    request, new_token, num_tokens, beam_idx)
+                if self._draft_meet_max_token_stop_criteria(
+                        request, num_tokens, beam_idx):
+                    should_stop = True
+                request.py_draft_tokens = next_draft_tokens_list[idx]
+                request.py_decoding_iter += 1
+            idx += 1
+
+        for request in state.scheduled_requests.generation_requests:
+            assert not request.py_return_context_logits, "return_context_logits not implemented for MTPSampler"
+            assert not request.py_return_generation_logits, "return_generation_logits not implemented for MTPSampler"
+            # assert not request.py_return_log_probs, "return_log_probs not implemented for MTPSampler"
+            if request.state != LlmRequestState.GENERATION_COMPLETE:
+                new_tokens = new_tokens_list[idx]
+                new_tokens_log_probs = next_tokens_log_probs_list[idx]
+                num_new_tokens = new_tokens_lens_list[idx]
+                should_stop = False
+                for i in range(num_new_tokens):
+                    new_token = new_tokens[i]
+                    new_token_log_prob = new_tokens_log_probs[i]
+                    num_tokens = request.add_new_token(new_token, beam_idx)
+                    handle_logprobs(request, [new_token], [new_token_log_prob])
+                    should_stop = self._handle_stop_criteria(
+                        request, new_token, num_tokens, beam_idx)
+                    if should_stop:
+                        break
+                if self._draft_meet_max_token_stop_criteria(
+                        request, num_tokens, beam_idx):
+                    should_stop = True
+                request.py_draft_tokens = next_draft_tokens_list[idx]
+                request.py_rewind_len = self.draft_len - (num_new_tokens - 1)
+                request.py_decoding_iter += 1
+            idx += 1
 
     def sample_async(self, scheduled_requests: ScheduledRequests,
-                     outputs: dict[str, torch.Tensor]) -> SampleStateMTP:
-        # new_tokens_device: accepted tokens, device tensor, shape: batch_size, nextn + 1
-        # new_tokens_lens_device: accepted lengths, device tensor, shape: batch_size
-        # next_draft_tokens_device: predicted draft tokens, device tensor, shape: batch_size, nextn
-        # next_new_tokens_device: input tokens for the next iteration, device tensor, shape: batch_size, nextn + 1
-
-        requests = scheduled_requests.all_requests()
-        slots = torch.as_tensor([r.py_seq_slot for r in requests])
-        slots = slots.to(device="cuda", non_blocking=True)
-
-        o_new_tokens = outputs['new_tokens'][:len(requests)]
-        o_new_tokens_lens = outputs['new_tokens_lens'][:len(requests)]
-        o_next_draft_tokens = outputs['next_draft_tokens'][:len(requests)]
-        o_next_new_tokens = outputs['next_new_tokens'][:len(requests)]
-
-        new_tokens = self.store.new_tokens
-        next_new_tokens = self.store.next_new_tokens
-        new_tokens_lens = self.store.new_tokens_lens
-        next_draft_tokens = self.store.next_draft_tokens
-
-        new_tokens.squeeze(-1).T.index_copy_(0, slots, o_new_tokens)
-        next_new_tokens.squeeze(-1).T.index_copy_(0, slots, o_next_new_tokens)
-        new_tokens_lens.index_copy_(0, slots, o_new_tokens_lens)
-        next_draft_tokens.index_copy_(0, slots, o_next_draft_tokens)
+                     model_outputs) -> SampleStateMTP:
+        # new_tokens_device: all of the accepted tokens, device tensor
+        # new_tokens_lens_device: the accepted lengths, device tensor
+        # next_draft_tokens_device: predicted draft tokens, device tensor
+        # next_new_tokens_device: input tokens for the next iteration, device tensor
+        new_tokens_device = model_outputs['new_tokens']
+        new_tokens_lens_device = model_outputs['new_tokens_lens']
+        next_draft_tokens_device = model_outputs['next_draft_tokens']
+        next_new_tokens_device = model_outputs['next_new_tokens']
+        next_tokens_log_probs_device = model_outputs["log_probs"]
 
         device = SampleStateTensorsMTP(
-            new_tokens=next_new_tokens,
-            new_tokens_lens=new_tokens_lens,
-            next_draft_tokens=next_draft_tokens,
+            new_tokens=next_new_tokens_device,
+            new_tokens_lens=new_tokens_lens_device,
+            next_draft_tokens=next_draft_tokens_device,
+            next_tokens_log_probs=next_tokens_log_probs_device,
         )
         host = SampleStateTensorsMTP(
-            new_tokens=new_tokens.to('cpu', non_blocking=True),
-            new_tokens_lens=new_tokens_lens.to('cpu', non_blocking=True),
-            next_draft_tokens=next_draft_tokens.to('cpu', non_blocking=True),
+            new_tokens=new_tokens_device.to('cpu', non_blocking=True),
+            new_tokens_lens=new_tokens_lens_device.to('cpu', non_blocking=True),
+            next_draft_tokens=next_draft_tokens_device.to('cpu',
+                                                          non_blocking=True),
+            next_tokens_log_probs=next_tokens_log_probs_device.to(
+                'cpu', non_blocking=True),
         )
         sampler_event = torch.cuda.Event()
         sampler_event.record()
@@ -440,7 +474,7 @@ class MTPWorker(nn.Module):
 
         # Sample and verify draft tokens
         raw_logits = logits
-        accepted_tokens, num_accepted_tokens = self.sample_and_accept_draft_tokens(
+        accepted_tokens, num_accepted_tokens, log_probs = self.sample_and_accept_draft_tokens(
             input_ids, logits, spec_metadata, attn_metadata)
 
         # Update MTP past hidden states
@@ -508,7 +542,8 @@ class MTPWorker(nn.Module):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
-            'next_new_tokens': next_new_tokens
+            'next_new_tokens': next_new_tokens,
+            "log_probs": log_probs
         }
 
     def skip_forward(
@@ -528,6 +563,9 @@ class MTPWorker(nn.Module):
         accepted_tokens = torch.empty((batch_size, (mtp_num_modules + 1)),
                                       dtype=torch.int,
                                       device=logits.device)
+        log_probs = torch.empty((batch_size, (mtp_num_modules + 1)),
+                                      dtype=torch.float32,
+                                      device=logits.device)
         num_accepted_tokens = torch.ones(batch_size,
                                          dtype=torch.int,
                                          device=logits.device)
@@ -542,7 +580,8 @@ class MTPWorker(nn.Module):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
-            'next_new_tokens': next_new_tokens
+            'next_new_tokens': next_new_tokens,
+            'log_probs': log_probs
         }
 
     def update_mtp_hidden_states(
@@ -782,8 +821,11 @@ class MTPWorker(nn.Module):
         # The return buffer
         if self.spec_config.use_relaxed_acceptance_for_thinking or not self.is_thop:
             accepted_tokens = torch.ones((batch_size, (mtp_num_modules + 1)),
-                                         dtype=torch.int,
-                                         device=logits.device)
+                                          dtype=torch.int,
+                                          device=logits.device)
+            log_probs = torch.ones((batch_size, (mtp_num_modules + 1)),
+                                          dtype=torch.float32,
+                                          device=logits.device)
             num_accepted_tokens = torch.ones(batch_size,
                                              dtype=torch.int,
                                              device=logits.device)
@@ -835,20 +877,30 @@ class MTPWorker(nn.Module):
                                                   (mtp_num_modules + 1),
                                                   dtype=torch.int,
                                                   device=logits.device)
-                accepted_tokens, num_accepted_tokens = torch.ops.trtllm.mtp_sampling_and_accepted_draft_tokens_op(
-                    logits, spec_metadata.draft_tokens, target_tokens_cache,
+                target_token_logprobs_cache = torch.zeros(batch_size *
+                                                  (mtp_num_modules + 1),
+                                                  dtype=torch.float32,
+                                                  device=logits.device)
+                accepted_tokens, num_accepted_tokens, log_probs = torch.ops.trtllm.mtp_sampling_and_accepted_draft_tokens_op(
+                    logits, spec_metadata.draft_tokens, target_tokens_cache, target_token_logprobs_cache,
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
             else:
                 # Do greedy sampling for the input logits
-                target_tokens = torch.argmax(logits, dim=-1)
+                target_tokens, target_log_probs = greedy_search_sampling_batch(logits)
 
                 # context
                 accepted_tokens[:num_contexts, 0] = target_tokens[:num_contexts]
+                log_probs[:num_contexts, 0] = target_log_probs[:num_contexts]
 
                 # generation
                 gen_target_tokens = target_tokens[num_contexts:].reshape(
                     num_gens, mtp_num_modules + 1)
+                gen_target_log_probs = target_log_probs[num_contexts:].reshape(
+                    num_gens, mtp_num_modules + 1)
+
                 accepted_tokens[num_contexts:, :] = gen_target_tokens
+                log_probs[num_contexts:, :] = gen_target_log_probs
+
                 draft_tokens = spec_metadata.draft_tokens.reshape(
                     num_gens, mtp_num_modules)
                 num_accepted_tokens[num_contexts:] += torch.cumprod(
@@ -856,7 +908,7 @@ class MTPWorker(nn.Module):
                      ).int(),
                     dim=-1).sum(1)
 
-        return accepted_tokens, num_accepted_tokens
+        return accepted_tokens, num_accepted_tokens, log_probs
 
     def change_attn_metadata(self, num_accepted_tokens: torch.Tensor,
                              attn_metadata: AttentionMetadata):
@@ -1139,7 +1191,7 @@ class MTPEagleWorker(MTPWorker):
 
         # Sample and verify draft tokens
         raw_logits = logits
-        accepted_tokens, num_accepted_tokens = self.sample_and_accept_draft_tokens(
+        accepted_tokens, num_accepted_tokens, log_probs = self.sample_and_accept_draft_tokens(
             input_ids, logits, spec_metadata, attn_metadata)
 
         # Save the old attn_metadata and spec_metadata
@@ -1269,7 +1321,8 @@ class MTPEagleWorker(MTPWorker):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
-            'next_new_tokens': next_new_tokens
+            'next_new_tokens': next_new_tokens,
+            'log_probs': log_probs
         }
 
     @torch.compile(options={"max-autotune": True})

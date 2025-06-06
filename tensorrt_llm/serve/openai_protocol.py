@@ -265,16 +265,10 @@ class CompletionRequest(OpenAIBaseModel):
             add_special_tokens=self.add_special_tokens,
 
             # TODO: migrate to use logprobs and prompt_logprobs
-            _return_log_probs=bool(self.logprobs),
+            _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
-
-    @model_validator(mode="before")
-    @classmethod
-    def check_logprobs(cls, data):
-        if data.get("logprobs"):
-            raise ValueError("logprobs is not supported")
-        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -559,7 +553,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             add_special_tokens=self.add_special_tokens,
 
             # TODO: migrate to use logprobs and prompt_logprobs
-            _return_log_probs=bool(self.logprobs),
+            _return_log_probs=self.logprobs,
+            logprobs=self.logprobs,
         )
         return sampling_params
 
