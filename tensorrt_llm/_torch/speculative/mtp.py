@@ -244,7 +244,7 @@ class MTPSampler(TorchSampler):
         next_draft_tokens_list = state.host.next_draft_tokens.tolist()
         next_tokens_log_probs_list = state.host.next_tokens_log_probs.tolist()
 
-        def handle_logprobs(request, tokens, log_probs):
+        def handle_logprobs(request: LlmRequest, tokens, log_probs):
             token_log_probs = [{
                 token: Logprob(logprob=logprob, rank=1)
             } for token, logprob in zip(tokens, log_probs)]
@@ -820,7 +820,7 @@ class MTPWorker(nn.Module):
                                                   (mtp_num_modules + 1),
                                                   dtype=torch.float32,
                                                   device=logits.device)
-                accepted_tokens, num_accepted_tokens = torch.ops.trtllm.mtp_sampling_and_accepted_draft_tokens_op(
+                accepted_tokens, num_accepted_tokens, log_probs = torch.ops.trtllm.mtp_sampling_and_accepted_draft_tokens_op(
                     logits, spec_metadata.draft_tokens, target_tokens_cache, target_token_logprobs_cache,
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
             else:
