@@ -253,13 +253,6 @@ class CompletionRequest(OpenAIBaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def check_logprobs(cls, data):
-        if data.get("logprobs"):
-            raise ValueError("logprobs is not supported")
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
     def validate_stream_options(cls, data):
         if data.get("stream_options") and not data.get("stream"):
             raise ValueError(
