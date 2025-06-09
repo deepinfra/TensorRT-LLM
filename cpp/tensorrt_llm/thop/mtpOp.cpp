@@ -288,8 +288,8 @@ TORCH_LIBRARY_FRAGMENT(trtllm, m)
 {
     m.def(
         "mtp_sampling_and_accepted_draft_tokens_op(Tensor logits, Tensor draftTokens, Tensor "
-        "targetTokens, int numMTPModules, "
-        "int batchSize, int numContextRequest, int vocabSize) -> (Tensor, Tensor)");
+        "targetTokens, Tensor targetTokenLogprobs, int numMTPModules, "
+        "int batchSize, int numContextRequest, int vocabSize) -> (Tensor, Tensor, Tensor)");
 }
 
 TORCH_LIBRARY_IMPL(trtllm, CUDA, m)
