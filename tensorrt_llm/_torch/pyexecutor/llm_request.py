@@ -1,3 +1,4 @@
+import copy
 from typing import List, Optional
 
 import torch
@@ -265,8 +266,12 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
             use_fast_logits=False,
             mpi_world_rank=0) -> tensorrt_llm.bindings.executor.Response | None:
         response = super().create_response(use_fast_logits, mpi_world_rank)
+        py_result = None
+        if response:
+            py_result = copy.copy(self.py_result)
+            self.py_result._log_probs = LogProbStorage()
         return LlmResponse(response,
-                           self.py_result) if response is not None else None
+                           py_result) if response is not None else None
 
 
 def convert_wordlist(word_list) -> List[List[int]]:
