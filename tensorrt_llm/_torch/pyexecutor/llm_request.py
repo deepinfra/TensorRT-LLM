@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional, Union
+import copy
 
 import torch
 
@@ -308,17 +309,22 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
             self,
             use_fast_logits=False,
             mpi_world_rank=0) -> tensorrt_llm.bindings.executor.Response | None:
+
         result, is_final = super().create_serialized_result(
             use_fast_logits, mpi_world_rank)
+        py_result = None
+        if len(result) > 0:
+            py_result = copy.copy(self.py_result)
+            self.py_result._log_probs = LogProbStorage()
+
         return LlmResponse(
             request_id=self.py_request_id,
-            result=LlmResult(result, self.py_result, is_final),
+            result=LlmResult(result, py_result, is_final),
             client_id=self.py_client_id) if len(result) > 0 else None
 
     @property
     def is_dummy(self):
         return self.is_attention_dp_dummy or self.is_cuda_graph_dummy or self.is_dummy_request
-
 
 def convert_wordlist(word_list) -> List[List[int]]:
     """Converts a wordlist from format:
