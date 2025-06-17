@@ -315,7 +315,8 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         py_result = None
         if len(result) > 0:
             py_result = copy.copy(self.py_result)
-            self.py_result._log_probs = LogProbStorage()
+            if self.py_result._log_probs:
+                self.py_result._log_probs = LogProbStorage()
 
         return LlmResponse(
             request_id=self.py_request_id,
