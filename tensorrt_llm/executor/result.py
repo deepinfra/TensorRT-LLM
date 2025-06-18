@@ -123,13 +123,16 @@ class CompletionOutput:
         return len(self.token_ids)
 
     def text_diff_safe(self, last_text_len) -> Tuple[str, int]:
-        return self.text[last_text_len:], len(self.text)
+        l = len(self.text)
+        return self.text[last_text_len:l], l
 
     def logprobs_diff_safe(self, last_logprobs_len) -> Tuple[List[float], int]:
-        return self.logprobs[last_logprobs_len:], len(self.logprobs)
+        l = len(self.logprobs)
+        return self.logprobs[last_logprobs_len:l], l
 
     def token_ids_diff_safe(self, last_token_ids_len) -> Tuple[List[int], int]:
-        return self.logprobs[last_token_ids_len:], len(self.logprobs)
+        l = len(self.token_ids)
+        return self.token_ids[last_token_ids_len:l], l
 
     #@property
     #def text_diff(self) -> str:
