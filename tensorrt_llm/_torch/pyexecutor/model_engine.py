@@ -1184,7 +1184,12 @@ class PyTorchModelEngine(ModelEngine):
         def get_request_temperature(request: LlmRequest) -> float:
             if not request.sampling_config.temperature:
                 return 0.7
-            return request.sampling_config.temperature[0]
+            temperature = request.sampling_config.temperature[0]
+            if 0 < temperature < 1e-2:
+                logger.warning(
+                    f"Temperature {temperature} is too low, setting to 0.01")
+                temperature = 0.01
+            return temperature
 
         def get_request_top_k(request: LlmRequest) -> int:
             if not request.sampling_config.top_k:
