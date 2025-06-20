@@ -266,6 +266,9 @@ def apply_top_k_top_p(
     logits = logits_sort.scatter(dim=-1, index=logits_idx, src=logits_sort)
     return logits
 
+def greedy_sample(logits: torch.Tensor) -> torch.Tensor:
+    return logits.argmax(dim=-1).view(-1)
+
 def apply_temperature(
     logits: torch.Tensor,
     temp: torch.Tensor,
@@ -281,6 +284,7 @@ def sampling_batch(
         min_p: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
     raw_probs = torch.softmax(logits, dim=-1)
+    greedy_sampled = greedy_sample(logits)
     logits = apply_temperature(logits, temperatures)
     logits = apply_min_p(logits, min_p)
     # if not torch.cuda.is_current_stream_capturing():
@@ -288,7 +292,13 @@ def sampling_batch(
     #     generator.manual_seed(0)
     # next_tokens = flashinfer_sample(adjusted_logits, top_k, top_p, generator)
     logits = apply_top_k_top_p(logits, top_k, top_p)
-    next_tokens = forward_native(logits, top_k, top_p)
+    random_sampled = forward_native(logits, top_k, top_p)
+    next_tokens = torch.where(
+            temperatures < 1e-5,
+            greedy_sampled,
+            random_sampled,
+            out=greedy_sampled,  # Reuse tensor
+        )
     token_probs = torch.gather(raw_probs, dim=1,
                                index=next_tokens.unsqueeze(1)).squeeze(-1)
     log_probs = torch.log(token_probs)
