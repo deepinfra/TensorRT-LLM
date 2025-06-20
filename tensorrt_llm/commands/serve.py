@@ -82,6 +82,7 @@ def get_llm_args(model: str,
                  moe_expert_parallel_size: Optional[int] = None,
                  gpus_per_node: Optional[int] = None,
                  free_gpu_memory_fraction: Optional[float] = None,
+                 host_cache_size: int = 0,
                  num_postprocess_workers: int = 0,
                  trust_remote_code: bool = False,
                  reasoning_parser: Optional[str] = None,
@@ -96,7 +97,9 @@ def get_llm_args(model: str,
                                max_beam_width=max_beam_width,
                                max_seq_len=max_seq_len)
     kv_cache_config = KvCacheConfig(
-        free_gpu_memory_fraction=free_gpu_memory_fraction)
+        free_gpu_memory_fraction=free_gpu_memory_fraction,
+        host_cache_size=host_cache_size,
+    )
 
     dynamic_batch_config = DynamicBatchConfig(
         enable_batch_size_tuning=True,
@@ -230,6 +233,11 @@ def launch_server(host: str,
               default=0.9,
               help="Free GPU memory fraction reserved for KV Cache, "
               "after allocating model weights and buffers.")
+@click.option("--host_cache_size",
+                type=int,
+                default=0,
+                help="Size of the host cache in bytes. "
+                "Set to 0 to disable host cache. ")
 @click.option(
     "--num_postprocess_workers",
     type=int,
@@ -276,6 +284,7 @@ def serve(model_name: Optional[str], model: Optional[str],
           tp_size: int, pp_size: int, ep_size: Optional[int],
           cluster_size: Optional[int], gpus_per_node: Optional[int],
           kv_cache_free_gpu_memory_fraction: float,
+          host_cache_size: int,
           num_postprocess_workers: int, trust_remote_code: bool,
           load_format: str, max_log_len: int,
           extra_llm_api_options: Optional[str],
@@ -304,6 +313,7 @@ def serve(model_name: Optional[str], model: Optional[str],
         moe_cluster_parallel_size=cluster_size,
         gpus_per_node=gpus_per_node,
         free_gpu_memory_fraction=kv_cache_free_gpu_memory_fraction,
+        host_cache_size=host_cache_size,
         num_postprocess_workers=num_postprocess_workers,
         trust_remote_code=trust_remote_code,
         reasoning_parser=reasoning_parser)
