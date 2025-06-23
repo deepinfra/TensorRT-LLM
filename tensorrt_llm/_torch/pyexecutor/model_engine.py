@@ -1186,8 +1186,7 @@ class PyTorchModelEngine(ModelEngine):
                 return 0.7
             temperature = request.sampling_config.temperature[0]
             if 0 < temperature < 1e-2:
-                logger.warning(
-                    f"Temperature {temperature} is too low, setting to 0.01")
+                # temperature less than 0.01 may cause numerical errors
                 temperature = 0.01
             return temperature
 
