@@ -311,7 +311,8 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         py_result = None
         if response:
             py_result = copy.copy(self.py_result)
-            self.py_result._log_probs = LogProbStorage()
+            if self.py_result._log_probs:
+                self.py_result._log_probs = LogProbStorage()
         return LlmResponse(response,
                            py_result) if response is not None else None
 
