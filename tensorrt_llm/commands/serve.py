@@ -83,6 +83,8 @@ def get_llm_args(model: str,
                  gpus_per_node: Optional[int] = None,
                  free_gpu_memory_fraction: Optional[float] = None,
                  host_cache_size: int = 0,
+                 kv_cache_dtype: str = "auto",
+                 enable_chunked_prefill: bool = True,
                  num_postprocess_workers: int = 0,
                  trust_remote_code: bool = False,
                  reasoning_parser: Optional[str] = None,
@@ -126,10 +128,16 @@ def get_llm_args(model: str,
         "max_beam_width": max_beam_width,
         "max_seq_len": max_seq_len,
         "kv_cache_config": kv_cache_config,
+        "enable_chunked_prefill": enable_chunked_prefill,
         "backend": backend if backend == "pytorch" else None,
         "num_postprocess_workers": num_postprocess_workers,
         "postprocess_tokenizer_dir": tokenizer or model,
         "reasoning_parser": reasoning_parser,
+        "use_cuda_graph": True,
+        "cuda_graph_batch_sizes": list(range(1, max_batch_size + 1)),
+        "cuda_graph_max_batch_size": max_batch_size,
+        "enable_trtllm_sampler": True,
+        "kv_cache_dtype": kv_cache_dtype,
     }
 
     return llm_args, llm_args_extra_dict
@@ -143,7 +151,7 @@ def launch_server(host: str,
 
     backend = llm_args["backend"]
     model = llm_args["model"]
-    served_model_name = llm_args["served_model_name"]
+    served_model_name = llm_args.pop("served_model_name")
 
     if backend == 'pytorch':
         llm = PyTorchLLM(**llm_args)
@@ -238,6 +246,14 @@ def launch_server(host: str,
                 default=0,
                 help="Size of the host cache in bytes. "
                 "Set to 0 to disable host cache. ")
+@click.option("--kv_cache_dtype",
+              type=str,
+              default="auto",
+              help="Data type for KV cache")
+@click.option("--disable_chunked_prefill",
+              is_flag=True,
+              default=False,
+              help="Flag to disable chunked prefill.")
 @click.option(
     "--num_postprocess_workers",
     type=int,
@@ -285,6 +301,8 @@ def serve(model_name: Optional[str], model: Optional[str],
           cluster_size: Optional[int], gpus_per_node: Optional[int],
           kv_cache_free_gpu_memory_fraction: float,
           host_cache_size: int,
+          kv_cache_dtype: str,
+          disable_chunked_prefill: bool,
           num_postprocess_workers: int, trust_remote_code: bool,
           load_format: str, max_log_len: int,
           extra_llm_api_options: Optional[str],
@@ -314,6 +332,8 @@ def serve(model_name: Optional[str], model: Optional[str],
         gpus_per_node=gpus_per_node,
         free_gpu_memory_fraction=kv_cache_free_gpu_memory_fraction,
         host_cache_size=host_cache_size,
+        kv_cache_dtype=kv_cache_dtype,
+        enable_chunked_prefill=not disable_chunked_prefill,
         num_postprocess_workers=num_postprocess_workers,
         trust_remote_code=trust_remote_code,
         reasoning_parser=reasoning_parser)
