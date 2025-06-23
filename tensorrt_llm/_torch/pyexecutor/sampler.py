@@ -291,7 +291,7 @@ def sampling_batch(
     #     generator = torch.Generator(device="cuda")
     #     generator.manual_seed(0)
     # next_tokens = flashinfer_sample(adjusted_logits, top_k, top_p, generator)
-    logits = apply_top_k_top_p(logits, top_k, top_p)
+    # logits = apply_top_k_top_p(logits, top_k, top_p)
     random_sampled = forward_native(logits, top_k, top_p)
     next_tokens = torch.where(
             temperatures < 1e-5,
