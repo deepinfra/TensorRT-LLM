@@ -315,6 +315,8 @@ def serve(model_name: Optional[str], model: Optional[str],
     logger.set_level(log_level)
     model = model or model_name
 
+    assert max_seq_len is not None, "max_seq_len must be specified"
+
     llm_args, _ = get_llm_args(
         model=model,
         served_model_name=served_model_name,
