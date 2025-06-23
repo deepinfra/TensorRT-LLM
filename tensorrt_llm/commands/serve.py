@@ -135,7 +135,6 @@ def get_llm_args(model: str,
         "reasoning_parser": reasoning_parser,
         "use_cuda_graph": True,
         "cuda_graph_batch_sizes": list(range(1, max_batch_size + 1)),
-        "cuda_graph_max_batch_size": max_batch_size,
         "enable_trtllm_sampler": True,
         "kv_cache_dtype": kv_cache_dtype,
     }
