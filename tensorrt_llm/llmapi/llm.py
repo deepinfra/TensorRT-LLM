@@ -394,7 +394,7 @@ class LLM:
                 prompt_token_ids)
 
         # check if prompt token ids are more than the context size
-        max_seq_len = int(self._executor_config.max_seq_len)
+        max_seq_len = int(self.args.build_config.max_seq_len)
         prompt_len = len(prompt_token_ids)
         if prompt_len >= max_seq_len:
             raise ValueError(
