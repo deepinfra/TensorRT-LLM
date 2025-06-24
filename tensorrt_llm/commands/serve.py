@@ -166,12 +166,7 @@ def launch_server(host: str,
 
 
 @click.command("serve")
-@click.argument("model_name", type=str, default=None)
-@click.option("--model",
-              type=str,
-              default=None,
-              help="model name or path."
-              "Model name to use. Defaults to model_path.")
+@click.argument("model", type=str)
 @click.option("--served-model-name",
               type=str,
               default=None,
@@ -199,7 +194,7 @@ def launch_server(host: str,
               type=int,
               default=BuildConfig.max_beam_width,
               help="Maximum number of beams for beam search decoding.")
-@click.option("--max_batch_size", "--max-num-seqs",
+@click.option("--max_batch_size",
               type=int,
               default=BuildConfig.max_batch_size,
               help="Maximum number of requests that the engine can schedule.")
@@ -211,12 +206,12 @@ def launch_server(host: str,
     "Maximum number of batched input tokens after padding is removed in each batch."
 )
 @click.option(
-    "--max_seq_len", "--max-model-len",
+    "--max_seq_len",
     type=int,
     default=BuildConfig.max_seq_len,
     help="Maximum total length of one request, including prompt and outputs. "
     "If unspecified, the value is deduced from the model config.")
-@click.option("--tp_size", "--tensor-parallel-size", type=int, default=1, help='Tensor parallelism size.')
+@click.option("--tp_size", type=int, default=1, help='Tensor parallelism size.')
 @click.option("--pp_size",
               type=int,
               default=1,
@@ -248,25 +243,20 @@ def launch_server(host: str,
               type=str,
               default="auto",
               help="Data type for KV cache")
-@click.option("--disable_chunked_prefill",
-              is_flag=True,
-              default=False,
-              help="Flag to disable chunked prefill.")
+@click.option("--enable_chunked_prefill",
+              type=bool,
+              default=True,
+              help="Flag to control chunked prefill. ")
 @click.option(
     "--num_postprocess_workers",
     type=int,
     default=0,
     help="[Experimental] Number of workers to postprocess raw responses "
     "to comply with OpenAI protocol.")
-@click.option("--trust_remote_code", "--trust-remote-code",
+@click.option("--trust_remote_code",
               is_flag=True,
               default=False,
               help="Flag for HF transformers.")
-@click.option("--load-format",
-              default="safetensors",
-              help="Currently unused. Set to safetensors.")
-@click.option("--max-log-len", type=int, default=-1,
-              help="Set to 0 to make logging less verbose. Currently unimplemented.")
 @click.option(
     "--extra_llm_api_options",
     type=str,
@@ -290,7 +280,7 @@ def launch_server(host: str,
     default=None,
     help="Server role. Specify this value only if running in disaggregated mode."
 )
-def serve(model_name: Optional[str], model: Optional[str],
+def serve(model: str,
           served_model_name: Optional[str],
           tokenizer: Optional[str], host: str, port: int,
           log_level: str, backend: str, max_beam_width: int,
@@ -300,9 +290,8 @@ def serve(model_name: Optional[str], model: Optional[str],
           kv_cache_free_gpu_memory_fraction: float,
           host_cache_size: int,
           kv_cache_dtype: str,
-          disable_chunked_prefill: bool,
+          enable_chunked_prefill: bool,
           num_postprocess_workers: int, trust_remote_code: bool,
-          load_format: str, max_log_len: int,
           extra_llm_api_options: Optional[str],
           reasoning_parser: Optional[str],
           metadata_server_config_file: Optional[str],
@@ -312,7 +301,6 @@ def serve(model_name: Optional[str], model: Optional[str],
     MODEL: model name | HF checkpoint path | TensorRT engine path
     """
     logger.set_level(log_level)
-    model = model or model_name
 
     assert max_seq_len is not None, "max_seq_len must be specified"
 
@@ -333,7 +321,7 @@ def serve(model_name: Optional[str], model: Optional[str],
         free_gpu_memory_fraction=kv_cache_free_gpu_memory_fraction,
         host_cache_size=host_cache_size,
         kv_cache_dtype=kv_cache_dtype,
-        enable_chunked_prefill=not disable_chunked_prefill,
+        enable_chunked_prefill=enable_chunked_prefill,
         num_postprocess_workers=num_postprocess_workers,
         trust_remote_code=trust_remote_code,
         reasoning_parser=reasoning_parser)
