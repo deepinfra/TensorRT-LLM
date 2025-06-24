@@ -100,12 +100,7 @@ def launch_server(host: str, port: int, llm_args: dict):
 
 
 @click.command("serve")
-@click.argument("model_name", type=str, default=None)
-@click.option("--model",
-              type=str,
-              default=None,
-              help="model name or path."
-              "Model name to use. Defaults to model_path.")
+@click.argument("model", type=str)
 @click.option("--served-model-name",
               type=str,
               default=None,
@@ -201,7 +196,7 @@ def launch_server(host: str, port: int, llm_args: dict):
     default=None,
     help="[Experimental] Specify the parser for reasoning models.",
 )
-def serve(model_name: Optional[str], model: Optional[str],
+def serve(model: str,
           served_model_name: Optional[str],
           tokenizer: Optional[str], host: str, port: int,
           log_level: str, backend: str, max_beam_width: int,
@@ -218,7 +213,6 @@ def serve(model_name: Optional[str], model: Optional[str],
     MODEL: model name | HF checkpoint path | TensorRT engine path
     """
     logger.set_level(log_level)
-    model = model or model_name
 
     llm_args, _ = get_llm_args(
         model=model,
