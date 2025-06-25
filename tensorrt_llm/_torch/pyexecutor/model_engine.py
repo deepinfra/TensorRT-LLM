@@ -1250,7 +1250,6 @@ class PyTorchModelEngine(ModelEngine):
             min_p.append(get_request_min_p(request))
 
             request.py_batch_idx = py_batch_idx(request)
-            batch_idx += 1
 
         num_ctx_requests = len(scheduled_requests.context_requests)
         num_ctx_tokens = len(input_ids)
