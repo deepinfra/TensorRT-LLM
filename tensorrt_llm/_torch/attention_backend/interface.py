@@ -49,6 +49,15 @@ class AttentionMetadata:
     kv_cache_manager: KVCacheManager
     mapping: Optional[Mapping] = None
 
+    # The temperatures for requests.
+    temperatures: Optional[torch.Tensor] = None
+    # The top_k for requests.
+    top_k: Optional[torch.Tensor] = None
+    # The top_p for requests.
+    top_p: Optional[torch.Tensor] = None
+    # The min_p for requests.
+    min_p: Optional[torch.Tensor] = None
+
     enable_flash_mla: bool = False
     enable_paged_context_mla: bool = False
     # Whether CUDA graph is enabled.
