@@ -452,21 +452,21 @@ class PyTorchModelEngine(ModelEngine):
             self.without_logits = self.spec_config.spec_dec_mode.without_logits(
             )
             self.max_draft_len = spec_config.max_draft_tokens
-            self.temperatures_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
-                                               dtype=torch.float,
-                                               device='cuda')
-            self.top_k_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
-                                          dtype=torch.int,
-                                          device='cuda')
-            self.top_p_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
-                                          dtype=torch.float,
-                                          device='cuda')
-            self.min_p_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
-                                          dtype=torch.float,
-                                          device='cuda')
         else:
             self.without_logits = False
             self.max_draft_len = 0
+        self.temperatures_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                             dtype=torch.float,
+                                             device='cuda')
+        self.top_k_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                      dtype=torch.int,
+                                      device='cuda')
+        self.top_p_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                      dtype=torch.float,
+                                      device='cuda')
+        self.min_p_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                      dtype=torch.float,
+                                      device='cuda')
 
         # This field is initialized lazily on the first forward pass.
         # This is convenient because:
