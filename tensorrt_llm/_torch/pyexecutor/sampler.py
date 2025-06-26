@@ -545,14 +545,14 @@ class TorchSampler(Sampler):
     def _batch_sample(self, scheduled_requests: ScheduledRequests,
                       model_outputs) -> SampleState:
         logits = model_outputs["logits"]
-        new_tokens_device = torch.argmax(logits, dim=-1)
-        new_tokens_host = new_tokens_device.to('cpu', non_blocking=True)
+        tokens = model_outputs["tokens"]
+        new_tokens_host = tokens.to('cpu', non_blocking=True)
         sampler_event = torch.cuda.Event()
         sampler_event.record()
         return SampleState(
             scheduled_requests=scheduled_requests,
             logits=logits,
-            device=SampleStateTensors(new_tokens=new_tokens_device),
+            device=SampleStateTensors(new_tokens=tokens),
             host=SampleStateTensors(new_tokens=new_tokens_host),
             sampler_event=sampler_event)
 

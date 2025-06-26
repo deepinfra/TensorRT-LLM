@@ -15,6 +15,7 @@ from tensorrt_llm.functional import PositionEmbeddingType
 from tensorrt_llm.logger import logger
 from tensorrt_llm.lora_manager import HfLoraLoader
 from tensorrt_llm.models.convert_utils import split_matrix_tp
+from ..pyexecutor.sampler import sampling_batch
 
 from ...inputs import (ExtraProcessedInputs, InputProcessor, TextPrompt,
                        register_input_processor)
@@ -791,7 +792,7 @@ class LlamaForCausalLM(SpecDecOneEngineForCausalLM[LlamaModel, LlamaConfig]):
             return_context_logits: bool = False,
             spec_metadata: Optional[SpecMetadata] = None,
             **kwargs,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         logits = super().forward(
             attn_metadata,
             input_ids,
@@ -801,7 +802,9 @@ class LlamaForCausalLM(SpecDecOneEngineForCausalLM[LlamaModel, LlamaConfig]):
             spec_metadata,
             **kwargs)
 
-        return logits
+
+        tokens, logprobs = sampling_batch(logits, attn_metadata.temperatures, attn_metadata.top_k, attn_metadata.top_p, attn_metadata.min_p)
+        return tokens, logprobs, logits
 
 
 

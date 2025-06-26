@@ -1489,18 +1489,18 @@ class PyTorchModelEngine(ModelEngine):
             self.gather_ids_cuda[:len(gather_ids)].copy_(torch.tensor(
                 gather_ids, dtype=torch.int, pin_memory=True),
                                                          non_blocking=True)
-            self.temperatures_cuda[:len(temperatures)].copy_(torch.tensor(
-                temperatures, dtype=torch.float, pin_memory=True),
-                                                        non_blocking=True)
-            self.top_k_cuda[:len(top_k)].copy_(torch.tensor(
-                top_k, dtype=torch.int, pin_memory=True),
-                                                        non_blocking=True)
-            self.top_p_cuda[:len(top_p)].copy_(torch.tensor(
-                top_p, dtype=torch.float, pin_memory=True),
-                                                        non_blocking=True)
-            self.min_p_cuda[:len(min_p)].copy_(torch.tensor(
-                min_p, dtype=torch.float, pin_memory=True),
-                                                        non_blocking=True)
+        self.temperatures_cuda[:len(temperatures)].copy_(torch.tensor(
+            temperatures, dtype=torch.float, pin_memory=True),
+                                                    non_blocking=True)
+        self.top_k_cuda[:len(top_k)].copy_(torch.tensor(
+            top_k, dtype=torch.int, pin_memory=True),
+                                                    non_blocking=True)
+        self.top_p_cuda[:len(top_p)].copy_(torch.tensor(
+            top_p, dtype=torch.float, pin_memory=True),
+                                                    non_blocking=True)
+        self.min_p_cuda[:len(min_p)].copy_(torch.tensor(
+            min_p, dtype=torch.float, pin_memory=True),
+                                                    non_blocking=True)
 
         if not attn_metadata.is_cuda_graph:
             # Assumes seq lens do not change between CUDA graph invocations. This applies
@@ -1524,7 +1524,10 @@ class PyTorchModelEngine(ModelEngine):
             num_extra_kv_tokens=0 if self.spec_config is None else
             self.spec_config.num_extra_kv_tokens)
         attn_metadata.kv_cache_manager = kv_cache_manager
-
+        attn_metadata.temperatures = self.temperatures_cuda[:len(temperatures)]
+        attn_metadata.top_k = self.top_k_cuda[:len(top_k)]
+        attn_metadata.top_p = self.top_p_cuda[:len(top_p)]
+        attn_metadata.min_p = self.min_p_cuda[:len(min_p)]
         attn_metadata.prepare()
 
         lora_params = self._get_lora_params_from_requests(
@@ -1550,10 +1553,6 @@ class PyTorchModelEngine(ModelEngine):
                                                                 total_draft_lens]
             spec_metadata.request_ids = request_ids
             spec_metadata.gather_ids = self.gather_ids_cuda[:len(gather_ids)]
-            spec_metadata.temperatures = self.temperatures_cuda[:len(temperatures)]
-            spec_metadata.top_k = self.top_k_cuda[:len(top_k)]
-            spec_metadata.top_p = self.top_p_cuda[:len(top_p)]
-            spec_metadata.min_p = self.min_p_cuda[:len(min_p)]
             # if attn_metadata.is_cuda_graph and not torch.cuda.is_current_stream_capturing():
                 # spec_metadata.generator = torch.Generator(device='cpu').manual_seed(0)
             spec_metadata.num_generations = len(
@@ -2209,7 +2208,7 @@ class PyTorchModelEngine(ModelEngine):
 
         # For simplicity, just return all the the logits if we have special gather_ids
         # from speculative decoding.
-        logits = self.model_forward(
+        tokens, logprobs, logits = self.model_forward(
             **inputs,
             return_context_logits=gather_ids is not None
             or gather_context_logits,
@@ -2217,7 +2216,9 @@ class PyTorchModelEngine(ModelEngine):
         if gather_ids is not None:
             return {'logits': logits[gather_ids]}
         else:
-            return {'logits': logits}
+            return {'logits': logits,
+                    'tokens': tokens,
+                    'logprobs': logprobs}
 
     def _init_userbuffers(self, hidden_size):
         if self.mapping.tp_size <= 1:
