@@ -782,6 +782,30 @@ class LlamaForCausalLM(SpecDecOneEngineForCausalLM[LlamaModel, LlamaConfig]):
     ):
         super().__init__(LlamaModel(model_config), model_config)
 
+    def forward(
+            self,
+            attn_metadata: AttentionMetadata,
+            input_ids: torch.LongTensor = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            return_context_logits: bool = False,
+            spec_metadata: Optional[SpecMetadata] = None,
+            **kwargs,
+    ) -> torch.Tensor:
+        logits = super().forward(
+            attn_metadata,
+            input_ids,
+            position_ids,
+            inputs_embeds,
+            return_context_logits,
+            spec_metadata,
+            **kwargs)
+
+        return logits
+
+
+
+
 
 class Llama4InputProcessor(InputProcessor):
 
