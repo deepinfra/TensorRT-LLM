@@ -15,7 +15,7 @@ from tensorrt_llm.functional import PositionEmbeddingType
 from tensorrt_llm.logger import logger
 from tensorrt_llm.lora_manager import HfLoraLoader
 from tensorrt_llm.models.convert_utils import split_matrix_tp
-from ..pyexecutor.sampler import sampling_batch
+from ..pyexecutor.sampler import sampling_batch, flashinfer_sample
 
 from ...inputs import (ExtraProcessedInputs, InputProcessor, TextPrompt,
                        register_input_processor)
@@ -801,7 +801,6 @@ class LlamaForCausalLM(SpecDecOneEngineForCausalLM[LlamaModel, LlamaConfig]):
             return_context_logits,
             spec_metadata,
             **kwargs)
-
 
         tokens, logprobs = sampling_batch(logits, attn_metadata.temperatures, attn_metadata.top_k, attn_metadata.top_p, attn_metadata.min_p)
         return tokens, logprobs, logits
