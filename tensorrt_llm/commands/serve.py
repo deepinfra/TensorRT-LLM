@@ -17,7 +17,7 @@ from tensorrt_llm._utils import mpi_rank
 from tensorrt_llm.executor.utils import LlmLauncherEnvs
 from tensorrt_llm.llmapi import (BuildConfig, CapacitySchedulerPolicy,
                                  DynamicBatchConfig, KvCacheConfig,
-                                 SchedulerConfig)
+                                 SchedulerConfig, CudaGraphConfig)
 from tensorrt_llm.llmapi.disagg_utils import (CtxGenServerConfig,
                                               MetadataServerConfig, ServerRole,
                                               parse_disagg_config_file,
@@ -116,64 +116,33 @@ def get_llm_args(model: str,
     )
 
     llm_args = {
-        "model":
-        model,
-        "served_model_name":
-        served_model_name,
-        "scheduler_config":
-        scheduler_config,
-        "tokenizer":
-        tokenizer,
-        "tensor_parallel_size":
-        tensor_parallel_size,
-        "pipeline_parallel_size":
-        pipeline_parallel_size,
-        "moe_expert_parallel_size":
-        moe_expert_parallel_size,
-        "gpus_per_node":
-        gpus_per_node,
-        "trust_remote_code":
-        trust_remote_code,
-        "build_config":
-        build_config,
-        "max_batch_size":
-        max_batch_size,
-        "max_num_tokens":
-        max_num_tokens,
-        "max_beam_width":
-        max_beam_width,
-        "max_seq_len":
-        max_seq_len,
-        "kv_cache_config":
-        kv_cache_config,
-        "enable_chunked_prefill":
-        enable_chunked_prefill,
-        "backend":
-        backend if backend == "pytorch" else None,
-        "num_postprocess_workers":
-        num_postprocess_workers,
-        "postprocess_tokenizer_dir":
-        tokenizer or model,
-        "reasoning_parser":
-        reasoning_parser,
-        "use_cuda_graph":
-        True,
-        "cuda_graph_batch_sizes":
-        list(range(1, max_batch_size + 1)),
-        "enable_trtllm_sampler":
-        True,
-        "kv_cache_dtype":
-        kv_cache_dtype,
-        "guided_decoding_backend":
-        guided_decoding_backend,
-        "disable_overlap_scheduler":
-        disable_overlap_scheduler,
-        "postprocess_tokenizer_dir":
-        tokenizer or model,
-        "reasoning_parser":
-        reasoning_parser,
-        "fail_fast_on_attention_window_too_large":
-        fail_fast_on_attention_window_too_large,
+        "model": model,
+        "served_model_name": served_model_name,
+        "scheduler_config": scheduler_config,
+        "tokenizer": tokenizer,
+        "tensor_parallel_size": tensor_parallel_size,
+        "pipeline_parallel_size": pipeline_parallel_size,
+        "moe_expert_parallel_size": moe_expert_parallel_size,
+        "gpus_per_node": gpus_per_node,
+        "trust_remote_code": trust_remote_code,
+        "build_config": build_config,
+        "max_batch_size": max_batch_size,
+        "max_num_tokens": max_num_tokens,
+        "max_beam_width": max_beam_width,
+        "max_seq_len": max_seq_len,
+        "kv_cache_config": kv_cache_config,
+        "enable_chunked_prefill": enable_chunked_prefill,
+        "backend": backend if backend == "pytorch" else None,
+        "num_postprocess_workers": num_postprocess_workers,
+        "postprocess_tokenizer_dir": tokenizer or model,
+        "reasoning_parser": reasoning_parser,
+        "cuda_graph_config": CudaGraphConfig(batch_sizes=list(range(1, max_batch_size + 1))),
+        "enable_trtllm_sampler": True,
+        "kv_cache_dtype": kv_cache_dtype,
+        "guided_decoding_backend": guided_decoding_backend,
+        "disable_overlap_scheduler": disable_overlap_scheduler,
+        "reasoning_parser": reasoning_parser,
+        "fail_fast_on_attention_window_too_large": fail_fast_on_attention_window_too_large,
     }
 
     return llm_args, llm_args_extra_dict
