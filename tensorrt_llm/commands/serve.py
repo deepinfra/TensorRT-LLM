@@ -17,7 +17,7 @@ from tensorrt_llm._utils import mpi_rank
 from tensorrt_llm.executor.utils import LlmLauncherEnvs
 from tensorrt_llm.llmapi import (BuildConfig, CapacitySchedulerPolicy,
                                  DynamicBatchConfig, KvCacheConfig,
-                                 SchedulerConfig)
+                                 SchedulerConfig, CudaGraphConfig)
 from tensorrt_llm.llmapi.disagg_utils import (CtxGenServerConfig,
                                               MetadataServerConfig, ServerRole,
                                               parse_disagg_config_file,
@@ -136,8 +136,7 @@ def get_llm_args(model: str,
         "num_postprocess_workers": num_postprocess_workers,
         "postprocess_tokenizer_dir": tokenizer or model,
         "reasoning_parser": reasoning_parser,
-        "use_cuda_graph": True,
-        "cuda_graph_batch_sizes": list(range(1, max_batch_size + 1)),
+        "cuda_graph_config": CudaGraphConfig(batch_sizes=list(range(1, max_batch_size + 1))),
         "enable_trtllm_sampler": True,
         "kv_cache_dtype": kv_cache_dtype,
         "guided_decoding_backend": guided_decoding_backend,
