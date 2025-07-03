@@ -285,7 +285,7 @@ class MTPSampler(TorchSampler):
             assert not request.py_return_context_logits, "return_context_logits not implemented for MTPSampler"
             assert not request.py_return_generation_logits, "return_generation_logits not implemented for MTPSampler"
             # assert not request.py_return_log_probs, "return_log_probs not implemented for MTPSampler"
-            if request.get_context_remaining_length() != 0:
+            if request.context_remaining_length != 0:
                 idx += 1
                 continue
 
