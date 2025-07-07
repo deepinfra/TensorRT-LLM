@@ -4,6 +4,9 @@ import os
 import signal  # Added import
 import subprocess  # nosec B404
 import sys
+import threading
+import traceback
+from datetime import datetime
 from typing import Any, List, Optional
 
 import click
@@ -31,6 +34,63 @@ from tensorrt_llm.serve import OpenAIDisaggServer, OpenAIServer
 
 # Global variable to store the Popen object of the child process
 _child_p_global: Optional[subprocess.Popen] = None
+
+
+def print_stack_trace(signum, frame):
+    """Signal handler for SIGUSR1 that prints stack traces of all threads."""
+    current_pid = os.getpid()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"SIGUSR1 received - Stack trace dump at {datetime.now()}")
+    logger.info(f"Process PID: {current_pid}")
+    logger.info(f"{'='*80}")
+
+    # Print stack trace of current thread
+    logger.info(f"\nMain thread stack trace (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Capture the stack trace as a string and log it
+    import io
+    string_io = io.StringIO()
+    traceback.print_stack(frame, file=string_io)
+    logger.info(string_io.getvalue())
+
+    # Print stack traces of all threads
+    logger.info(f"\nAll threads stack traces (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Sort threads by name for consistent output
+    thread_frames = list(sys._current_frames().items())
+    threads_info = []
+
+    for thread_id, frame in thread_frames:
+        thread = None
+        for t in threading.enumerate():
+            if t.ident == thread_id:
+                thread = t
+                break
+
+        thread_name = thread.name if thread else f"Thread-{thread_id}"
+        thread_daemon = thread.daemon if thread else "Unknown"
+        thread_alive = thread.is_alive() if thread else "Unknown"
+
+        threads_info.append((thread_name, thread_id, thread_daemon, thread_alive, frame))
+
+    # Sort by thread name for consistent output
+    threads_info.sort(key=lambda x: x[0])
+
+    for thread_name, thread_id, thread_daemon, thread_alive, frame in threads_info:
+        logger.info(f"\nThread: {thread_name} (ID: {thread_id}, PID: {current_pid})")
+        logger.info(f"  Daemon: {thread_daemon}, Alive: {thread_alive}")
+        logger.info("-" * 20)
+
+        # Capture each thread's stack trace as a string and log it
+        string_io = io.StringIO()
+        traceback.print_stack(frame, file=string_io)
+        logger.info(string_io.getvalue())
+
+    logger.info(f"\n{'='*80}")
+    logger.info(f"End of stack trace dump for PID: {current_pid}")
+    logger.info(f"{'='*80}\n")
 
 
 def _signal_handler_cleanup_child(signum, frame):
@@ -151,6 +211,10 @@ def launch_server(host: str,
                   llm_args: dict,
                   metadata_server_cfg: Optional[MetadataServerConfig] = None,
                   server_role: Optional[ServerRole] = None):
+
+    # Install the SIGUSR1 signal handler for debugging
+    signal.signal(signal.SIGUSR1, print_stack_trace)
+    logger.info("SIGUSR1 signal handler installed. Send 'kill -USR1 <pid>' to get stack traces.")
 
     backend = llm_args["backend"]
     model = llm_args["model"]
