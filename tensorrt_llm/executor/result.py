@@ -598,7 +598,7 @@ class IterationResult:
             try:
                 data = self.queue.get(timeout=self._timeout)
                 results.append(json.loads(data))
-            except Empty:
+            except (Empty, asyncio.QueueEmpty, asyncio.TimeoutError) as e:
                 self._done = True
         return results
 
@@ -614,7 +614,7 @@ class IterationResult:
         try:
             data = await self.aqueue.get(timeout=self._timeout)
             return json.loads(data)
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, asyncio.QueueEmpty) as e:
             self._done = True
             raise StopAsyncIteration
 
