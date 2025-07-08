@@ -1,11 +1,9 @@
 #!/usr/bin/env python
 import asyncio
 import os
-<<<<<<< HEAD
 import re
-=======
+from dataclasses import dataclass
 import logging
->>>>>>> 3514cecff (Add deepinfra code)
 import signal
 import traceback
 from contextlib import asynccontextmanager
@@ -17,6 +15,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, List, Optional
 from typing import (AsyncGenerator, AsyncIterator, List, Optional, Tuple,
                     TypedDict, Callable, Awaitable, Any, Type)
 
+from tensorrt_llm.llmapi.utils import AsyncQueue
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError, HTTPException
@@ -141,6 +140,12 @@ def cancel_on_disconnect(model_type: Type[BaseModel]):
 
     return cancel_on_disconnect_inner
 
+@dataclass
+class KVHash:
+    block_hash: int
+    parent_hash: int
+    root_hash: int
+    cache_level: int
 
 class OpenAIServer:
 
@@ -157,6 +162,10 @@ class OpenAIServer:
         self.binding_addr = None  # Will be set in __call__
         hf_tokenizer_path = llm._hf_model_dir or self.tokenizer.tokenizer.name_or_path
         trust_remote_code = llm.args.trust_remote_code
+        self.last_iteration_stat = {}
+        self.kv_map:dict[int, KVHash] = {}
+        self.kv_listeners: List[asyncio.Queue] = []
+        self.kv_event_processor_task: Optional[asyncio.Task] = None
         try:
             self.processor = AutoProcessor.from_pretrained(hf_tokenizer_path, trust_remote_code=trust_remote_code)
         except Exception:
@@ -197,13 +206,14 @@ class OpenAIServer:
                 # Register with ETCD using the existing key format
                 self.metadata_server.put(f"trtllm/{self.llm.llm_id}", metadata)
                 logger.info(f"trtllm/{self.llm.llm_id} is registered")
-
+            self.kv_event_processor_task = asyncio.create_task(self.kv_event_processor())
             # terminate rank0 worker
             yield
 
             if self.metadata_server is not None:
                 self.metadata_server.remove(f"trtllm/{self.llm.llm_id}")
                 logger.info(f"trtllm/{self.llm.llm_id} is unregistered")
+            self.kv_event_processor_task.cancel()
             self.llm.shutdown()
 
         self.app = FastAPI(lifespan=lifespan)
@@ -250,7 +260,7 @@ class OpenAIServer:
         # TODO: the metrics endpoint only reports iteration stats, not the runtime stats for now
         self.app.add_api_route("/metrics", self.get_iteration_stats, methods=["GET"])
         # TODO: workaround before ETCD support
-        self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["POST"])
+        self.app.add_api_route("/kv_cache_events", self.get_kv_cache_events, methods=["GET"])
         self.app.add_api_route("/v1/completions",
                                self.openai_completion,
                                methods=["POST"])
@@ -397,15 +407,122 @@ class OpenAIServer:
             stats.append(stat)
         return JSONResponse(content=stats)
 
-    async def get_kv_cache_events(self) -> JSONResponse:
-        events = []
-        try:
-            async for event in self.llm.get_kv_cache_events_async(2):
-                events.append(event)
-        except IndexError:
-            # queue is empty, no more events
-            pass
-        return JSONResponse(content=events)
+    def create_hash_obj(self, block_hash, parent_hash, cache_level):
+        parent_hash_obj = self.kv_map.get(parent_hash)
+        if parent_hash_obj:
+            root_hash = parent_hash_obj.root_hash
+        else:
+            root_hash = block_hash
+        return KVHash(block_hash=block_hash, parent_hash=parent_hash, root_hash=root_hash, cache_level=cache_level)
+
+    def process_kv_event(self, block_hash, parent_hash, cache_level):
+        hash_obj = self.kv_map.get(block_hash)
+        if hash_obj:
+            hash_obj.cache_level = cache_level
+        else:
+            hash_obj = self.create_hash_obj(block_hash, parent_hash, cache_level)
+        if cache_level == -1:
+            self.kv_map.pop(block_hash, None)
+            return hash_obj
+        else:
+            self.kv_map[block_hash] = hash_obj
+            return hash_obj
+
+    async def kv_event_processor(self):
+        logger.info("Starting kv_cache_generator")
+        events = None
+        while True:
+            try:
+                await asyncio.sleep(1)
+                events = self.llm.get_kv_cache_events_async(None)
+            except Exception:
+                pass
+                # WAR result is not initialized before the first request
+            if events:
+                break
+        async for event in events:
+            try:
+                data = event['data']
+                parent_hash = data.get('parent_hash', 0)
+                type = data['type']
+                kv_events = []
+                if type == "stored":
+                    blocks = data['blocks']
+                    for block in blocks:
+                        block_hash = block['block_hash']
+                        cache_level = block['cache_level']
+                        kv_events.append(
+                            self.process_kv_event(block_hash, parent_hash, cache_level)
+                        )
+                        parent_hash = block_hash
+                elif type == "removed":
+                    block_hashes = data['block_hashes']
+                    for block_hash in block_hashes:
+                        kv_events.append(
+                            self.process_kv_event(block_hash, parent_hash, -1)
+                        )
+                elif type == "updated":
+                    block_hash = data['block_hash']
+                    cache_level = data['cache_level']['new_value']
+                    kv_events.append(
+                        self.process_kv_event(block_hash, parent_hash, cache_level)
+                    )
+                else:
+                    logger.info(f'{event}')
+                    continue
+
+                for listener in self.kv_listeners:
+                    listener.put_nowait(kv_events)
+
+            except Exception as e:
+                logger.error(traceback.format_exc())
+                logger.info(f'{event}')
+
+    async def kv_cache_generator(self):
+        def format_sse_event(kv_events: List[KVHash]) -> str:
+            kv_hashes = []
+            kv_root_hashes = []
+            kv_parent_hashes = []
+            kv_cache_levels = []
+
+            # fill the lists from data in kv_events
+            for kv_event in kv_events:
+                kv_hashes.append(kv_event.block_hash)
+                kv_root_hashes.append(kv_event.root_hash)
+                kv_parent_hashes.append(kv_event.parent_hash)
+                kv_cache_levels.append(kv_event.cache_level)
+
+            ret_event = {
+                "kv_hashes": kv_hashes,
+                "kv_root_hashes": kv_root_hashes,
+                "kv_parent_hashes": kv_parent_hashes,
+                "kv_cache_levels": kv_cache_levels,
+            }
+            return f'data: {json.dumps(ret_event)}\n\n'
+
+        # insert listener first, so we always get shutdown signal
+        queue = asyncio.Queue()
+        self.kv_listeners.append(queue)
+
+        BATCH_SIZE = 1000
+        items = list(self.kv_map.values())
+        logger.info(f"kv_cache_generator: {len(items)} items in kv_map")
+        for kv_events in [items[i:i + BATCH_SIZE] for i in range(0, len(items), BATCH_SIZE)]:
+            yield format_sse_event(kv_events)
+        logger.info("kv_cache_generator: done with initial kv_map")
+        # yield empty event to signal that we are ready to receive events
+        yield format_sse_event([])
+        while True:
+            all_kv_events = await queue.get()
+            for kv_events in [all_kv_events[i:i + BATCH_SIZE] for i in range(0, len(all_kv_events), BATCH_SIZE)]:
+                yield format_sse_event(kv_events)
+
+    async def get_kv_cache_events(self) -> StreamingResponse:
+        """
+        This endpoint is used to stream kv cache events.
+        """
+        return StreamingResponse(self.kv_cache_generator(),
+                                 media_type="text/event-stream")
 
     @cancel_on_disconnect(ChatCompletionRequest)
     async def openai_chat(self, request: ChatCompletionRequest, raw_request: Request) -> Response:

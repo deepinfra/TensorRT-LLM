@@ -144,6 +144,7 @@ def get_llm_args(model: str,
                  gpus_per_node: Optional[int] = None,
                  free_gpu_memory_fraction: Optional[float] = None,
                  mamba_ssm_cache_dtype: str = "auto",
+                 event_buffer_max_size: int = 0,
                  host_cache_size: int = 0,
                  enable_chunked_prefill: bool = True,
                  guided_decoding_backend: Optional[str] = None,
@@ -166,6 +167,7 @@ def get_llm_args(model: str,
         free_gpu_memory_fraction=free_gpu_memory_fraction,
         mamba_ssm_cache_dtype=mamba_ssm_cache_dtype,
         host_cache_size=host_cache_size,
+        event_buffer_max_size=event_buffer_max_size,
     )
 
     dynamic_batch_config = DynamicBatchConfig(
@@ -305,6 +307,10 @@ def launch_server(host: str,
               default=0.9,
               help="Free GPU memory fraction reserved for KV Cache, "
               "after allocating model weights and buffers.")
+@click.option("--event_buffer_max_size",
+              type=int,
+              default=1000000,
+              help="Maximum size of the event buffer. If set to 0, the event buffer will not be used.")
 @click.option("--host_cache_size",
                 type=int,
                 default=0,
@@ -368,23 +374,16 @@ def launch_server(host: str,
     help=
     "Exit with runtime error when attention window is too large to fit even a single sequence in the KV cache."
 )
-<<<<<<< HEAD
-def serve(model: str, tokenizer: Optional[str], host: str, port: int,
-=======
+
 def serve(model: str,
           served_model_name: Optional[str],
           tokenizer: Optional[str], host: str, port: int,
->>>>>>> 3514cecff (Add deepinfra code)
           log_level: str, backend: str, max_beam_width: int,
           max_batch_size: int, max_num_tokens: int, max_seq_len: int,
           tp_size: int, pp_size: int, ep_size: Optional[int],
           cluster_size: Optional[int], gpus_per_node: Optional[int],
-<<<<<<< HEAD
           kv_cache_free_gpu_memory_fraction: float, mamba_ssm_cache_dtype: str,
-          num_postprocess_workers: int, trust_remote_code: bool,
-          extra_llm_api_options: Optional[str], reasoning_parser: Optional[str],
-=======
-          kv_cache_free_gpu_memory_fraction: float,
+          event_buffer_max_size: int,
           host_cache_size: int,
           enable_chunked_prefill: bool,
           guided_decoding_backend: Optional[str],
@@ -392,7 +391,6 @@ def serve(model: str,
           num_postprocess_workers: int, trust_remote_code: bool,
           extra_llm_api_options: Optional[str],
           reasoning_parser: Optional[str],
->>>>>>> 3514cecff (Add deepinfra code)
           metadata_server_config_file: Optional[str],
           server_role: Optional[str],
           fail_fast_on_attention_window_too_large: bool):
@@ -419,14 +417,12 @@ def serve(model: str,
         moe_cluster_parallel_size=cluster_size,
         gpus_per_node=gpus_per_node,
         free_gpu_memory_fraction=kv_cache_free_gpu_memory_fraction,
-<<<<<<< HEAD
         mamba_ssm_cache_dtype=mamba_ssm_cache_dtype,
-=======
+        event_buffer_max_size=event_buffer_max_size,
         host_cache_size=host_cache_size,
         enable_chunked_prefill=enable_chunked_prefill,
         guided_decoding_backend=guided_decoding_backend,
         disable_overlap_scheduler=disable_overlap_scheduler,
->>>>>>> 3514cecff (Add deepinfra code)
         num_postprocess_workers=num_postprocess_workers,
         trust_remote_code=trust_remote_code,
         reasoning_parser=reasoning_parser,
