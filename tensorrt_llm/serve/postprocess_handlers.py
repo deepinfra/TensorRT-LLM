@@ -8,6 +8,7 @@ from ..executor.postproc_worker import PostprocArgs
 from ..llmapi.reasoning_parser import (BaseReasoningParser,
                                        ReasoningParserFactory)
 from ..llmapi.tokenizer import TransformersTokenizer
+from .bufferer import Chunk
 # yapf: disable
 from .openai_protocol import (ChatCompletionLogProbs,
                               ChatCompletionLogProbsContent,
@@ -270,6 +271,51 @@ class CompletionPostprocArgs(PostprocArgs):
             stream_options=request.stream_options,
             detokenize=request.detokenize,
         )
+
+
+@nvtx_range_debug("completion_stream_chunk_post_processor")
+def completion_stream_chunk_post_processor(chunk: Chunk, args: CompletionPostprocArgs) -> List[str]:
+    res: List[str] = []
+    prompt_tokens = args.num_prompt_tokens
+    if stream_option := args.stream_options:
+        include_usage = stream_option.include_usage
+        include_continuous_usage = include_usage and stream_option.continuous_usage_stats
+    else:
+        include_usage = False
+        include_continuous_usage = False
+
+    delta_text = chunk.text
+    if args.echo and args.first_iteration:
+        delta_text = args.prompt + delta_text
+    choice = CompletionResponseStreamChoice(
+        index=args.prompt_idx * args.num_choices + chunk.index,
+        text=delta_text if args.detokenize else "",
+        token_ids=None if args.detokenize else chunk.token_ids,
+        finish_reason = chunk.finish_reason,
+        stop_reason = chunk.stop_reason,
+    )
+    chunk = CompletionStreamResponse(model=args.model, choices=[choice])
+    if include_continuous_usage:
+        chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
+                                completion_tokens=chunk.total_tokens,
+                                total_tokens=prompt_tokens + chunk.total_tokens)
+    data = chunk.model_dump_json(exclude_unset=False)
+    res.append(f"data: {data}\n\n")
+
+    if include_usage and chunk.done:
+        final_usage = UsageInfo(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=chunk.total_tokens,
+            total_tokens=prompt_tokens + chunk.total_tokens,
+        )
+
+        final_usage_chunk = ChatCompletionStreamResponse(
+            choices=[], model=args.model, usage=final_usage)
+        final_usage_data = final_usage_chunk.model_dump_json()
+        res.append(f"data: {final_usage_data}\n\n")
+    args.first_iteration = False
+    return res
+
 
 
 @nvtx_range_debug("completion_stream_post_processor")

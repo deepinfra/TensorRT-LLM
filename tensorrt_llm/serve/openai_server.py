@@ -42,6 +42,7 @@ from tensorrt_llm.serve.postprocess_handlers import (
 from tensorrt_llm.version import __version__ as VERSION
 
 from .._utils import nvtx_mark
+from .bufferer import Chunk, PrefixMatchingBufferer
 
 # yapf: enale
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
@@ -345,7 +346,7 @@ class OpenAIServer:
             return consumer()
 
         async def create_completion_generator(
-                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]]):
+                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]]) -> AsyncGenerator[str]:
             async for request_output, postproc_params in generator:
                 if not self.postproc_worker_enabled:
                     post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
@@ -355,6 +356,59 @@ class OpenAIServer:
                 for pp_res in pp_result:
                     yield pp_res
             yield "data: [DONE]\n\n"
+
+        async def create_completion_response(
+                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]], request: CompletionRequest,
+                promises: List[RequestOutput],
+                disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> CompletionResponse | AsyncGenerator[str]:
+            bufferer = PrefixMatchingBufferer(request.stop if isinstance(request.stop, list) or request.stop is None else [request.stop])
+            all_chunks = []
+            promise_idx = 0
+            async for request_output, postproc_params in generator:
+                promise_idx += 1
+                for output in request_output.outputs:
+                    current_chunk = Chunk(
+                        output.text_diff, output.token_ids_diff, output.length, output.logprobs_diff,
+                        output.index, output.finish_reason, output.stop_reason, request_output._done)
+                    released_chunks = bufferer.add_and_release(current_chunk)
+                    for chunk in released_chunks:
+                        if request.stream:
+                            if not self.postproc_worker_enabled:
+                                post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
+                                pp_result = post_processor(request_output, args)
+                            else:
+                                pp_result = request_output.outputs[0]._postprocess_result
+                            for pp_res in pp_result:
+                                yield pp_res
+                        else:
+                            all_chunks.append(chunk)
+                    if bufferer.has_full_match():
+                        # cancel the request since it matched the stop word
+                        # TODO: make sure to send the usage info before aborting
+                        promises[promise_idx - 1].abort()
+                        break
+
+                if not bufferer.has_full_match():
+                    # if we didn't match the stop word, we need to release all the chunks
+                    released_chunks = bufferer.release_all()
+                    for chunk in released_chunks:
+                        if request.stream:
+                            if not self.postproc_worker_enabled:
+                                post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
+                                pp_result = post_processor(request_output, args)
+                            else:
+                                pp_result = request_output.outputs[0]._postprocess_result
+                            for pp_res in pp_result:
+                                yield pp_res
+                        else:
+                            all_chunks.append(chunk)
+
+
+            if request.stream:
+                yield "data: [DONE]\n\n"
+            else:
+                pass
+
 
         async def create_completion_response(
                 generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]], disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> CompletionResponse:
@@ -416,7 +470,7 @@ class OpenAIServer:
                     inputs=prompt,
                     sampling_params=sampling_params,
                     _postproc_params=postproc_params,
-                    streaming=request.stream,
+                    streaming=True, # always stream because we want to support stop words
                     lora_request=request.lora_request,
                     disaggregated_params=disaggregated_params
                 )
@@ -428,14 +482,13 @@ class OpenAIServer:
                 postproc_params_collection.append(None if self.postproc_worker_enabled else postproc_params)
 
             generator = merge_promises(promises, postproc_params_collection)
+
+            response = create_completion_response(generator, request, promises, disaggregated_params)
+
             if request.stream:
-                response_generator = create_completion_generator(
-                    generator)
-                return StreamingResponse(content=response_generator,
+                return StreamingResponse(content=response,
                                             media_type="text/event-stream")
             else:
-                response = await create_completion_response(
-                    generator, disaggregated_params)
                 return JSONResponse(content=response.model_dump())
         except CppExecutorError:
             logger.error(traceback.format_exc())
