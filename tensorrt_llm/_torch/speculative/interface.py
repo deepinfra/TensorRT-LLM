@@ -161,6 +161,10 @@ class SpecMetadata:
     top_p: Optional[torch.Tensor] = None
     # The min_p for requests.
     min_p: Optional[torch.Tensor] = None
+    # The tokens for requests.
+    tokens: Optional[torch.Tensor] = None
+    # The repetition_penalty for requests.
+    repetition_penalty: Optional[torch.Tensor] = None
     # The number of tokens for speculative model/layer
     num_tokens: int = 0
     # The number of tokens for speculative model/layer of different rank

@@ -290,14 +290,53 @@ def apply_temperature(
     # Use in-place division to avoid creating a new tensor.
     return logits.div_(temp.unsqueeze(dim=1))
 
+def apply_repetition_penalties_torch(
+        logits: torch.Tensor, mask: torch.Tensor, repetition_penalties: torch.Tensor) -> None:
+    repetition_penalties = repetition_penalties.unsqueeze(dim=1).repeat(
+        1, logits.size(1))
+    # If token appears in prompt or output, apply, otherwise use 1.0 for no-op.
+    penalties = torch.where(mask, repetition_penalties,
+                            1.0)
+    # If logits are positive, divide by penalty, otherwise multiply by penalty.
+    scaling = torch.where(logits > 0, 1.0 / penalties, penalties)
+    logits *= scaling
+
+def get_token_bin_counts_and_mask(
+    tokens: torch.Tensor,
+    vocab_size: int,
+    num_seqs: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # Compute the bin counts for the tokens.
+    # vocab_size + 1 for padding.
+    bin_counts = torch.zeros((num_seqs, vocab_size + 1),
+                             dtype=torch.long,
+                             device=tokens.device)
+    bin_counts.scatter_add_(1, tokens, torch.ones_like(tokens))
+    bin_counts = bin_counts[:, :vocab_size]
+    mask = bin_counts > 0
+
+    return bin_counts, mask
+
+def apply_penalties(logits: torch.Tensor, tokens_tensor: torch.Tensor,
+                    repetition_penalties: torch.Tensor) -> torch.Tensor:
+    num_seqs, vocab_size = logits.shape
+    _, mask = get_token_bin_counts_and_mask(tokens_tensor,
+                                                   vocab_size, num_seqs)
+    apply_repetition_penalties_torch(logits, mask,
+                               repetition_penalties)
+    return logits
+
 def sampling_batch(
         logits: torch.Tensor,
         temperatures: torch.Tensor,
         top_k: torch.Tensor,
         top_p: torch.Tensor,
-        min_p: torch.Tensor
+        min_p: torch.Tensor,
+        tokens: torch.Tensor,
+        repetition_penalties: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
     raw_probs = torch.softmax(logits, dim=-1)
+    apply_penalties(logits, tokens, repetition_penalties)
     greedy_sampled = greedy_sample(logits)
     logits = apply_temperature(logits, temperatures)
     logits = apply_min_p(logits, min_p)

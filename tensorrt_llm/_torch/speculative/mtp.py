@@ -894,7 +894,15 @@ class MTPWorker(nn.Module):
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
             else:
                 # Do greedy sampling for the input logits
-                target_tokens, target_log_probs = sampling_batch(logits, spec_metadata.temperatures, spec_metadata.top_k, spec_metadata.top_p, spec_metadata.min_p)
+                target_tokens, target_log_probs = sampling_batch(
+                    logits,
+                    spec_metadata.temperatures,
+                    spec_metadata.top_k,
+                    spec_metadata.top_p,
+                    spec_metadata.min_p,
+                    spec_metadata.tokens,
+                    spec_metadata.repetition_penalty
+                )
                 # target_tokens, target_log_probs = greedy_search_sampling_batch(logits)
 
                 # context

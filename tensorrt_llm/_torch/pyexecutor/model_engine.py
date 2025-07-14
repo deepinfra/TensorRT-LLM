@@ -13,7 +13,9 @@ import weakref
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TypeVar, Union
+
+import numpy as np
 
 import psutil
 import safetensors
@@ -318,6 +320,81 @@ def _filter_cuda_graph_batch_sizes(cuda_graph_batch_sizes: list[int],
 
     return result
 
+T = TypeVar("T")
+
+TORCH_DTYPE_TO_NUMPY_DTYPE = {
+    torch.float16: np.float16,
+    torch.float32: np.float32,
+    torch.float64: np.float64,
+    torch.uint8: np.uint8,
+    torch.int32: np.int32,
+    torch.int64: np.int64,
+}
+
+def make_ndarray_with_pad(
+    x: list[list[T]],
+    pad: T,
+    dtype: np.typing.DTypeLike,
+    *,
+    max_len: Optional[int] = None,
+) -> np.typing.NDArray:
+    """
+    Make a padded array from 2D inputs.
+
+    The padding is applied to the end of each inner list until it reaches
+    `max_len`.
+    """
+    if max_len is None:
+        # Unlike for most functions, map is faster than a genexpr over `len`
+        max_len = max(map(len, x), default=0)
+
+    padded_x = np.full((len(x), max_len), pad, dtype=dtype)
+    for ind, blocktb in enumerate(x):
+        assert len(blocktb) <= max_len
+        padded_x[ind, :len(blocktb)] = blocktb
+
+    return padded_x
+
+
+def make_tensor_with_pad(
+    x: list[list[T]],
+    pad: T,
+    dtype: torch.dtype,
+    *,
+    max_len: Optional[int] = None,
+    device: Optional[Union[str, torch.device]] = None,
+    pin_memory: bool = False,
+) -> torch.Tensor:
+    """
+    Make a padded tensor from 2D inputs.
+
+    The padding is applied to the end of each inner list until it reaches
+    `max_len`.
+    """
+    np_dtype = TORCH_DTYPE_TO_NUMPY_DTYPE[dtype]
+    padded_x = make_ndarray_with_pad(x, pad, np_dtype, max_len=max_len)
+
+    tensor = torch.from_numpy(padded_x).to(device)
+    if pin_memory:
+        tensor = tensor.pin_memory()
+
+    return tensor
+
+def _convert_to_tensors(output_token_ids: list[list[int]], vocab_size: int) -> torch.Tensor:
+    """
+    Convert the different list data structures to tensors.
+    """
+    output_tokens_tensor = make_tensor_with_pad(
+        output_token_ids,
+        # Use the value of vocab_size as a pad since we don't have a
+        # token_id of this value.
+        pad=vocab_size,
+        device="cpu",
+        dtype=torch.int64,
+        pin_memory=True,
+    )
+    return output_tokens_tensor
+
 
 class PyTorchModelEngine(ModelEngine):
 
@@ -461,6 +538,12 @@ class PyTorchModelEngine(ModelEngine):
                                           dtype=torch.float,
                                           device='cuda')
             self.min_p_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
+                                          dtype=torch.float,
+                                          device='cuda')
+            self.tokens_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), self.max_seq_len),
+                                                 dtype=torch.int64,
+                                                 device='cuda')
+            self.repetition_penalty_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
                                           dtype=torch.float,
                                           device='cuda')
         else:
@@ -1170,6 +1253,8 @@ class PyTorchModelEngine(ModelEngine):
         top_k = []
         top_p = []
         min_p = []
+        tokens = []
+        repetition_penalty = []
 
         batch_idx = 0
 
@@ -1206,6 +1291,16 @@ class PyTorchModelEngine(ModelEngine):
                 min_p = request.sampling_config.min_p[0]
             return min_p
 
+        def get_request_tokens(request: LlmRequest, draft_pos: int) -> List[int]:
+            tokens = request.get_tokens(0).copy()
+            tokens.extend(request.py_draft_tokens[:draft_pos])
+            return tokens
+
+        def get_repetition_penalty(request: LlmRequest) -> float:
+            if not request.sampling_config.repetition_penalty:
+                return 1.0
+            return request.sampling_config.repetition_penalty[0]
+
         for request in scheduled_requests.context_requests:
             request_ids.append(request.py_request_id)
             all_prompt_tokens = request.get_tokens(0)
@@ -1239,6 +1334,8 @@ class PyTorchModelEngine(ModelEngine):
             top_k.append(get_request_top_k(request))
             top_p.append(get_request_top_p(request))
             min_p.append(get_request_min_p(request))
+            tokens.append(all_prompt_tokens)
+            repetition_penalty.append(get_repetition_penalty(request))
 
             request.py_batch_idx = batch_idx
             batch_idx += 1
@@ -1298,6 +1395,7 @@ class PyTorchModelEngine(ModelEngine):
                     input_ids.append(request.get_last_tokens(0))
                     input_ids.extend(request.py_draft_tokens)
                     draft_tokens.extend(request.py_draft_tokens)
+
                 # get other ids and lengths
                 num_draft_tokens = len(request.py_draft_tokens)
                 past_seen_token_num = request.max_beam_num_tokens - 1
@@ -1305,6 +1403,7 @@ class PyTorchModelEngine(ModelEngine):
 
                 if self.is_spec_decode and self.spec_config.spec_dec_mode.extend_ctx(
                         self.attn_backend):
+
                     # We're treating the prompt lengths as context requests here, so
                     # the the prompt lens should not include the cached tokens.
                     prompt_lengths.append(1 + num_draft_tokens)
@@ -1326,6 +1425,11 @@ class PyTorchModelEngine(ModelEngine):
                 top_k.extend([get_request_top_k(request)] * (num_draft_tokens + 1))
                 top_p.extend([get_request_top_p(request)] * (num_draft_tokens + 1))
                 min_p.extend([get_request_min_p(request)] * (num_draft_tokens + 1))
+                repetition_penalty.extend([get_repetition_penalty(request)] * (num_draft_tokens + 1))
+                for draft_pos in range(num_draft_tokens + 1):
+                    # get token ids
+                    tokens.append(get_request_tokens(request, draft_pos))
+
                 # update batch index
                 request.py_batch_idx = batch_idx
                 batch_idx += 1
@@ -1360,7 +1464,11 @@ class PyTorchModelEngine(ModelEngine):
                 top_k.extend([get_request_top_k(request)] * (self.max_draft_len + 1))
                 top_p.extend([get_request_top_p(request)] * (self.max_draft_len + 1))
                 min_p.extend([get_request_min_p(request)] * (self.max_draft_len + 1))
-
+                # TODO figure out what's the token for none mtp
+                for draft_pos in range(self.max_draft_len + 1):
+                    pass
+                    # get token ids
+                    # tokens.append(get_request_tokens(request, draft_pos))
 
         sequence_lengths.extend([1] * len(generation_requests))
         gather_ids.extend(
@@ -1392,6 +1500,11 @@ class PyTorchModelEngine(ModelEngine):
             top_k.extend([get_request_top_k(request)] * (self.max_draft_len + 1))
             top_p.extend([get_request_top_p(request)] * (self.max_draft_len + 1))
             min_p.extend([get_request_min_p(request)] * (self.max_draft_len + 1))
+            # TODO figure out what's the toke for none speculative decoding
+            for draft_pos in range(self.max_draft_len + 1):
+                pass
+                # get token ids
+                # tokens.append(get_request_tokens(request, draft_pos))
             request.py_batch_idx = batch_idx
             batch_idx += 1
 
@@ -1498,6 +1611,11 @@ class PyTorchModelEngine(ModelEngine):
             self.min_p_cuda[:len(min_p)].copy_(torch.tensor(
                 min_p, dtype=torch.float, pin_memory=True),
                                                         non_blocking=True)
+            tokens = _convert_to_tensors(tokens, self.model.lm_head.out_features)
+            self.tokens_cuda[:tokens.shape[0], :tokens.shape[1]].copy_(tokens)
+            self.repetition_penalty_cuda[:len(repetition_penalty)].copy_(torch.tensor(
+                repetition_penalty, dtype=torch.float, pin_memory=True),
+                                                        non_blocking=True)
 
         if not attn_metadata.is_cuda_graph:
             # Assumes seq lens do not change between CUDA graph invocations. This applies
@@ -1551,6 +1669,8 @@ class PyTorchModelEngine(ModelEngine):
             spec_metadata.top_k = self.top_k_cuda[:len(top_k)]
             spec_metadata.top_p = self.top_p_cuda[:len(top_p)]
             spec_metadata.min_p = self.min_p_cuda[:len(min_p)]
+            spec_metadata.tokens = self.tokens_cuda[:tokens.shape[0], :tokens.shape[1]]
+            spec_metadata.repetition_penalty = self.repetition_penalty_cuda[:len(repetition_penalty)]
             # if attn_metadata.is_cuda_graph and not torch.cuda.is_current_stream_capturing():
                 # spec_metadata.generator = torch.Generator(device='cpu').manual_seed(0)
             spec_metadata.num_generations = len(
