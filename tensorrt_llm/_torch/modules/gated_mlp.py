@@ -124,12 +124,15 @@ class GatedMLP(nn.Module):
         if bool(lora_params):
             return self.forward_lora(x, all_rank_num_tokens,
                                      final_all_reduce_params, lora_params)
-
+        print("forward without lora", x.shape)
         h1 = self.gate_up_proj(x)
+        print("gate_up_proj done", h1.shape)
         h2 = self._apply_activation(h1)
+        print("apply_activation done", h2.shape)
         output = self.down_proj(h2,
                                 all_reduce_params=final_all_reduce_params,
                                 layer_idx=self.layer_idx)
+        print("forward")
         return output
 
     def forward_lora(

@@ -177,4 +177,4 @@ class Gemma3Model(PreTrainedModel):
         return logits
 
 
-AutoModel.register(Gemma3Config, Gemma3Model)
+# AutoModel.register(Gemma3Config, Gemma3Model)

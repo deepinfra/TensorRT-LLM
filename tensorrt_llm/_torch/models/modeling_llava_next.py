@@ -283,4 +283,4 @@ class LlavaNextModel(PreTrainedModel):
         return logits
 
 
-AutoModel.register(LlavaNextConfig, LlavaNextModel)
+# AutoModel.register(LlavaNextConfig, LlavaNextModel)

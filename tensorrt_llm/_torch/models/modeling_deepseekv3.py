@@ -37,9 +37,11 @@ import triton.language as tl
 from torch import nn
 from tqdm import tqdm
 from transformers import PretrainedConfig
+from transformers import Glm4MoeConfig
 
 from tensorrt_llm._utils import get_sm_version
-from tensorrt_llm.functional import PositionEmbeddingType
+from tensorrt_llm.functional import LayerNormType, PositionEmbeddingType
+from ..modules.attention import Attention
 from tensorrt_llm.llmapi.utils import enable_llm_debug
 from tensorrt_llm.mapping import Mapping
 from tensorrt_llm.models.modeling_utils import QuantConfig
@@ -65,7 +67,7 @@ from ..speculative import MTPEagleWorker, MTPSpecMetadata, MTPWorker
 from ..utils import (AuxStreamType, EventType, Fp4QuantizedTensor,
                      disable_fp4_allgather)
 from .modeling_utils import (DecoderModel, DecoderModelForCausalLM,
-                             EagerFusionConfig, filter_weights,
+                             EagerFusionConfig, _load_weights_impl, filter_weights,
                              register_auto_model)
 
 
@@ -447,7 +449,7 @@ class Deepseekv3MoE(nn.Module):
 
         # FIXME: incompatible with mixed quantization mode (including excluding modules from quantization)
         block_size = 1
-        if model_config.quant_config and model_config.quant_config.group_size is not None:
+        if model_config.quant_config and model_config.quant_config.quant_algo and model_config.quant_config.group_size is not None:
             block_size = model_config.quant_config.group_size
 
         shared_tp_size, self.shared_output_scale = self._compute_shared_expert_tp_size(
@@ -469,6 +471,7 @@ class Deepseekv3MoE(nn.Module):
             key: torch.cuda.Event()
             for key in [EventType.Main, EventType.MoeShared]
         }
+        self.layer_idx = layer_idx
 
     def _compute_shared_expert_tp_size(self, intermediate_size: int,
                                        block_size: int) -> int:
@@ -552,24 +555,28 @@ class Deepseekv3MoE(nn.Module):
             assert not self.use_dp
 
         def _compute_shared_output():
+            print("DeepseekV3MoE::forward shared", self.layer_idx)
+            print((hidden_states_fp4 or hidden_states).shape)
             shared_output = self.shared_experts(hidden_states_fp4
                                                 or hidden_states)
+            print(shared_output.shape)
             if self.shared_output_scale is not None:
                 shared_output *= self.shared_output_scale
             return shared_output
 
         def _compute_routed_output():
+            print("DeepseekV3MoE::forward routed", self.layer_idx)  
             routed_output = self.compute_routed_output(hidden_states,
                                                        hidden_states_fp4,
                                                        all_rank_num_tokens,
                                                        do_finalize)
             return routed_output
-
+        print("DeepseekV3MoE::forward", self.layer_idx)
         routed_output, shared_output = maybe_execute_in_parallel(
             _compute_routed_output, _compute_shared_output,
             self.event_dict[EventType.Main],
             self.event_dict[EventType.MoeShared], self.aux_stream)
-
+        print("DeepseekV3MoE::forward done", self.layer_idx)
         if not do_finalize:
             return [shared_output, *routed_output]
         else:
@@ -582,6 +589,95 @@ class Deepseekv3MoE(nn.Module):
                     all_reduce_params=final_all_reduce_params)
 
             return final_hidden_states
+
+class GLMAttention(Attention):
+
+    def __init__(
+        self,
+        model_config: ModelConfig[PretrainedConfig],
+        layer_idx: Optional[int] = None,
+        fuse_qk_norm_rope: bool = True,
+        aux_stream: Optional[torch.cuda.Stream] = None,
+    ):
+        config = model_config.pretrained_config
+
+        pos_embd_params=PositionalEmbeddingParams(
+                            type=PositionEmbeddingType.yarn,
+                            rope=RopeParams.from_config(config),
+                            is_neox=True,
+                        )
+
+        self.fuse_qk_norm_rope = fuse_qk_norm_rope
+
+        super().__init__(
+            hidden_size=config.hidden_size,
+            num_attention_heads=config.num_attention_heads,
+            num_key_value_heads=config.num_key_value_heads,
+            max_position_embeddings=config.max_position_embeddings,
+            bias=config.attention_bias,
+            pos_embd_params=pos_embd_params,
+            rope_fusion=not self.
+            fuse_qk_norm_rope,  # If fuse_qk_norm_rope is true, do not apply fused RoPE in attention OP, and self.rotary_emb will be skipped in the overridden apply_rope.
+            layer_idx=layer_idx,
+            dtype=config.torch_dtype,
+            dense_bias=False,
+            config=model_config,
+        )
+        self.use_qk_norm = config.use_qk_norm
+        if self.use_qk_norm:
+            self.q_norm = RMSNorm(hidden_size=self.head_dim,
+                              eps=1e-6,
+                              dtype=config.torch_dtype,
+                              has_weights=True)
+            self.k_norm = RMSNorm(hidden_size=self.head_dim,
+                              eps=1e-6,
+                              dtype=config.torch_dtype,
+                              has_weights=True)
+        self.aux_stream = aux_stream
+        self.ln_events = [torch.cuda.Event(), torch.cuda.Event()]
+
+    def apply_qk_norm(self, q, k):
+
+        def q_l2norm():
+            return self.q_norm(q.reshape(-1, self.head_dim)).reshape(
+                -1, self.q_size)
+
+        def k_l2norm():
+            return self.k_norm(k.reshape(-1, self.head_dim)).reshape(
+                -1, self.kv_size)
+
+        q, k = maybe_execute_in_parallel(
+            q_l2norm,
+            k_l2norm,
+            self.ln_events[0],
+            self.ln_events[1],
+            self.aux_stream,
+        )
+
+        return q, k
+
+    def apply_qk_norm_rope(self, qkv, position_ids):
+        torch.ops.trtllm.fused_qk_norm_rope(
+            qkv, self.num_heads, self.num_key_value_heads,
+            self.num_key_value_heads, self.head_dim,
+            self.q_norm.variance_epsilon, self.q_norm.weight,
+            self.k_norm.weight, self.pos_embd_params.rope.theta,
+            self.pos_embd_params.is_neox, position_ids.view(-1))
+        return qkv, None, None
+
+    def apply_rope(self, q: torch.Tensor, k: Optional[torch.Tensor],
+                   v: Optional[torch.Tensor], position_ids: torch.Tensor):
+        if not self.use_qk_norm:
+            return super().apply_rope(q, k, v, position_ids)
+        # Qwen3 applies QK norm before RoPE.
+        if not self.fuse_qk_norm_rope:
+            q, k, v = self.split_qkv(q, k, v)
+            q, k = self.apply_qk_norm(q, k)
+            return super().apply_rope(q, k, v, position_ids)
+
+        assert k is None and v is None, "The input should be a concatenated qkv tensor to apply_qk_norm_rope"
+        qkv = q
+        return self.apply_qk_norm_rope(qkv, position_ids)
 
 
 class DeepseekV3DecoderLayer(DecoderLayer):
@@ -602,10 +698,15 @@ class DeepseekV3DecoderLayer(DecoderLayer):
         self.mapping = model_config.mapping
         mapping = self.mapping
 
-        self.self_attn = DeepseekV3Attention(
+        # self.self_attn = DeepseekV3Attention(
+        #     model_config,
+        #     layer_idx=layer_idx,
+        #     aux_stream=aux_stream_dict[AuxStreamType.Attention])
+        self.self_attn = GLMAttention(
             model_config,
             layer_idx=layer_idx,
-            aux_stream=aux_stream_dict[AuxStreamType.Attention])
+            aux_stream=aux_stream_dict[AuxStreamType.Attention]
+        )
         self.enable_attention_dp = mapping.enable_attention_dp
 
         self.mlp_tp_size = mapping.tp_size
@@ -623,8 +724,7 @@ class DeepseekV3DecoderLayer(DecoderLayer):
         has_tp = mapping.has_tp()
 
         if (config.n_routed_experts is not None
-                and layer_idx >= config.first_k_dense_replace
-                and layer_idx % config.moe_layer_freq == 0):
+                and layer_idx >= config.first_k_dense_replace):
 
             self.fusion_config.PRE_MOE_FUSION = self.enable_fusion and has_tp
             self.fusion_config.POST_MOE_FUSION = self.fusion_config.PRE_MOE_FUSION
@@ -643,7 +743,7 @@ class DeepseekV3DecoderLayer(DecoderLayer):
                 layer_idx=layer_idx)
         else:
             block_size = 1
-            if quant_config and quant_config.group_size is not None:
+            if quant_config and quant_config.quant_algo and quant_config.group_size is not None:
                 block_size = quant_config.group_size
             self.mlp_tp_size = self._compute_mlp_tp_size(
                 config.intermediate_size, block_size)
@@ -803,11 +903,11 @@ class DeepseekV3DecoderLayer(DecoderLayer):
                            and self.fusion_config.POST_MOE_FUSION
                            and self.model_config.moe_backend == 'TRTLLM'
                            and self.mlp.experts.has_nvfp4)
-
+        print("DeepseekV3DecoderLayer::forward_MoE", self.layer_idx)
         hidden_states = _run_MoE(hidden_states,
                                  hidden_states_fp4=None,
                                  do_finalize=do_finalize)
-
+        print("DeepseekV3DecoderLayer::forward_MoE done", self.layer_idx)
         if self.fusion_config.POST_MOE_FUSION:
             if do_finalize:
                 hidden_states, residual = self.allreduce(
@@ -843,7 +943,7 @@ class DeepseekV3DecoderLayer(DecoderLayer):
             if self.next_layer_layernorm is not None:
                 hidden_states, residual = self.next_layer_layernorm(
                     hidden_states, residual)
-
+        print("DeepseekV3DecoderLayer::forward_MoE end", self.layer_idx)
         return hidden_states, residual
 
     def forward_mlp(
@@ -1043,7 +1143,7 @@ class DeepseekV3Model(DecoderModel):
         hidden_states = inputs_embeds
         residual = None
 
-        for decoder_layer in self.layers[:self.num_hidden_layers]:
+        for decoder_layer in self.layers[:17]:
             hidden_states, residual = decoder_layer(
                 position_ids=position_ids,
                 hidden_states=hidden_states,
@@ -1054,8 +1154,8 @@ class DeepseekV3Model(DecoderModel):
         return hidden_states
 
 
-@register_auto_model("DeepseekV3ForCausalLM")
-class DeepseekV3ForCausalLM(DecoderModelForCausalLM[DeepseekV3Model,
+@register_auto_model("Glm4MoeForCausalLM")
+class Glm4MoeForCausalLM(DecoderModelForCausalLM[DeepseekV3Model,
                                                     PretrainedConfig]):
 
     def __init__(self, model_config: ModelConfig[PretrainedConfig]):
@@ -1123,6 +1223,7 @@ class DeepseekV3ForCausalLM(DecoderModelForCausalLM[DeepseekV3Model,
             position_ids=position_ids,
             inputs_embeds=inputs_embeds,
         )
+        print("DeepseekV3Model::forward")
 
         if spec_metadata and spec_metadata.spec_dec_mode.is_mtp():
             # get logits
@@ -1150,241 +1251,61 @@ class DeepseekV3ForCausalLM(DecoderModelForCausalLM[DeepseekV3Model,
                 attn_metadata,
                 return_context_logits,
             )
+            print("DeepseekV3Model::forward done", logits.shape)
             return logits
 
     def load_weights(self, weights: Dict):
+        # model.layers.91.mlp.experts.75.up_proj.weight_scale_2
+        _load_weights_impl(self, weights, params_map={
+            r'(?!.*shared_experts)(?=.*experts?)(.*?)up_proj(.*)': r'\1w3\2',
+            r'(?!.*shared_experts)(?=.*experts?)(.*?)down_proj(.*)': r'\1w2\2',
+            r'(?!.*shared_experts)(?=.*experts?)(.*?)gate_proj(.*)': r'\1w1\2',
+        })
 
-        def rename_moe_weight(weights: Dict, rename_rules: Dict):
-            result = {}
-            for key, value in weights.items():
-                new_key = key
-                for old, new in rename_rules.items():
-                    new_key = new_key.replace(old, new)
-                result[new_key] = value
-            return result
+    # def load_weights(self, weights: Dict):
 
-        ## Prepare weights for TP
-        def split(v, tp_size, idx, dim=0):
-            if tp_size == 1:
-                return v
-            if len(v.shape) == 1:
-                return torch.chunk(v, tp_size)[idx].contiguous()
-            else:
-                return torch.chunk(v, tp_size, dim=dim)[idx].contiguous()
+    #     def rename_moe_weight(weights: Dict, rename_rules: Dict):
+    #         result = {}
+    #         for key, value in weights.items():
+    #             new_key = key
+    #             for old, new in rename_rules.items():
+    #                 new_key = new_key.replace(old, new)
+    #             result[new_key] = value
+    #         return result
 
-        def split_matrix_tp(v, tensor_parallel, rank, dim):
-            return split(v, tensor_parallel, rank, dim=dim)
+    #     params_map = {'gate_up_proj': ['gate_proj', 'up_proj']}
+    #     all_named_modules = dict(self.named_modules())
 
-        def load_kv_b_proj_and_k_b_proj_trans(module_name: str,
-                                              is_scale: bool) -> torch.Tensor:
-            weight_name = "weight" if not is_scale else "weight_scale_inv"
-            local_qk_nope_head_dim = qk_nope_head_dim if not is_scale else qk_nope_head_dim // 128
-            local_v_head_dim = v_head_dim if not is_scale else v_head_dim // 128
-            local_kv_lora_rank = kv_lora_rank if not is_scale else kv_lora_rank // 128
-
-            kv_b_proj = weights[f"{module_name}.{weight_name}"][:].unflatten(
-                0,
-                [
-                    num_heads,
-                    local_qk_nope_head_dim + local_v_head_dim,
-                ],
-            )
-
-            if not self.model_config.mapping.enable_attention_dp:
-                kv_b_proj = split_matrix_tp(kv_b_proj, tp_size, tp_rank, 0)
-            k_nope_weight, v_weight = kv_b_proj.split(
-                [local_qk_nope_head_dim, local_v_head_dim],
-                dim=1,
-            )
-            weight_divisor = 1 if self.model_config.mapping.enable_attention_dp else tp_size
-            local_num_heads = num_heads // weight_divisor
-
-            k_nope_weight_trans = k_nope_weight.transpose(2, 1)
-
-            kv_b_proj = torch.concat([
-                k_nope_weight.reshape(local_num_heads * local_qk_nope_head_dim,
-                                      local_kv_lora_rank),
-                v_weight.reshape(local_num_heads * local_v_head_dim,
-                                 local_kv_lora_rank)
-            ],
-                                     dim=0)
-
-            return kv_b_proj, k_nope_weight_trans
-
-        def check_weight_dtype(module_name: str, dtype):
-            weight_name = "weight"
-            w_dtype = weights[f"{module_name}.{weight_name}"].dtype
-            return w_dtype == dtype
-
-        def load_kv_b_proj_and_k_b_proj_trans_dequant(
-                module_name: str) -> torch.Tensor:
-            weight_name = "weight"
-            local_qk_nope_head_dim = qk_nope_head_dim
-            local_v_head_dim = v_head_dim
-            local_kv_lora_rank = kv_lora_rank
-
-            kv_b_proj = weights[f"{module_name}.{weight_name}"][:].cuda()
-
-            weight_name = "weight_scale_inv"
-            kv_b_proj_scale = weights[f"{module_name}.{weight_name}"][:].cuda()
-
-            kv_b_proj = weight_dequant(kv_b_proj, kv_b_proj_scale)
-            kv_b_proj = kv_b_proj.unflatten(
-                0,
-                [
-                    num_heads,
-                    local_qk_nope_head_dim + local_v_head_dim,
-                ],
-            )
-            if not self.model_config.mapping.enable_attention_dp:
-                kv_b_proj = split_matrix_tp(kv_b_proj, tp_size, tp_rank, 0)
-            k_nope_weight, v_weight = kv_b_proj.split(
-                [local_qk_nope_head_dim, local_v_head_dim],
-                dim=1,
-            )
-            weight_divisor = 1 if self.model_config.mapping.enable_attention_dp else tp_size
-            local_num_heads = num_heads // weight_divisor
-
-            k_nope_weight_trans = k_nope_weight.transpose(2, 1)
-
-            kv_b_proj = torch.concat([
-                k_nope_weight.reshape(local_num_heads * local_qk_nope_head_dim,
-                                      local_kv_lora_rank),
-                v_weight.reshape(local_num_heads * local_v_head_dim,
-                                 local_kv_lora_rank)
-            ],
-                                     dim=0)
-
-            return kv_b_proj, k_nope_weight_trans
-
-        def split_kv_b_proj(kv_b_proj: torch.Tensor,
-                            is_scale: bool) -> torch.Tensor:
-            local_qk_nope_head_dim = qk_nope_head_dim if not is_scale else qk_nope_head_dim // 128
-            local_v_head_dim = v_head_dim if not is_scale else v_head_dim // 128
-
-            weight_divisor = 1 if self.model_config.mapping.enable_attention_dp else tp_size
-            local_num_heads = num_heads // weight_divisor
-
-            k_b_proj, v_b_proj = kv_b_proj.split([
-                local_num_heads * local_qk_nope_head_dim,
-                local_num_heads * local_v_head_dim
-            ],
-                                                 dim=0)
-            k_b_proj = k_b_proj.view(
-                [local_num_heads, local_qk_nope_head_dim, -1])
-            v_b_proj = v_b_proj.view([local_num_heads, local_v_head_dim, -1])
-
-            return k_b_proj, v_b_proj
-
-        is_lite = self.config.q_lora_rank is None
-        num_heads = self.config.num_attention_heads
-        qk_nope_head_dim = self.config.qk_nope_head_dim
-        v_head_dim = self.config.v_head_dim
-        kv_lora_rank = self.config.kv_lora_rank
-
-        tp_rank = self.model_config.mapping.tp_rank
-        tp_size = self.model_config.mapping.tp_size
-
-        params_map = {'gate_up_proj': ['gate_proj', 'up_proj']}
-        all_named_modules = dict(self.named_modules())
-
-        for name, module in tqdm(all_named_modules.items(),
-                                 desc="Loading weights"):
-            if len(module._parameters) > 0:
-                names = name.split('.')
-                parent_module_name = '.'.join(names[:-1])
-                if "model.layers" in name and int(
-                        names[2]) >= self.config.num_hidden_layers:
-                    mtp_layer_idx = int(
-                        names[2]) - self.config.num_hidden_layers
-                    names[2] = str(mtp_layer_idx %
-                                   self.config.num_nextn_predict_layers +
-                                   self.config.num_hidden_layers)
-                    name = '.'.join(names)
-                if names[-1] == "kv_b_proj":
-                    # TODO: remove weight_dequant after enabling fp8_bmm
-                    dequant_kv_b_proj = self.model_config.quant_config.is_module_excluded_from_quantization(
-                        names[-1])
-                    if dequant_kv_b_proj:
-                        kv_b_proj, k_b_proj_trans = load_kv_b_proj_and_k_b_proj_trans_dequant(
-                            name)
-                    else:
-                        kv_b_proj, k_b_proj_trans = load_kv_b_proj_and_k_b_proj_trans(
-                            name, is_scale=False)
-                    module.weight.data.copy_(
-                        kv_b_proj.reshape(module.weight.shape))
-
-                    attn_module = all_named_modules[parent_module_name]
-                    _, v_b_proj = split_kv_b_proj(module.weight.data,
-                                                  is_scale=False)
-                    attn_module.v_b_proj = nn.Parameter(v_b_proj,
-                                                        requires_grad=False)
-
-                    attn_module.k_b_proj_trans.data.copy_(
-                        k_b_proj_trans.reshape(
-                            attn_module.k_b_proj_trans.shape))
-
-                    if getattr(module, "weight_scale",
-                               None) is not None and not dequant_kv_b_proj:
-                        kv_b_proj_scale, k_b_proj_trans_scale = load_kv_b_proj_and_k_b_proj_trans(
-                            name, is_scale=True)
-                        module.weight_scale.copy_(
-                            kv_b_proj_scale.reshape(module.weight_scale.shape))
-                        attn_module.k_b_proj_trans_scale.copy_(
-                            k_b_proj_trans_scale.reshape(
-                                attn_module.k_b_proj_trans_scale.shape))
-
-                        _, v_b_proj_scale = split_kv_b_proj(
-                            module.weight_scale.data, is_scale=True)
-                        attn_module.v_b_proj_scale = nn.Parameter(
-                            v_b_proj_scale, requires_grad=False)
-
-                elif names[-1] == "fused_a":
-                    fused_a = weights[
-                        f"{'.'.join(names[:-1])}.kv_a_proj_with_mqa.weight"][:]
-                    if not is_lite:
-                        q_a_proj = weights[
-                            f"{'.'.join(names[:-1])}.q_a_proj.weight"][:]
-                        fused_a = torch.cat([q_a_proj, fused_a], dim=0)
-
-                    if f"{'.'.join(names[:-1])}.kv_a_proj_with_mqa.weight_scale_inv" in weights:
-                        fused_a_scale = weights[
-                            f"{'.'.join(names[:-1])}.kv_a_proj_with_mqa.weight_scale_inv"]
-                        if not is_lite:
-                            q_a_proj_scale = weights[
-                                f"{'.'.join(names[:-1])}.q_a_proj.weight_scale_inv"][:]
-                            fused_a_scale = torch.cat(
-                                [q_a_proj_scale, fused_a_scale], dim=0)
-
-                        module.weight_scale.data.copy_(fused_a_scale)
-
-                    module.weight.data.copy_(fused_a)
-                elif names[-1] in params_map:
-                    module_weights = []
-                    for new_name in params_map[names[-1]]:
-                        module_weights.append(
-                            filter_weights('.'.join(names[:-1] + [new_name]),
-                                           weights))
-                    module.load_weights(weights=module_weights)
-                elif names[-1] == "experts":
-                    module_weights = filter_weights(name, weights)
-                    module_weights = rename_moe_weight(module_weights, {
-                        "down_proj": "w2",
-                        "up_proj": "w3",
-                        "gate_proj": "w1",
-                    })
-                    module.load_weights(weights=[module_weights])
-                elif names[-1] == "self_attn":
-                    continue
-                elif names[-1] == "next_layer_layernorm":
-                    continue
-                else:
-                    module_weights = filter_weights(name, weights)
-                    if hasattr(module, 'load_weights'):
-                        module.load_weights(weights=[module_weights])
-                    else:
-                        for n, p in module.named_parameters():
-                            p.data.copy_(module_weights[n][:])
+    #     for name, module in tqdm(all_named_modules.items(),
+    #                              desc="Loading weights"):
+    #         if len(module._parameters) > 0:
+    #             names = name.split('.')
+    #             if names[-1] in params_map:
+    #                 module_weights = []
+    #                 for new_name in params_map[names[-1]]:
+    #                     module_weights.append(
+    #                         filter_weights('.'.join(names[:-1] + [new_name]),
+    #                                        weights))
+    #                 module.load_weights(weights=module_weights)
+    #             elif names[-1] == "experts":
+    #                 module_weights = filter_weights(name, weights)
+    #                 module_weights = rename_moe_weight(module_weights, {
+    #                     "down_proj": "w2",
+    #                     "up_proj": "w3",
+    #                     "gate_proj": "w1",
+    #                 })
+    #                 module.load_weights(weights=[module_weights])
+    #             elif names[-1] == "self_attn":
+    #                 continue
+    #             elif names[-1] == "next_layer_layernorm":
+    #                 continue
+    #             else:
+    #                 module_weights = filter_weights(name, weights)
+    #                 if hasattr(module, 'load_weights'):
+    #                     module.load_weights(weights=[module_weights])
+    #                 else:
+    #                     for n, p in module.named_parameters():
+    #                         p.data.copy_(module_weights[n][:])
 
         for idx, layer in enumerate(
                 self.model.layers[:self.config.num_hidden_layers]):
