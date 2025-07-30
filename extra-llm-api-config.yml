@@ -1,0 +1,9 @@
+enable_attention_dp: false
+max_batch_size: 1
+max_num_tokens: 4000
+max_seq_len: 3000
+kv_cache_config:
+  free_gpu_memory_fraction: 0.8
+enable_chunked_prefill: true
+print_iter_log: true
+disable_overlap_scheduler: true

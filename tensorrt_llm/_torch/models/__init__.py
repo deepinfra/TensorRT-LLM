@@ -3,7 +3,7 @@ import transformers
 from .modeling_auto import AutoModelForCausalLM
 from .modeling_bert import BertForSequenceClassification
 from .modeling_clip import CLIPVisionModel
-from .modeling_deepseekv3 import DeepseekV3ForCausalLM
+from .modeling_deepseekv3 import Glm4MoeForCausalLM
 from .modeling_gemma3 import Gemma3ForCausalLM
 from .modeling_gemma3vl import Gemma3Model
 from .modeling_hyperclovax import HCXVisionForCausalLM
