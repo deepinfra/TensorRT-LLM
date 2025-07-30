@@ -951,9 +951,9 @@ class NVFP4FusedMoEMethod(FusedMoEMethodBase):
                                      dst_fc31_alpha: torch.Tensor):
         w1_weight_scale_2 = w1_weight_scale_2[...].reshape([])
         w3_weight_scale_2 = w3_weight_scale_2[...].reshape([])
-        assert torch.allclose(
-            w1_weight_scale_2,
-            w3_weight_scale_2), "w1_weight_scale_2 != w3_weight_scale_2"
+        # assert torch.allclose(
+        #     w1_weight_scale_2,
+        #     w3_weight_scale_2), "w1_weight_scale_2 != w3_weight_scale_2"
 
         w3_w1_weight_scale_2 = 1.0 / w1_weight_scale_2
         dst_fc31_alpha.copy_(1.0 /

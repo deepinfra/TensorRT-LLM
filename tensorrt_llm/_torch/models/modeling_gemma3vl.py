@@ -227,7 +227,6 @@ class Gemma3VLM(PreTrainedModel):
             image_features = self.mm_projector(image_features)
         return image_features
 
-
 def _load_weights_into_hf_module(
     model: torch.nn.Module,
     weights: dict,

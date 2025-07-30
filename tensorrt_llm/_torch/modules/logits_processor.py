@@ -15,7 +15,6 @@ class LogitsProcessor(nn.Module):
                 lm_head: Linear,
                 attn_metadata: AttentionMetadata,
                 return_context_logits: bool = False) -> torch.Tensor:
-
         if not return_context_logits:
             if attn_metadata is not None:
                 last_tokens = torch.cumsum(
@@ -26,7 +25,6 @@ class LogitsProcessor(nn.Module):
                 hidden_states = hidden_states[last_tokens]
             else:
                 hidden_states = hidden_states[-1]
-
         logits = lm_head(hidden_states)
         logits = logits.float()
         return logits
