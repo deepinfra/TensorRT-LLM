@@ -3,5 +3,6 @@ FROM $url AS pytrtllm-builder
 
 COPY python.patch /app/tensorrt_llm/python.patch
 RUN patch -p1 -i/app/tensorrt_llm/python.patch -d/usr/local/lib/python3.12/dist-packages
+COPY extra-llm-api-config.yml /app/tensorrt_llm
 RUN pip install --upgrade transformers
 ENTRYPOINT ["/bin/bash", "-c", "exec \"$@\"", "--", "/usr/local/bin/trtllm-serve"]
