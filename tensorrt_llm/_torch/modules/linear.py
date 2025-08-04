@@ -671,11 +671,15 @@ class NVFP4LinearMethod(LinearMethodBase):
 
     def apply(self, module: Linear, input: torch.Tensor,
               bias: Optional[torch.Tensor]):
+        
         if isinstance(input, Fp4QuantizedTensor):
             act_fp4, act_sf = input.fp4_tensor, input.scaling_factor
+            print("input is Fp4QuantizedTensor", act_fp4.shape)
         else:
+            print("input shape: ", input.shape)
             act_fp4, act_sf = torch.ops.trtllm.fp4_quantize(
                 input, module.input_scale, module.scaling_vector_size, False)
+            print("act_fp4 shape: ", act_fp4.shape)
 
         output = torch.ops.trtllm.nvfp4_gemm(act_fp4, module.weight, act_sf,
                                              module.weight_scale, module.alpha,
