@@ -10,6 +10,7 @@ import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Any, Dict, Optional, Tuple
+from collections import defaultdict
 
 import psutil
 import safetensors
