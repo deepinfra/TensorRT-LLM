@@ -495,6 +495,12 @@ class OpenAIServer:
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
                 # Include prompt token ids for context-only requests
                 pp_result.prompt_token_ids = response.prompt_token_ids
+
+            for choice in pp_result.choices:
+                if choice.finish_reason is not None:
+                    prom_metrics["request_completed_total"] += 1
+                    prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
             return pp_result
 
         def merge_completion_responses(responses: List[CompletionResponse]) -> CompletionResponse:
@@ -503,71 +509,6 @@ class OpenAIServer:
             num_prompt_tokens = num_gen_tokens = 0
             for rsp in responses:
                 choices, usage = rsp.choices, rsp.usage
-
-            async def producer(i: int, promise: RequestOutput, postproc_params: Optional[PostprocParams]):
-                async for output in promise:
-                    await outputs.put((output, postproc_params))
-                finished[i] = True
-
-            _tasks = [
-                asyncio.create_task(producer(i, promise, postproc_params))
-                for i, (promise, postproc_params) in enumerate(zip(promises, postproc_params_collections))
-            ]
-
-            async def consumer():
-                while not all(finished) or not outputs.empty():
-                    item = await outputs.get()
-                    yield item
-                await asyncio.gather(*_tasks)
-
-            return consumer()
-
-        async def create_completion_generator(
-                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]],
-                promises: List[RequestOutput]):
-            did_complete = False
-            try:
-                async for request_output, postproc_params in generator:
-                    if not self.postproc_worker_enabled:
-                        post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                        pp_result = post_processor(request_output, args)
-                    else:
-                        pp_result = request_output.outputs[0]._postprocess_result
-                    for pp_res in pp_result:
-                        for choice in pp_res.choices:
-                            if choice.finish_reason is not None:
-                                did_complete = True
-                                prom_metrics["request_completed_total"] += 1
-                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-                        pp_res_json = pp_res.model_dump_json(exclude_unset=False)
-                        yield f"data: {pp_res_json}\n\n"
-                yield f"data: [DONE]\n\n"
-            finally:
-                print(f"Completion generator finally {did_complete=}")
-                if not did_complete:
-                    prom_metrics["request_cancelled_total"] += 1
-                    for promise in promises:
-                        promise.abort()
-
-        async def create_completion_response(
-                generator: AsyncIterator[Tuple[RequestOutput, Optional[PostprocParams]]], disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> CompletionResponse:
-            all_choices: List[CompletionResponseChoice] = []
-            all_prompt_token_ids: List[List[int]] = []
-            num_prompt_tokens = num_gen_tokens = 0
-            async for request_output, postproc_params in generator:
-                pp_result: CompletionResponse
-                if not self.postproc_worker_enabled:
-                    post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                    pp_result = post_processor(request_output, args)
-                else:
-                    pp_result = request_output.outputs[0]._postprocess_result
-
-                for choice in pp_result.choices:
-                    if choice.finish_reason is not None:
-                        prom_metrics["request_completed_total"] += 1
-                        prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-
-                choices, usage = pp_result.choices, pp_result.usage
                 all_choices.extend(choices)
                 num_prompt_tokens += usage.prompt_tokens
                 num_gen_tokens += usage.completion_tokens
@@ -589,14 +530,26 @@ class OpenAIServer:
             return merged_rsp
 
         async def completion_generator(promise: RequestOutput, params: Optional[PostprocParams]):
-            async for output in promise:
-                if not self.postproc_worker_enabled:
-                    post_processor, args = params.post_processor, params.postproc_args
-                    pp_result = post_processor(output, args)
-                else:
-                    pp_result = output.outputs[0]._postprocess_result
-                for pp_res in pp_result:
-                    yield pp_res
+            did_complete = False
+            try:
+                async for output in promise:
+                    if not self.postproc_worker_enabled:
+                        post_processor, args = params.post_processor, params.postproc_args
+                        pp_result = post_processor(output, args)
+                    else:
+                        pp_result = output.outputs[0]._postprocess_result
+                    for pp_res in pp_result:
+                        for choice in pp_res.choices:
+                            if choice.finish_reason is not None:
+                                did_complete = True
+                                prom_metrics["request_completed_total"] += 1
+                                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+                        yield pp_res
+            finally:
+                print(f"Completion generator finally {did_complete=}")
+                if not did_complete:
+                    prom_metrics["request_cancelled_total"] += 1
+                    promise.abort()
 
         async def merge_generators(generators: List[AsyncIterator[Any]]):
             result_queue = asyncio.Queue()
