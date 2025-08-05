@@ -10,7 +10,7 @@ from ..distributed.ops import allgather
 from ..model_config import ModelConfig
 from ..pyexecutor.llm_request import LlmRequest, LlmRequestState
 from ..pyexecutor.resource_manager import BaseResourceManager, SlotManager
-from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler, greedy_search_sampling_batch, sampling_batch
+from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler, greedy_search_sampling_batch, sampling_batch,
                                   add_token, int_tensor)
 from ..pyexecutor.scheduler import ScheduledRequests
 from .interface import SpecMetadata
