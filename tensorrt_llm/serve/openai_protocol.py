@@ -20,8 +20,8 @@ from ..sampling_params import LogitBiasLogitsProcessor
 
 
 class OpenAIBaseModel(BaseModel):
-    # OpenAI API does not allow extra fields & allow to initialize by both alias and field name
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # OpenAI & allow to initialize by both alias and field name
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class StreamOptions(OpenAIBaseModel):
