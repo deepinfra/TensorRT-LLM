@@ -544,7 +544,8 @@ class OpenAIServer:
                                 did_complete = True
                                 prom_metrics["request_completed_total"] += 1
                                 prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-                        yield pp_res
+                        pp_res_json = pp_res.model_dump_json(exclude_unset=True)
+                        yield f"data: {pp_res_json}\n\n"
             finally:
                 print(f"Completion generator finally {did_complete=}")
                 if not did_complete:
