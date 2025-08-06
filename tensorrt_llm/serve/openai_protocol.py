@@ -265,8 +265,8 @@ class CompletionRequest(OpenAIBaseModel):
             add_special_tokens=self.add_special_tokens,
 
             # TODO: migrate to use logprobs and prompt_logprobs
-            _return_log_probs=self.logprobs,
-            logprobs=self.logprobs,
+            _return_log_probs=False,
+            logprobs=0,
         )
         return sampling_params
 
@@ -553,8 +553,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             add_special_tokens=self.add_special_tokens,
 
             # TODO: migrate to use logprobs and prompt_logprobs
-            _return_log_probs=self.logprobs,
-            logprobs=self.logprobs,
+            _return_log_probs=False,
+            logprobs=0,
         )
         return sampling_params
 
