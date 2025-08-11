@@ -240,7 +240,6 @@ class MTPSampler(TorchSampler):
                                  next_draft_tokens: list[list[int]]):
         assert not request.py_return_context_logits, "return_context_logits not implemented for MTPSampler"
         assert not request.py_return_generation_logits, "return_generation_logits not implemented for MTPSampler"
-        assert not request.py_return_log_probs, "return_log_probs not implemented for MTPSampler"
         request.py_draft_tokens = next_draft_tokens[request.py_seq_slot]
         request.py_decoding_iter += 1
 
@@ -259,58 +258,29 @@ class MTPSampler(TorchSampler):
             } for token, logprob in zip(tokens, log_probs)]
             request.py_result.append_log_probs([token_log_probs])
 
-        idx = 0
         beam_idx = self.BEAM
-        for request in state.scheduled_requests.context_requests:
-            assert not request.py_return_context_logits, "return_context_logits not implemented for MTPSampler"
-            assert not request.py_return_generation_logits, "return_generation_logits not implemented for MTPSampler"
-            # assert not request.py_return_log_probs, "return_log_probs not implemented for MTPSampler"
+        for req in state.scheduled_requests.context_requests:
             if req.state == LlmRequestState.GENERATION_COMPLETE or req.context_remaining_length != 0:
-                idx += 1
                 continue
             new_token = add_token(req, new_tokens, beam=beam_idx)
             self._handle_stop_criteria(req, new_token)
             self._request_common_handling(req, next_draft_tokens_list)
+            new_token_log_prob = next_tokens_log_probs_list[req.py_seq_slot][0]
+            handle_logprobs(req, [new_token], [new_token_log_prob])
 
-            if request.state != LlmRequestState.GENERATION_COMPLETE:
-                new_token = new_tokens_list[idx][0]
-                new_token_log_prob = next_tokens_log_probs_list[idx][0]
-                num_tokens = request.add_new_token(new_token, beam_idx)
-                handle_logprobs(request, [new_token], [new_token_log_prob])
-                should_stop = self._handle_stop_criteria(
-                    request, new_token, num_tokens, beam_idx)
-                if self._draft_meet_max_token_stop_criteria(
-                        request, num_tokens, beam_idx):
-                    should_stop = True
-                request.py_draft_tokens = next_draft_tokens_list[idx]
-                request.py_decoding_iter += 1
-            idx += 1
-
-        for request in state.scheduled_requests.generation_requests:
-            assert not request.py_return_context_logits, "return_context_logits not implemented for MTPSampler"
-            assert not request.py_return_generation_logits, "return_generation_logits not implemented for MTPSampler"
-            # assert not request.py_return_log_probs, "return_log_probs not implemented for MTPSampler"
-            if request.state != LlmRequestState.GENERATION_COMPLETE:
-                new_tokens = new_tokens_list[idx]
-                new_tokens_log_probs = next_tokens_log_probs_list[idx]
-                num_new_tokens = new_tokens_lens_list[idx]
-                should_stop = False
-                for i in range(num_new_tokens):
-                    new_token = new_tokens[i]
-                    new_token_log_prob = new_tokens_log_probs[i]
-                    num_tokens = request.add_new_token(new_token, beam_idx)
-                    handle_logprobs(request, [new_token], [new_token_log_prob])
-                    should_stop = self._handle_stop_criteria(
-                        request, new_token, num_tokens, beam_idx)
-                    if should_stop:
-                        break
-                if self._draft_meet_max_token_stop_criteria(
-                        request, num_tokens, beam_idx):
-                    should_stop = True
-                request.py_draft_tokens = next_draft_tokens_list[idx]
-                request.py_rewind_len = self.draft_len - (num_new_tokens - 1)
-                request.py_decoding_iter += 1
-            idx += 1
+        for req in state.scheduled_requests.generation_requests:
+            if req.state == LlmRequestState.GENERATION_COMPLETE:
+                continue
+            num_new_tokens = new_tokens_lens[req.py_seq_slot]
+            new_tokens_log_probs = next_tokens_log_probs_list[req.py_seq_slot]
+            for i in range(num_new_tokens):
+                new_token = add_token(req, new_tokens, beam=beam_idx, step=i)
+                new_token_log_prob = new_tokens_log_probs[i]
+                handle_logprobs(req, [new_token], [new_token_log_prob])
+                if self._handle_stop_criteria(req, new_token):
+                    break
+            req.py_rewind_len = self.draft_len - (num_new_tokens - 1)
+            self._request_common_handling(req, next_draft_tokens_list)
 
     def sample_async(self, scheduled_requests: ScheduledRequests,
                      model_outputs) -> SampleStateMTP:
