@@ -318,7 +318,7 @@ def launch_server(host: str,
               help="Backend for guided decoding.")
 @click.option("--disable_overlap_scheduler",
               type=bool,
-              default=True,
+              default=False,
               help="Disable overlap scheduler. ")
 @click.option(
     "--num_postprocess_workers",
