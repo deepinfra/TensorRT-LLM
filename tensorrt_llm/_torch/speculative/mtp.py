@@ -10,7 +10,7 @@ from ..distributed.ops import allgather
 from ..model_config import ModelConfig
 from ..pyexecutor.llm_request import LlmRequest, LlmRequestState
 from ..pyexecutor.resource_manager import BaseResourceManager, SlotManager
-from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler, greedy_search_sampling_batch, sampling_batch,
+from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler, float_tensor, greedy_search_sampling_batch, sampling_batch,
                                   add_token, int_tensor)
 from ..pyexecutor.scheduler import ScheduledRequests
 from .interface import SpecMetadata
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 class SampleStateTensorsMTP(SampleStateTensors):
     new_tokens_lens: torch.Tensor
     next_draft_tokens: torch.Tensor
-    next_tokens_log_probs: Optional[torch.Tensor] = None
+    log_probs: Optional[torch.Tensor] = None
 
 
 @dataclass(kw_only=True)
@@ -224,6 +224,7 @@ class MTPSampler(TorchSampler):
         next_new_tokens: torch.Tensor
         next_draft_tokens: torch.Tensor
         new_tokens_lens: torch.Tensor
+        log_probs: torch.Tensor
 
     def create_store(self) -> Store:
         num_tokens, seq_slots, _ = self.NEW_TOKENS_SHAPE
@@ -234,6 +235,7 @@ class MTPSampler(TorchSampler):
             next_new_tokens=int_tensor(self.NEW_TOKENS_SHAPE),
             next_draft_tokens=int_tensor((seq_slots, draft_len)),
             new_tokens_lens=int_tensor((seq_slots, )),
+            log_probs=float_tensor(self.NEW_TOKENS_SHAPE),
         )
 
     def _request_common_handling(self, request: LlmRequest,
@@ -250,7 +252,7 @@ class MTPSampler(TorchSampler):
         new_tokens = state.host.new_tokens
         new_tokens_lens = state.host.new_tokens_lens
         next_draft_tokens_list = state.host.next_draft_tokens.tolist()
-        next_tokens_log_probs_list = state.host.next_tokens_log_probs.tolist()
+        next_tokens_log_probs_list = state.host.log_probs.tolist()
 
         def handle_logprobs(request: LlmRequest, tokens, log_probs):
             token_log_probs = [{
@@ -283,30 +285,44 @@ class MTPSampler(TorchSampler):
             self._request_common_handling(req, next_draft_tokens_list)
 
     def sample_async(self, scheduled_requests: ScheduledRequests,
-                     model_outputs) -> SampleStateMTP:
+                     outputs) -> SampleStateMTP:
         # new_tokens_device: all of the accepted tokens, device tensor
         # new_tokens_lens_device: the accepted lengths, device tensor
         # next_draft_tokens_device: predicted draft tokens, device tensor
         # next_new_tokens_device: input tokens for the next iteration, device tensor
-        new_tokens_device = model_outputs['new_tokens']
-        new_tokens_lens_device = model_outputs['new_tokens_lens']
-        next_draft_tokens_device = model_outputs['next_draft_tokens']
-        next_new_tokens_device = model_outputs['next_new_tokens']
-        next_tokens_log_probs_device = model_outputs["log_probs"]
+        requests = scheduled_requests.all_requests()
+        slots = torch.as_tensor([r.py_seq_slot for r in requests])
+        slots = slots.to(device="cuda", non_blocking=True)
+
+        o_new_tokens = outputs['new_tokens'][:len(requests)]
+        o_new_tokens_lens = outputs['new_tokens_lens'][:len(requests)]
+        o_next_draft_tokens = outputs['next_draft_tokens'][:len(requests)]
+        o_next_new_tokens = outputs['next_new_tokens'][:len(requests)]
+        o_log_probs = outputs['log_probs'][:len(requests)]
+
+        new_tokens = self.store.new_tokens
+        next_new_tokens = self.store.next_new_tokens
+        new_tokens_lens = self.store.new_tokens_lens
+        next_draft_tokens = self.store.next_draft_tokens
+        log_probs = self.store.log_probs
+
+        new_tokens.squeeze(-1).T.index_copy_(0, slots, o_new_tokens)
+        next_new_tokens.squeeze(-1).T.index_copy_(0, slots, o_next_new_tokens)
+        new_tokens_lens.index_copy_(0, slots, o_new_tokens_lens)
+        next_draft_tokens.index_copy_(0, slots, o_next_draft_tokens)
+        log_probs.squeeze(-1).T.index_copy_(0, slots, o_log_probs)
 
         device = SampleStateTensorsMTP(
-            new_tokens=next_new_tokens_device,
-            new_tokens_lens=new_tokens_lens_device,
-            next_draft_tokens=next_draft_tokens_device,
-            next_tokens_log_probs=next_tokens_log_probs_device,
+            new_tokens=next_new_tokens,
+            new_tokens_lens=new_tokens_lens,
+            next_draft_tokens=next_draft_tokens,
+            log_probs=log_probs,
         )
         host = SampleStateTensorsMTP(
-            new_tokens=new_tokens_device.to('cpu', non_blocking=True),
-            new_tokens_lens=new_tokens_lens_device.to('cpu', non_blocking=True),
-            next_draft_tokens=next_draft_tokens_device.to('cpu',
-                                                          non_blocking=True),
-            next_tokens_log_probs=next_tokens_log_probs_device.to(
-                'cpu', non_blocking=True),
+            new_tokens=new_tokens.to('cpu', non_blocking=True),
+            new_tokens_lens=new_tokens_lens.to('cpu', non_blocking=True),
+            next_draft_tokens=next_draft_tokens.to('cpu', non_blocking=True),
+            log_probs=log_probs.to('cpu', non_blocking=True),
         )
         sampler_event = torch.cuda.Event()
         sampler_event.record()
