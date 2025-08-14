@@ -9,7 +9,7 @@ from tensorrt_llm.mapping import Mapping
 from ..attention_backend import AttentionMetadata
 from ..pyexecutor.llm_request import LlmRequest
 from ..pyexecutor.resource_manager import BaseResourceManager, SlotManager
-from ..pyexecutor.sampler import TorchSampler
+from ..pyexecutor.sampler import TorchSampler, sampling_batch
 from ..pyexecutor.scheduler import ScheduledRequests
 from .interface import SpecMetadata
 from .mtp import MTPSampler
@@ -277,7 +277,7 @@ class Eagle3OneModelWorker(nn.Module):
         raw_logits = logits
 
         # Sample and accept tokens
-        accepted_tokens, num_accepted_tokens = self.sample_and_accept_draft_tokens(
+        accepted_tokens, num_accepted_tokens, log_probs = self.sample_and_accept_draft_tokens(
             logits, attn_metadata, spec_metadata)
 
         # Save the old attn_metadata and spec_metadata
@@ -379,6 +379,7 @@ class Eagle3OneModelWorker(nn.Module):
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
             'next_new_tokens': next_new_tokens,
+            "log_probs": log_probs
         }
 
     def sample_and_accept_draft_tokens(
@@ -398,25 +399,34 @@ class Eagle3OneModelWorker(nn.Module):
         accepted_tokens = torch.empty((batch_size, (self.max_draft_len + 1)),
                                       dtype=torch.int,
                                       device=logits.device)
+        log_probs = torch.ones((batch_size, (self.max_draft_len + 1)),
+                                          dtype=torch.float32,
+                                          device=logits.device)
         num_accepted_tokens = torch.ones(batch_size,
                                          dtype=torch.int,
                                          device=logits.device)
 
         # Do greedy sampling for the input logits
-        target_tokens = torch.argmax(logits, dim=-1)
+        # target_tokens = torch.argmax(logits, dim=-1)
+        # sampling
+        target_tokens, target_log_probs = sampling_batch(logits, spec_metadata.temperatures, spec_metadata.top_k, spec_metadata.top_p, spec_metadata.min_p)
         # context
         accepted_tokens[:num_contexts, 0] = target_tokens[:num_contexts]
+        log_probs[:num_contexts, 0] = target_log_probs[:num_contexts]
 
         # generation
         gen_target_tokens = target_tokens[num_contexts:].reshape(
             num_gens, self.max_draft_len + 1)
+        gen_target_log_probs = target_log_probs[num_contexts:].reshape(
+                    num_gens, self.max_draft_len + 1)
         accepted_tokens[num_contexts:, :] = gen_target_tokens
+        log_probs[num_contexts:, :] = gen_target_log_probs
         draft_tokens = spec_metadata.draft_tokens.reshape(
             num_gens, self.max_draft_len)
         num_accepted_tokens[num_contexts:] += torch.cumprod(
             (draft_tokens == gen_target_tokens[:, :self.max_draft_len]).int(),
             dim=-1).sum(1)
-        return accepted_tokens, num_accepted_tokens
+        return accepted_tokens, num_accepted_tokens, log_probs
 
     def draft_decoder(
         self,
