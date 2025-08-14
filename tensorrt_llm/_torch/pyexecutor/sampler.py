@@ -366,6 +366,14 @@ def add_token(request: LlmRequest,
     request.add_new_token(new_token, beam)
     return new_token
 
+def get_log_prob(request: LlmRequest,
+              log_probs: torch.Tensor,
+              *,
+              beam: int,
+              step: int = 0) -> int:
+    seq_slot = request.py_seq_slot
+    assert seq_slot is not None
+    return float(log_probs[step, seq_slot, beam])
 
 def int_tensor(shape: tuple[int, ...], device: str = 'cuda') -> torch.Tensor:
     return torch.empty(shape, dtype=torch.int, device=device)

@@ -10,7 +10,7 @@ from ..distributed.ops import allgather
 from ..model_config import ModelConfig
 from ..pyexecutor.llm_request import LlmRequest, LlmRequestState
 from ..pyexecutor.resource_manager import BaseResourceManager, SlotManager
-from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler, float_tensor, greedy_search_sampling_batch, sampling_batch,
+from ..pyexecutor.sampler import (SampleState, SampleStateTensors, TorchSampler, float_tensor, get_log_prob, greedy_search_sampling_batch, sampling_batch,
                                   add_token, int_tensor)
 from ..pyexecutor.scheduler import ScheduledRequests
 from .interface import SpecMetadata
@@ -252,7 +252,7 @@ class MTPSampler(TorchSampler):
         new_tokens = state.host.new_tokens
         new_tokens_lens = state.host.new_tokens_lens
         next_draft_tokens_list = state.host.next_draft_tokens.tolist()
-        next_tokens_log_probs_list = state.host.log_probs.tolist()
+        log_probs = state.host.log_probs
 
         def handle_logprobs(request: LlmRequest, tokens, log_probs):
             token_log_probs = [{
@@ -267,18 +267,17 @@ class MTPSampler(TorchSampler):
             new_token = add_token(req, new_tokens, beam=beam_idx)
             self._handle_stop_criteria(req, new_token)
             self._request_common_handling(req, next_draft_tokens_list)
-            new_token_log_prob = next_tokens_log_probs_list[req.py_seq_slot][0]
-            handle_logprobs(req, [new_token], [new_token_log_prob])
+            log_prob = get_log_prob(req, log_probs, beam=beam_idx)
+            handle_logprobs(req, [new_token], [log_prob])
 
         for req in state.scheduled_requests.generation_requests:
             if req.state == LlmRequestState.GENERATION_COMPLETE:
                 continue
             num_new_tokens = new_tokens_lens[req.py_seq_slot]
-            new_tokens_log_probs = next_tokens_log_probs_list[req.py_seq_slot]
             for i in range(num_new_tokens):
                 new_token = add_token(req, new_tokens, beam=beam_idx, step=i)
-                new_token_log_prob = new_tokens_log_probs[i]
-                handle_logprobs(req, [new_token], [new_token_log_prob])
+                log_prob = get_log_prob(req, log_probs, beam=beam_idx, step=i)
+                handle_logprobs(req, [new_token], [log_prob])
                 if self._handle_stop_criteria(req, new_token):
                     break
             req.py_rewind_len = self.draft_len - (num_new_tokens - 1)
