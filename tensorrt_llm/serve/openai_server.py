@@ -474,6 +474,8 @@ class OpenAIServer:
         for kv_events in [items[i:i + BATCH_SIZE] for i in range(0, len(items), BATCH_SIZE)]:
             yield format_sse_event(kv_events)
         logger.info("kv_cache_generator: done with initial kv_map")
+        # yield empty event to signal that we are ready to receive events
+        yield format_sse_event([])
         while True:
             kv_events = await queue.get()
             yield format_sse_event(kv_events)
