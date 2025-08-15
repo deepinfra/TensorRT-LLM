@@ -462,7 +462,7 @@ class OpenAIServer:
                 "kv_parent_hashes": kv_parent_hashes,
                 "kv_cache_levels": kv_cache_levels,
             }
-            return f'data: {ret_event}\n\n'
+            return f'data: {json.dumps(ret_event)}\n\n'
 
         # insert listener first, so we always get shutdown signal
         queue = asyncio.Queue()
