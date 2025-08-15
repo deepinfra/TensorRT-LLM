@@ -307,7 +307,7 @@ def launch_server(host: str,
               "after allocating model weights and buffers.")
 @click.option("--event_buffer_max_size",
               type=int,
-              default=0,
+              default=1000000,
               help="Maximum size of the event buffer. If set to 0, the event buffer will not be used.")
 @click.option("--host_cache_size",
                 type=int,
