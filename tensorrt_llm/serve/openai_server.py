@@ -477,8 +477,9 @@ class OpenAIServer:
         # yield empty event to signal that we are ready to receive events
         yield format_sse_event([])
         while True:
-            kv_events = await queue.get()
-            yield format_sse_event(kv_events)
+            all_kv_events = await queue.get()
+            for kv_events in [all_kv_events[i:i + BATCH_SIZE] for i in range(0, len(all_kv_events), BATCH_SIZE)]:
+                yield format_sse_event(kv_events)
 
     async def get_kv_cache_events(self) -> StreamingResponse:
         """
