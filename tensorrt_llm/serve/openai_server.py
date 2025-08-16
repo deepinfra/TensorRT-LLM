@@ -715,7 +715,9 @@ class OpenAIServer:
         prom_metrics["request_started_total"] += 1
         try:
             check_multiple_response(request.n, self.llm.args.backend)
-            if isinstance(request.prompt, str) or \
+            if request.prompt_token_ids is not None:
+                prompts = [request.prompt_token_ids]
+            elif isinstance(request.prompt, str) or \
                 (isinstance(request.prompt, list) and isinstance(request.prompt[0], int)):
                 prompts = [request.prompt]
             else:
