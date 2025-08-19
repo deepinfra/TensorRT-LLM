@@ -13,6 +13,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import torch
 
 from tensorrt_llm.logger import logger
+from tensorrt_llm.metrics.enums import RequestKVCacheStats
 
 from .._utils import (KVCacheEventSerializer, global_mpi_rank, global_mpi_size,
                       mpi_comm, mpi_rank, nvtx_range_debug)
@@ -333,6 +334,7 @@ class GenerationExecutorWorker(GenerationExecutor):
                 events_api = lambda: [None]
             else:
                 events_api = event_manager.get_latest_events
+
             return self._iteration_result_task(
                 self.kv_events_queues, events_api, self._iter_kv_events_result,
                 lambda x: json.dumps(KVCacheEventSerializer.serialize(x)))
@@ -1065,7 +1067,9 @@ def _get_metrics_dict(
                 req_perf_metrics.timing_metrics.first_scheduled_time.
                 total_seconds(),
                 RequestEventTiming.LAST_TOKEN_TIME:
-                req_perf_metrics.timing_metrics.last_token_time.total_seconds()
+                req_perf_metrics.timing_metrics.last_token_time.total_seconds(),
+                RequestKVCacheStats.NUM_REUSED_BLOCKS:
+                req_perf_metrics.kv_cache_metrics.num_reused_blocks
             }
     return metrics_dict
 

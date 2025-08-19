@@ -129,6 +129,12 @@ class CompletionResponseChoice(OpenAIBaseModel):
     )
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
+    num_reused_blocks: Optional[int] = Field(
+        default=None,
+        description=(
+            "The number of KV cache blocks reused during the generation."
+        )
+    )
 
 
 class CompletionResponse(OpenAIBaseModel):
@@ -157,6 +163,12 @@ class CompletionResponseStreamChoice(OpenAIBaseModel):
             "including encountering the EOS token"),
     )
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
+    num_reused_blocks: Optional[int] = Field(
+        default=None,
+        description=(
+            "The number of KV cache blocks reused during the generation."
+        )
+    )
 
 
 class CompletionStreamResponse(OpenAIBaseModel):
@@ -390,7 +402,12 @@ class ChatCompletionResponseChoice(OpenAIBaseModel):
 
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
-
+    num_reused_blocks: Optional[int] = Field(
+        default=None,
+        description=(
+            "The number of KV cache blocks reused during the generation."
+        )
+    )
 
 class ChatCompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")
@@ -418,7 +435,12 @@ class ChatCompletionResponseStreamChoice(OpenAIBaseModel):
     finish_reason: Optional[str] = None
     stop_reason: Optional[Union[int, str]] = None
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
-
+    num_reused_blocks: Optional[int] = Field(
+        default=None,
+        description=(
+            "The number of KV cache blocks reused during the generation."
+        )
+    )
 
 class ChatCompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")

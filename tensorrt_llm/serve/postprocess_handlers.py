@@ -177,7 +177,9 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
         choice = ChatCompletionResponseStreamChoice(index=i,
                                                     delta=delta_message,
                                                     finish_reason=None,
-                                                    avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None))
+                                                    avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
+                                                    num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
+                                                    )
         if args.return_logprobs:
             logprobs, args.last_logprobs_len = output.logprobs_diff_safe(args.last_logprobs_len)
             token_ids, args.last_token_ids_len = output.token_ids_diff_safe(args.last_token_ids_len)
@@ -240,6 +242,7 @@ def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocAr
             stop_reason=output.stop_reason,
             disaggregated_params=disaggregated_params,
             avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
+            num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
         )
 
         if args.return_logprobs:
@@ -314,6 +317,7 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
             finish_reason = output.finish_reason,
             stop_reason = output.stop_reason,
             avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
+            num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
         )
         if args.return_logprobs:
             logprobs, args.last_logprobs_len = output.logprobs_diff_safe(args.last_logprobs_len)
@@ -361,6 +365,7 @@ def completion_response_post_processor(rsp: GenerationResult, args: CompletionPo
             stop_reason=output.stop_reason,
             finish_reason=output.finish_reason,
             avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
+            num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
         )
         if args.return_logprobs:
             choice.logprobs = create_logprobs_completion(output.token_ids, args.tokenizer, output.logprobs)

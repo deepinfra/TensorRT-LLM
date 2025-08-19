@@ -10,6 +10,8 @@ from weakref import WeakMethod
 import torch
 import torch.nn.functional as F
 
+from tensorrt_llm.metrics.enums import RequestKVCacheStats
+
 from .._utils import nvtx_range_debug
 from ..bindings import executor as tllm
 from ..disaggregated_params import DisaggregatedParams
@@ -176,6 +178,7 @@ class GenerationResultBase:
         # Average decoded tokens per runtime iteration; set when the first LLM response arrives.
         # None indicates not yet available (e.g., before first step/stream).
         self.avg_decoded_tokens_per_iter: Optional[float] = None
+        self.num_reused_blocks: Optional[int] = None
         self._done = False
         self.metrics_dict = {}
 
@@ -406,7 +409,8 @@ class GenerationResultBase:
         if processed_metrics_stat:
             metrics_stats.update(processed_metrics_stat)
         self.metrics_dict = metrics_stats
-
+        if RequestKVCacheStats.NUM_REUSED_BLOCKS in stats:
+            self.num_reused_blocks = stats[RequestKVCacheStats.NUM_REUSED_BLOCKS]
 
 class DetokenizedGenerationResultBase(GenerationResultBase):
     ''' The base class for the generation result with detokenization support. '''
