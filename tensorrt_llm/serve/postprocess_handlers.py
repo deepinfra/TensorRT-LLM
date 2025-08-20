@@ -349,10 +349,14 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
 
     for output in rsp.outputs:
         delta_text, args.last_text_len = output.text_diff_safe(args.last_text_len)
+        token_ids, args.last_token_ids_len = output.token_ids_diff_safe(args.last_token_ids_len)
         if args.echo and args.first_iteration:
             delta_text = args.prompt + delta_text
         if delta_text == '' and not output.finish_reason and not output.stop_reason:
-            continue
+            if token_ids and not args.detokenize:
+                pass
+            else:
+                continue
         choice = CompletionResponseStreamChoice(
             index=args.prompt_idx * args.num_choices + output.index,
             text=delta_text if args.detokenize else "",
@@ -365,7 +369,6 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
         )
         if args.return_logprobs:
             logprobs, args.last_logprobs_len = output.logprobs_diff_safe(args.last_logprobs_len)
-            token_ids, args.last_token_ids_len = output.token_ids_diff_safe(args.last_token_ids_len)
             choice.logprobs = create_logprobs_completion(token_ids, args.tokenizer, logprobs)
         chunk = CompletionStreamResponse(model=args.model, choices=[choice])
         if include_continuous_usage:
