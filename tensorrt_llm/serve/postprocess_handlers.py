@@ -192,7 +192,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
                                     completion_tokens=output.length,
                                     total_tokens=output.length + prompt_tokens,
-                                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
+                                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
                                     )
         res.append(chunk)
 
@@ -261,7 +261,7 @@ def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocAr
         prompt_tokens=num_prompt_tokens,
         completion_tokens=num_generated_tokens,
         total_tokens=num_prompt_tokens + num_generated_tokens,
-        prompt_tokens_details=PromptTokensDetails(cached_tokens=min(num_prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=min(num_prompt_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
     )
     response = ChatCompletionResponse(
         model=args.model,
@@ -328,7 +328,7 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
                                     completion_tokens=output.length,
                                     total_tokens=output.length + prompt_tokens,
-                                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
+                                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
                                     )
         res.append(chunk)
 
@@ -376,7 +376,7 @@ def completion_response_post_processor(rsp: GenerationResult, args: CompletionPo
     usage = UsageInfo(prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=completion_tokens + prompt_tokens,
-                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
+                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
                     )
     response = CompletionResponse(choices=choices, model=args.model, usage=usage)
     return response
