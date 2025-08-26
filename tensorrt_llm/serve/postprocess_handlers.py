@@ -116,6 +116,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
 
     def yield_first_chat(num_tokens: int,
                          idx: int,
+                         rsp: GenerationResultBase,
                          role: str = None,
                          content: str = None) -> ChatCompletionStreamResponse:
         choice_data = ChatCompletionResponseStreamChoice(index=idx,
@@ -128,7 +129,9 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=num_tokens,
                                     total_tokens=num_tokens,
-                                    completion_tokens=0)
+                                    completion_tokens=0,
+                                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(num_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
+                                    )
         return chunk
 
     res: List[ChatCompletionStreamResponse] = []
@@ -142,9 +145,9 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
         include_continuous_usage = False
     if args.first_iteration:
         for i in range(args.num_choices):
-            res.append(yield_first_chat(prompt_tokens, i, role=args.role))
+            res.append(yield_first_chat(prompt_tokens, i, rsp, role=args.role))
             if args.echo and args.last_message_content:
-                res.append(yield_first_chat(prompt_tokens, i, content=args.last_message_content))
+                res.append(yield_first_chat(prompt_tokens, i, rsp, content=args.last_message_content))
         args.first_iteration = False
 
     for output in rsp.outputs:
@@ -203,6 +206,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
         )
 
         final_usage_chunk = ChatCompletionStreamResponse(
@@ -339,6 +343,7 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
         )
 
         final_usage_chunk = CompletionStreamResponse(
