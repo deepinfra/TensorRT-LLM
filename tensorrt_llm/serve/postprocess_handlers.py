@@ -23,7 +23,7 @@ from .openai_protocol import (ChatCompletionLogProbs,
                               CompletionResponseChoice,
                               CompletionResponseStreamChoice,
                               CompletionStreamResponse, DeltaMessage,
-                              FunctionCall, StreamOptions, ToolCall, UsageInfo,
+                              FunctionCall, PromptTokensDetails, StreamOptions, ToolCall, UsageInfo,
                               to_disaggregated_params)
 
 # yapf: enale
@@ -178,7 +178,6 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
                                                     delta=delta_message,
                                                     finish_reason=None,
                                                     avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
-                                                    num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
                                                     )
         if args.return_logprobs:
             logprobs, args.last_logprobs_len = output.logprobs_diff_safe(args.last_logprobs_len)
@@ -192,7 +191,9 @@ def chat_stream_post_processor(rsp: GenerationResultBase, args: ChatPostprocArgs
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
                                     completion_tokens=output.length,
-                                    total_tokens=output.length + prompt_tokens)
+                                    total_tokens=output.length + prompt_tokens,
+                                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
+                                    )
         res.append(chunk)
 
     if include_usage and rsp._done:
@@ -242,7 +243,6 @@ def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocAr
             stop_reason=output.stop_reason,
             disaggregated_params=disaggregated_params,
             avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
-            num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
         )
 
         if args.return_logprobs:
@@ -261,6 +261,7 @@ def chat_response_post_processor(rsp: GenerationResultBase, args: ChatPostprocAr
         prompt_tokens=num_prompt_tokens,
         completion_tokens=num_generated_tokens,
         total_tokens=num_prompt_tokens + num_generated_tokens,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=min(num_prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
     )
     response = ChatCompletionResponse(
         model=args.model,
@@ -317,7 +318,6 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
             finish_reason = output.finish_reason,
             stop_reason = output.stop_reason,
             avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
-            num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
         )
         if args.return_logprobs:
             logprobs, args.last_logprobs_len = output.logprobs_diff_safe(args.last_logprobs_len)
@@ -327,7 +327,9 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase, args:
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
                                     completion_tokens=output.length,
-                                    total_tokens=output.length + prompt_tokens)
+                                    total_tokens=output.length + prompt_tokens,
+                                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
+                                    )
         res.append(chunk)
 
     if include_usage and rsp._done:
@@ -365,7 +367,6 @@ def completion_response_post_processor(rsp: GenerationResult, args: CompletionPo
             stop_reason=output.stop_reason,
             finish_reason=output.finish_reason,
             avg_decoded_tokens_per_iter=getattr(rsp, 'avg_decoded_tokens_per_iter', None),
-            num_reused_blocks= getattr(rsp, 'num_reused_blocks', None),
         )
         if args.return_logprobs:
             choice.logprobs = create_logprobs_completion(output.token_ids, args.tokenizer, output.logprobs)
@@ -374,6 +375,8 @@ def completion_response_post_processor(rsp: GenerationResult, args: CompletionPo
 
     usage = UsageInfo(prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
-                    total_tokens=completion_tokens + prompt_tokens)
+                    total_tokens=completion_tokens + prompt_tokens,
+                    prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, getattr(rsp, 'num_reused_blocks', 0) * 32))
+                    )
     response = CompletionResponse(choices=choices, model=args.model, usage=usage)
     return response

@@ -56,12 +56,15 @@ class StreamOptions(OpenAIBaseModel):
     include_usage: Optional[bool] = True
     continuous_usage_stats: Optional[bool] = True
 
+class PromptTokensDetails(BaseModel):
+    cached_tokens: int | None = Field(default=None, description="number of input tokens read from cache")
+    cache_write_tokens: int | None = Field(default=None, description="number of input tokens used to create cache entry")
 
 class UsageInfo(OpenAIBaseModel):
     prompt_tokens: int = 0
     total_tokens: int = 0
     completion_tokens: Optional[int] = 0
-
+    prompt_tokens_details: PromptTokensDetails | None = Field(default=None, description="breakdown of prompt tokens usage")
 
 class ModelCard(OpenAIBaseModel):
     id: str
@@ -129,13 +132,6 @@ class CompletionResponseChoice(OpenAIBaseModel):
     )
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
-    num_reused_blocks: Optional[int] = Field(
-        default=None,
-        description=(
-            "The number of KV cache blocks reused during the generation."
-        )
-    )
-
 
 class CompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{str(uuid.uuid4().hex)}")
@@ -147,7 +143,6 @@ class CompletionResponse(OpenAIBaseModel):
     # Add prompt_tokens_ids to the response to remove the tokenization
     # in the generation server in disaggreated serving
     prompt_token_ids: Optional[Union[List[List[int]], List[int]]] = None
-
 
 class CompletionResponseStreamChoice(OpenAIBaseModel):
     index: int
@@ -163,13 +158,6 @@ class CompletionResponseStreamChoice(OpenAIBaseModel):
             "including encountering the EOS token"),
     )
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
-    num_reused_blocks: Optional[int] = Field(
-        default=None,
-        description=(
-            "The number of KV cache blocks reused during the generation."
-        )
-    )
-
 
 class CompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{str(uuid.uuid4().hex)}")
@@ -178,7 +166,6 @@ class CompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
-
 
 def _response_format_to_guided_decoding_params(
     response_format: Optional[ResponseFormat]
@@ -402,12 +389,6 @@ class ChatCompletionResponseChoice(OpenAIBaseModel):
 
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
-    num_reused_blocks: Optional[int] = Field(
-        default=None,
-        description=(
-            "The number of KV cache blocks reused during the generation."
-        )
-    )
 
 class ChatCompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")
@@ -419,7 +400,6 @@ class ChatCompletionResponse(OpenAIBaseModel):
     # Add prompt_tokens_ids to the response to remove the tokenization
     # in the generation server in disaggreated serving
     prompt_token_ids: Optional[List[int]] = None
-
 
 class DeltaMessage(OpenAIBaseModel):
     role: Optional[str] = None
@@ -435,12 +415,6 @@ class ChatCompletionResponseStreamChoice(OpenAIBaseModel):
     finish_reason: Optional[str] = None
     stop_reason: Optional[Union[int, str]] = None
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
-    num_reused_blocks: Optional[int] = Field(
-        default=None,
-        description=(
-            "The number of KV cache blocks reused during the generation."
-        )
-    )
 
 class ChatCompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")
