@@ -199,9 +199,10 @@ class GenerationExecutorProxy(GenerationExecutor):
                                                   IntraProcessQueue],
                                result_singleton: IterationResult) -> bool:
         # iteration result is not urgent, so we can sleep a bit
-        time.sleep(0.2)
+        # time.sleep(0.2)
 
         try:
+            queue.poll()
             data = queue.get()
         except:
             logger.debug(
