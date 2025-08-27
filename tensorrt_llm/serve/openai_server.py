@@ -419,6 +419,7 @@ class OpenAIServer:
     def process_kv_event(self, event_id, block_hash, parent_hash, cache_level):
         hash_obj = self.kv_map.get(block_hash)
         if hash_obj:
+            hash_obj.event_id = event_id
             hash_obj.cache_level = cache_level
         else:
             hash_obj = self.create_hash_obj(event_id, block_hash, parent_hash, cache_level)
