@@ -142,6 +142,7 @@ def cancel_on_disconnect(model_type: Type[BaseModel]):
 
 @dataclass
 class KVHash:
+    event_id: int
     block_hash: int
     parent_hash: int
     root_hash: int
@@ -407,20 +408,20 @@ class OpenAIServer:
             stats.append(stat)
         return JSONResponse(content=stats)
 
-    def create_hash_obj(self, block_hash, parent_hash, cache_level):
+    def create_hash_obj(self, event_id, block_hash, parent_hash, cache_level):
         parent_hash_obj = self.kv_map.get(parent_hash)
         if parent_hash_obj:
             root_hash = parent_hash_obj.root_hash
         else:
             root_hash = block_hash
-        return KVHash(block_hash=block_hash, parent_hash=parent_hash, root_hash=root_hash, cache_level=cache_level)
+        return KVHash(event_id=event_id, block_hash=block_hash, parent_hash=parent_hash, root_hash=root_hash, cache_level=cache_level)
 
-    def process_kv_event(self, block_hash, parent_hash, cache_level):
+    def process_kv_event(self, event_id, block_hash, parent_hash, cache_level):
         hash_obj = self.kv_map.get(block_hash)
         if hash_obj:
             hash_obj.cache_level = cache_level
         else:
-            hash_obj = self.create_hash_obj(block_hash, parent_hash, cache_level)
+            hash_obj = self.create_hash_obj(event_id, block_hash, parent_hash, cache_level)
         if cache_level == -1:
             self.kv_map.pop(block_hash, None)
             return hash_obj
@@ -443,6 +444,7 @@ class OpenAIServer:
         async for event in events:
             try:
                 data = event['data']
+                event_id = event['event_id']
                 parent_hash = data.get('parent_hash', 0)
                 type = data['type']
                 kv_events = []
@@ -452,20 +454,20 @@ class OpenAIServer:
                         block_hash = block['block_hash']
                         cache_level = block['cache_level']
                         kv_events.append(
-                            self.process_kv_event(block_hash, parent_hash, cache_level)
+                            self.process_kv_event(event_id, block_hash, parent_hash, cache_level)
                         )
                         parent_hash = block_hash
                 elif type == "removed":
                     block_hashes = data['block_hashes']
                     for block_hash in block_hashes:
                         kv_events.append(
-                            self.process_kv_event(block_hash, parent_hash, -1)
+                            self.process_kv_event(event_id, block_hash, parent_hash, -1)
                         )
                 elif type == "updated":
                     block_hash = data['block_hash']
                     cache_level = data['cache_level']['new_value']
                     kv_events.append(
-                        self.process_kv_event(block_hash, parent_hash, cache_level)
+                        self.process_kv_event(event_id, block_hash, parent_hash, cache_level)
                     )
                 else:
                     logger.info(f'{event}')
@@ -480,6 +482,7 @@ class OpenAIServer:
 
     async def kv_cache_generator(self):
         def format_sse_event(kv_events: List[KVHash]) -> str:
+            event_ids = []
             kv_hashes = []
             kv_root_hashes = []
             kv_parent_hashes = []
@@ -487,12 +490,14 @@ class OpenAIServer:
 
             # fill the lists from data in kv_events
             for kv_event in kv_events:
+                event_ids.append(kv_event.event_id)
                 kv_hashes.append(kv_event.block_hash)
                 kv_root_hashes.append(kv_event.root_hash)
                 kv_parent_hashes.append(kv_event.parent_hash)
                 kv_cache_levels.append(kv_event.cache_level)
 
             ret_event = {
+                "event_ids": event_ids,
                 "kv_hashes": kv_hashes,
                 "kv_root_hashes": kv_root_hashes,
                 "kv_parent_hashes": kv_parent_hashes,
