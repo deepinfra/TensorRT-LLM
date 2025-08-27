@@ -264,7 +264,7 @@ class GenerationExecutorWorker(GenerationExecutor):
                                engine_get_result_api: Callable,
                                result_singleton: IterationResult,
                                result_serializer: Callable) -> bool:
-        time.sleep(0.2)
+        time.sleep(0.01)
         async_queues = []
         queue = result_singleton.queue if self._is_llm_executor and result_singleton else it_result_queue.queue
         try:
