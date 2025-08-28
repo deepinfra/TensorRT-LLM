@@ -520,6 +520,16 @@ class TorchSampler(Sampler):
         self._global_seed = 42
         self._generator = None
 
+        self.temperatures_cuda = torch.empty((256, ),
+                                            dtype=torch.float,
+                                            device='cuda')
+        self.top_k_cuda = torch.empty((256, ),
+                                        dtype=torch.int,
+                                        device='cuda')
+        self.top_p_cuda = torch.empty((256, ),
+                                        dtype=torch.float,
+                                          device='cuda')
+
     def get_generator(self, device: torch.device) -> torch.Generator:
         """Get a deterministic generator for the specified device.
 
@@ -860,6 +870,19 @@ class TorchSampler(Sampler):
             top_ks.append(get_request_top_k(req))
             top_ps.append(get_request_top_p(req))
 
+        self.temperatures_cuda[:len(temperatures)].copy_(torch.tensor(
+            temperatures, dtype=torch.float, pin_memory=True),
+                                                    non_blocking=True)
+        self.top_k_cuda[:len(top_ks)].copy_(torch.tensor(
+            top_ks, dtype=torch.int, pin_memory=True),
+                                                    non_blocking=True)
+        self.top_p_cuda[:len(top_ps)].copy_(torch.tensor(
+            top_ps, dtype=torch.float, pin_memory=True),
+                                                    non_blocking=True)
+        _temperatures = self.temperatures_cuda[:len(temperatures)]
+        _top_k = self.top_k_cuda[:len(top_ks)]
+        _top_p = self.top_p_cuda[:len(top_ps)]
+
         strategies = sampling_strategies(requests)
         batched_next_tokens, batched_softmax = None, None
         if self.enable_mixed_sampler:
@@ -873,9 +896,9 @@ class TorchSampler(Sampler):
                                             steps_per_request)
         batched_next_tokens, batched_logprobs = sampling_batch(
             logits,
-            torch.tensor(temperatures, device=logits.device),
-            torch.tensor(top_ks, device=logits.device),
-            torch.tensor(top_ps, device=logits.device),
+            _temperatures,
+            _top_k,
+            _top_p
             )
         self.append_eagle3(batched_next_tokens, model_outputs)
 
