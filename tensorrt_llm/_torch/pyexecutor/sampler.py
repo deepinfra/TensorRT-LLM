@@ -334,7 +334,7 @@ def apply_temperature(
     # Use in-place division to avoid creating a new tensor.
     return logits.div_(temp.unsqueeze(dim=1))
 
-def sampling_batch(
+def sampling_batch_rawprobs(
         logits: torch.Tensor,
         temperatures: torch.Tensor,
         top_k: torch.Tensor,
@@ -357,6 +357,22 @@ def sampling_batch(
             random_sampled,
             out=greedy_sampled,  # Reuse tensor
         )
+    return next_tokens, raw_probs
+
+def sampling_batch(
+        logits: torch.Tensor,
+        temperatures: torch.Tensor,
+        top_k: torch.Tensor,
+        top_p: torch.Tensor,
+        min_p: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+    next_tokens, raw_probs = sampling_batch_rawprobs(
+        logits,
+        temperatures,
+        top_k,
+        top_p,
+        min_p
+    )
     token_probs = torch.gather(raw_probs, dim=1,
                                index=next_tokens.unsqueeze(1)).squeeze(-1)
     log_probs = torch.log(token_probs)
@@ -806,27 +822,68 @@ class TorchSampler(Sampler):
             new_tokens[:1].index_copy_(1, seq_slots, next_tokens)
             return
 
+        def get_request_temperature(request: LlmRequest) -> float:
+            if not request.sampling_config.temperature:
+                return 0.7
+            temperature = request.sampling_config.temperature[0]
+            if 0 < temperature < 1e-2:
+                # temperature less than 0.01 may cause numerical errors
+                temperature = 0.01
+            return temperature
+
+        def get_request_top_k(request: LlmRequest) -> int:
+            if not request.sampling_config.top_k:
+                top_k = 0
+            else:
+                top_k = request.sampling_config.top_k[0]
+            # flashinfer expects k > d for no top_k filter
+            if top_k <= 0:
+                top_k = 2147483647
+            return top_k
+
+        def get_request_top_p(request: LlmRequest) -> float:
+            if not request.sampling_config.top_p:
+                top_p = 1.0
+            else:
+                top_p = request.sampling_config.top_p[0]
+            return top_p
+
+        def get_request_min_p(request: LlmRequest) -> float:
+            if not request.sampling_config.min_p:
+                min_p = 0.0
+            else:
+                min_p = request.sampling_config.min_p[0]
+            return min_p
+
+        temperatures = []
+        top_ks = []
+        top_ps = []
+        min_ps = []
+        for req in requests:
+            temperatures.append(get_request_temperature(request))
+            top_ks.append(get_request_top_k(request))
+            top_ps.append(get_request_top_p(request))
+            min_ps.append(get_request_min_p(request))
+
         strategies = sampling_strategies(requests)
         batched_next_tokens, batched_softmax = None, None
-        batched_strategy: Strategy | None = GREEDY
         if self.enable_mixed_sampler:
             assert "d2t" not in model_outputs, "eagle3 does not yet support non-greedy sampling"
-            if len(set(strategies)) == 1:
-                batched_strategy = strategies[0]
-            else:
-                batched_strategy = None
-        generator = self.get_generator(raw_logits.device)
-        if batched_strategy is not None:
-            logits = raw_logits[:sum_steps]
-            # Collect steps per request for batched strategy
-            steps_per_request = [
-                1 + get_draft_token_length(req) for req in requests
-            ]
-            logits = self._apply_embedding_bias(logits, requests,
-                                                steps_per_request)
-            batched_next_tokens, batched_softmax = sample(
-                batched_strategy, logits, generator)
-            self.append_eagle3(batched_next_tokens, model_outputs)
+        logits = raw_logits[:sum_steps]
+        # Collect steps per request for batched strategy
+        steps_per_request = [
+            1 + get_draft_token_length(req) for req in requests
+        ]
+        logits = self._apply_embedding_bias(logits, requests,
+                                            steps_per_request)
+        batched_next_tokens, batched_softmax = sampling_batch_rawprobs(
+            logits,
+            torch.tensor(temperatures, device=logits.device),
+            torch.tensor(top_ks, device=logits.device),
+            torch.tensor(top_ps, device=logits.device),
+            torch.tensor(min_ps, device=logits.device)
+            )
+        self.append_eagle3(batched_next_tokens, model_outputs)
 
         offset = 0
         for i, (strategy, slot, steps, request) in enumerate(
@@ -836,13 +893,10 @@ class TorchSampler(Sampler):
 
             req = requests[i]
 
-            if batched_next_tokens is None:
-                logits = self._apply_embedding_bias(logits, [req])
-                next_tokens, softmax = sample(strategy, logits, generator)
-            else:
-                # Batched processing already applied bias, just use the results
-                next_tokens = batched_next_tokens[input_slice]
-                softmax = batched_softmax[input_slice]
+            # Batched processing already applied bias, just use the results
+            next_tokens = batched_next_tokens[input_slice]
+            softmax = batched_softmax[input_slice]
+
             current_slice = slice(0, steps), slot, beam
             new_tokens[current_slice] = next_tokens
             if request.py_draft_logits is not None:
