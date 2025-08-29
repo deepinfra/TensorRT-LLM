@@ -347,9 +347,9 @@ def sampling_batch_rawprobs(
     # if not torch.cuda.is_current_stream_capturing():
     #     generator = torch.Generator(device="cuda")
     #     generator.manual_seed(0)
-    # next_tokens = flashinfer_sample(adjusted_logits, top_k, top_p, generator)
+    random_sampled = flashinfer_sample(logits, top_k, top_p)
     # logits = apply_top_k_top_p(logits, top_k, top_p)
-    random_sampled = forward_native(logits, top_k, top_p)
+    # random_sampled = forward_native(logits, top_k, top_p)
     next_tokens = torch.where(
             temperatures < 1e-5,
             greedy_sampled,
