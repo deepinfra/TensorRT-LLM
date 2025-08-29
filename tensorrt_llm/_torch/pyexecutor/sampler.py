@@ -340,8 +340,8 @@ def sampling_batch_rawprobs(
         top_k: torch.Tensor,
         top_p: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-    raw_probs = torch.softmax(logits, dim=-1)
-    greedy_sampled = greedy_sample(logits)
+    # raw_probs = torch.softmax(logits, dim=-1)
+    # greedy_sampled = greedy_sample(logits)
     logits = apply_temperature(logits, temperatures)
     #logits = apply_min_p(logits, min_p)
     # if not torch.cuda.is_current_stream_capturing():
@@ -350,13 +350,13 @@ def sampling_batch_rawprobs(
     random_sampled = flashinfer_sample(logits, top_k, top_p)
     # logits = apply_top_k_top_p(logits, top_k, top_p)
     # random_sampled = forward_native(logits, top_k, top_p)
-    next_tokens = torch.where(
-            temperatures < 1e-5,
-            greedy_sampled,
-            random_sampled,
-            out=greedy_sampled,  # Reuse tensor
-        )
-    return next_tokens, raw_probs
+    # next_tokens = torch.where(
+    #         temperatures < 1e-5,
+    #         greedy_sampled,
+    #         random_sampled,
+    #         out=greedy_sampled,  # Reuse tensor
+    #     )
+    return random_sampled#, raw_probs
 
 def sampling_batch(
         logits: torch.Tensor,
@@ -364,16 +364,16 @@ def sampling_batch(
         top_k: torch.Tensor,
         top_p: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-    next_tokens, raw_probs = sampling_batch_rawprobs(
+    next_tokens = sampling_batch_rawprobs(
         logits,
         temperatures,
         top_k,
         top_p,
     )
-    token_probs = torch.gather(raw_probs, dim=1,
-                               index=next_tokens.unsqueeze(1)).squeeze(-1)
-    log_probs = torch.log(token_probs)
-    return next_tokens, log_probs
+    # token_probs = torch.gather(raw_probs, dim=1,
+    #                            index=next_tokens.unsqueeze(1)).squeeze(-1)
+    # log_probs = torch.log(token_probs)
+    return next_tokens#, log_probs
 
 def greedy_search_sampling_batch(logits):
     next_tokens = torch.argmax(logits, dim=-1)
@@ -894,7 +894,7 @@ class TorchSampler(Sampler):
         ]
         logits = self._apply_embedding_bias(logits, requests,
                                             steps_per_request)
-        batched_next_tokens, batched_logprobs = sampling_batch(
+        batched_next_tokens = sampling_batch(
             logits,
             _temperatures,
             _top_k,
@@ -912,18 +912,18 @@ class TorchSampler(Sampler):
 
             # Batched processing already applied bias, just use the results
             next_tokens = batched_next_tokens[input_slice]
-            log_probs = batched_logprobs[input_slice]
+            # log_probs = batched_logprobs[input_slice]
 
             current_slice = slice(0, steps), slot, beam
             new_tokens[current_slice] = next_tokens
             # if request.py_draft_logits is not None:
             #     request.py_target_probs = softmax.clone()
-            if gen_logits_host is not None:
-                gen_logits_host[current_slice].copy_(logits, non_blocking=True)
-            if log_probs_host is not None:
-                assert beam == 0, "The following call relies on beam_width to be 1 - hence the unsqueeze"
-                log_probs_host[slot, beam, :steps].copy_(log_probs,
-                                                         non_blocking=True)
+            # if gen_logits_host is not None:
+            #     gen_logits_host[current_slice].copy_(logits, non_blocking=True)
+            # if log_probs_host is not None:
+            #     assert beam == 0, "The following call relies on beam_width to be 1 - hence the unsqueeze"
+            #     log_probs_host[slot, beam, :steps].copy_(log_probs,
+            #                                              non_blocking=True)
             offset += steps
 
 
