@@ -211,6 +211,8 @@ class LLGuidanceMatcher(GrammarMatcher):
         return num_accepted > 0
 
     def rollback(self, num_tokens: int) -> None:
+        if num_tokens == 0:
+            return
         if self._is_terminated:
             self._is_terminated = False
             num_tokens -= 1
