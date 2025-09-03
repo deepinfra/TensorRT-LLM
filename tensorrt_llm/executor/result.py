@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from queue import Empty, Queue
 
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Literal,
-                    NamedTuple, Optional, TypeAlias, Union)
+                    NamedTuple, Optional, TypeAlias, Union, Tuple)
 from weakref import WeakMethod
 
 import torch
