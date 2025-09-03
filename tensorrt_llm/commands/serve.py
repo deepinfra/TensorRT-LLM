@@ -219,6 +219,8 @@ def get_llm_args(model: str,
         num_postprocess_workers,
         "postprocess_tokenizer_dir":
         tokenizer or model,
+        "sampler_type":
+        "TRTLLMSampler",
         "reasoning_parser":
         reasoning_parser,
         "cuda_graph_config":
