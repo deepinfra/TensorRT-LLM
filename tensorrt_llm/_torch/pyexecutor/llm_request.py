@@ -309,11 +309,11 @@ class PyResult:
 
     @property
     def log_probs(self) -> list[TokenLogprobs] | None:
-        return self._log_probs and self._log_probs.log_probs
+        return self._log_probs and getattr(self._log_probs, 'log_probs', None)
 
     @property
     def cum_log_probs(self) -> list[float] | None:
-        return self._log_probs and self._log_probs.cum_log_probs
+        return self._log_probs and getattr(self._log_probs, 'cum_log_probs', None)
 
     @property
     def mm_embedding_handle(self) -> Dict[str, Any] | None:
