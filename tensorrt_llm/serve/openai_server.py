@@ -14,7 +14,7 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, List, Optional
 from typing import (AsyncGenerator, AsyncIterator, List, Optional, Tuple,
-                    TypedDict, Callable, Awaitable, Any, Type)
+                    TypedDict, Callable, Awaitable, Any, Type, Union)
 
 from tensorrt_llm.llmapi.utils import AsyncQueue
 import uvicorn
