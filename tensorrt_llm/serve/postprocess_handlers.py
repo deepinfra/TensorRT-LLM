@@ -168,11 +168,11 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
     if args.first_iteration:
         for i in range(args.num_choices):
             res.append(
-                f"data: {yield_first_chat(prompt_tokens, i, rsp, role=args.role)} \n\n"
+                yield_first_chat(prompt_tokens, i, rsp, role=args.role)
             )
             if args.echo and args.last_message_content:
                 res.append(
-                    f"data: {yield_first_chat(prompt_tokens, i, rsp, content=args.last_message_content)} \n\n"
+                    yield_first_chat(prompt_tokens, i, rsp, content=args.last_message_content)
                 )
         args.first_iteration = False
 
