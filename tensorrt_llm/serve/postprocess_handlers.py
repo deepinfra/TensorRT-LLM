@@ -369,11 +369,10 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
             prompt_tokens_details=PromptTokensDetails(cached_tokens=min(prompt_tokens, (getattr(rsp, 'num_reused_blocks', 0) or 0) * 32))
         )
 
-        final_usage_chunk = ChatCompletionStreamResponse(choices=[],
+        final_usage_chunk = CompletionStreamResponse(choices=[],
                                                          model=args.model,
                                                          usage=final_usage)
-        final_usage_data = final_usage_chunk.model_dump_json()
-        res.append(f"data: {final_usage_data}\n\n")
+        res.append(final_usage_chunk)
     args.first_iteration = False
     return res
 
