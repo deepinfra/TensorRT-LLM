@@ -64,16 +64,13 @@ class ChatPostprocArgs(PostprocArgs):
 
 def create_logprobs(token_ids: List[int], tokenizer: TransformersTokenizer,
                     logprobs: List[float]) -> ChatCompletionLogProbs:
-    assert len(token_ids) == len(logprobs), \
-            "token_ids and logprobs have different lengths"
     content: List[ChatCompletionLogProbsContent] = []
-    for logprob in logprobs:
-        token_id, lp = list(logprob.items())[0]
+    for token_id, logprob in zip(token_ids, logprobs):
         token = tokenizer.decode(token_id)
         # returning multiple logprobs is not supported
         first_logprob = ChatCompletionLogProbsContent(
             token=token,
-            logprob=max(lp.logprob, -9999.0),
+            logprob=max(logprob, -9999.0),
             bytes=list(token.encode("utf-8", errors="replace")))
         content.append(first_logprob)
     chat_logprobs = ChatCompletionLogProbs(content=content)
@@ -81,18 +78,16 @@ def create_logprobs(token_ids: List[int], tokenizer: TransformersTokenizer,
 
 def create_logprobs_completion(token_ids: List[int],
                     tokenizer: TransformersTokenizer,
-                    logprobs: TokenLogprobs) -> CompletionLogProbs:
+                    logprobs: List[float]) -> CompletionLogProbs:
     token_logprobs: List[Optional[float]] = []
     tokens: List[str] = []
-    for logprob in logprobs:
-        token_id, lp = list(logprob.items())[0]
+    for token_id, logprob in zip(token_ids, logprobs):
         token = tokenizer.decode(token_id)
         # returning multiple logprobs is not supported
-        token_logprobs.append(max(lp.logprob, -9999.0))
+        token_logprobs.append(max(logprob, -9999.0))
         tokens.append(token)
     completion_logprobs = CompletionLogProbs(token_logprobs=token_logprobs,tokens=tokens)
     return completion_logprobs
-
 
 def apply_reasoning_parser(args: ChatPostprocArgs, output_index: int, text: str,
                            streaming: bool) -> Tuple[bool, str, str]:
