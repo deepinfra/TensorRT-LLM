@@ -63,9 +63,7 @@ class ChatPostprocArgs(PostprocArgs):
 
 
 def create_logprobs(token_ids: List[int], tokenizer: TransformersTokenizer,
-                    logprobs: List[float]) -> ChatCompletionLogProbs:
-    assert len(token_ids) == len(logprobs), \
-            "token_ids and logprobs have different lengths"
+                    logprobs: TokenLogprobs) -> ChatCompletionLogProbs:
     content: List[ChatCompletionLogProbsContent] = []
     for logprob in logprobs:
         token_id, lp = list(logprob.items())[0]
