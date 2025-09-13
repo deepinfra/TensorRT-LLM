@@ -10,7 +10,7 @@ from ...bindings.executor import GuidedDecodingConfig, GuidedDecodingParams
 from ...bindings.internal.batch_manager import LlmRequestType
 from ...logger import logger
 from ..hostfunc import hostfunc
-from .grammar_matcher import (GrammarMatcher, LLGuidanceMatcherFactory,
+from .grammar_matcher import (GrammarMatcher, GrammarMatcherFactoryWrapper, LLGuidanceMatcherFactory,
                               XGrammarMatcherFactory)
 from .llm_request import LlmRequest
 from .scheduler import ScheduledRequests
@@ -161,6 +161,7 @@ class GuidedDecoder:
             raise ValueError(
                 f"Invalid guided decoding backend: {self.guided_decoding_backend}"
             )
+        self.grammar_matcher_factory = GrammarMatcherFactoryWrapper(self.grammar_matcher_factory)
         logger.info(
             f"Guided decoder initialized with backend: {self.guided_decoding_backend}"
         )

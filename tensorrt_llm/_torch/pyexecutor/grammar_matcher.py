@@ -58,6 +58,48 @@ class XGrammarMatcher(GrammarMatcher):
         return self._matcher.is_terminated()
 
 
+class GrammarMatcherWrapper(GrammarMatcher):
+    def __init__(self, matcher: GrammarMatcher, guided_decoding_params: GuidedDecodingParams):
+        super().__init__()
+        self._matcher = matcher
+        self._guided_decoding_params = guided_decoding_params
+        self._end_thinking_token_id = 128799
+        self._is_thinking = True
+        self._steps_after_thinking = 0
+
+    def accept_token(self, token_id: int) -> bool:
+        if token_id == self._end_thinking_token_id and self._is_thinking:
+            self._is_thinking = False
+            return True
+        self._steps_after_thinking += 1
+        return self._matcher.accept_token(token_id)
+
+    def rollback(self, num_tokens: int) -> None:
+        if not self._is_thinking:
+            return
+        # cannot rollback more than steps after thinking
+        num_tokens_to_rollback = min(num_tokens, self._steps_after_thinking)
+        self._matcher.rollback(num_tokens_to_rollback)
+        if num_tokens > self._steps_after_thinking:
+            self._is_thinking = False
+
+    def fill_next_token_bitmask(self, next_token_bitmask: torch.Tensor,
+                                index: int) -> None:
+        self._matcher.fill_next_token_bitmask(next_token_bitmask, index)
+
+    def is_terminated(self) -> bool:
+        return self._matcher.is_terminated()
+
+class GrammarMatcherFactoryWrapper(GrammarMatcherFactory):
+    def __init__(self, factory: GrammarMatcherFactory):
+        super().__init__()
+        self._factory = factory
+
+    def create(self,
+               guided_decoding_params: GuidedDecodingParams) -> GrammarMatcher:
+        matcher = self._factory.create(guided_decoding_params)
+        return GrammarMatcherWrapper(matcher, guided_decoding_params)
+
 class XGrammarMatcherFactory(GrammarMatcherFactory):
 
     def __init__(self,
