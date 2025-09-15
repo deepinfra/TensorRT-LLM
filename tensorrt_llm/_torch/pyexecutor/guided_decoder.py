@@ -261,6 +261,9 @@ class GuidedDecoder:
                     self.num_advanced_tokens[slot] += 1
                     if matcher.is_terminated():
                         break
+                    if matcher.is_thinking():
+                        # don't apply bitmask when the matcher is thinking
+                        continue
                     matcher.fill_next_token_bitmask(self.bitmask_host,
                                                     offset + i)
                     self.token_mask_host[offset + i] = 1

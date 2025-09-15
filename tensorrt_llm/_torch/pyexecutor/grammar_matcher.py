@@ -29,6 +29,10 @@ class GrammarMatcher(ABC):
     def is_terminated(self) -> bool:
         pass
 
+    @abstractmethod
+    def is_thinking(self) -> bool:
+        pass
+
 
 class GrammarMatcherFactory(ABC):
 
@@ -56,6 +60,9 @@ class XGrammarMatcher(GrammarMatcher):
 
     def is_terminated(self) -> bool:
         return self._matcher.is_terminated()
+    
+    def is_thinking(self) -> bool:
+        return False
 
 
 class GrammarMatcherWrapper(GrammarMatcher):
@@ -70,6 +77,7 @@ class GrammarMatcherWrapper(GrammarMatcher):
     def accept_token(self, token_id: int) -> bool:
         if token_id == self._end_thinking_token_id and self._is_thinking:
             self._is_thinking = False
+            self._steps_after_thinking = 0
             return True
         self._steps_after_thinking += 1
         return self._matcher.accept_token(token_id)
@@ -77,7 +85,7 @@ class GrammarMatcherWrapper(GrammarMatcher):
     def rollback(self, num_tokens: int) -> None:
         if not self._is_thinking:
             return
-        # cannot rollback more than steps after thinking
+        # cannot rollback more than steps_after_thinking
         num_tokens_to_rollback = min(num_tokens, self._steps_after_thinking)
         self._matcher.rollback(num_tokens_to_rollback)
         if num_tokens > self._steps_after_thinking:
@@ -89,6 +97,9 @@ class GrammarMatcherWrapper(GrammarMatcher):
 
     def is_terminated(self) -> bool:
         return self._matcher.is_terminated()
+    
+    def is_thinking(self) -> bool:
+        return self._is_thinking
 
 class GrammarMatcherFactoryWrapper(GrammarMatcherFactory):
     def __init__(self, factory: GrammarMatcherFactory):
@@ -208,6 +219,9 @@ class LLGuidanceMatcher(GrammarMatcher):
 
     def is_terminated(self) -> bool:
         return self._is_terminated
+
+    def is_thinking(self) -> bool:
+        return False
 
     def _check_err(self) -> None:
         if self._matcher.is_error():
