@@ -22,10 +22,10 @@
 namespace tensorrt_llm::executor
 {
 
-GuidedDecodingParams::GuidedDecodingParams(GuideType guideType, std::optional<std::string> guide, std::optional<std::int32_t> thinkingEndTokenId)
+GuidedDecodingParams::GuidedDecodingParams(GuideType guideType, std::optional<std::string> guide, std::optional<std::int32_t> guidanceStartTokenId)
     : mGuideType{guideType}
     , mGuide{std::move(guide)}
-    , mThinkingEndTokenId{thinkingEndTokenId}
+    , mGuidanceStartTokenId{guidanceStartTokenId}
 {
     TLLM_CHECK_WITH_INFO(mGuideType == GuideType::kJSON || mGuide.has_value(),
         "The guide string must be provided unless using GuideType::kJSON.");
@@ -33,7 +33,7 @@ GuidedDecodingParams::GuidedDecodingParams(GuideType guideType, std::optional<st
 
 bool GuidedDecodingParams::operator==(GuidedDecodingParams const& other) const
 {
-    return mGuideType == other.mGuideType && mGuide == other.mGuide && mThinkingEndTokenId == other.mThinkingEndTokenId;
+    return mGuideType == other.mGuideType && mGuide == other.mGuide && mGuidanceStartTokenId == other.mGuidanceStartTokenId;
 }
 
 GuidedDecodingParams::GuideType GuidedDecodingParams::getGuideType() const
@@ -46,9 +46,9 @@ std::optional<std::string> GuidedDecodingParams::getGuide() const
     return mGuide;
 }
 
-std::optional<std::int32_t> GuidedDecodingParams::getThinkingEndTokenId() const
+std::optional<std::int32_t> GuidedDecodingParams::getGuidanceStartTokenId() const
 {
-    return mThinkingEndTokenId;
+    return mGuidanceStartTokenId;
 }
 
 } // namespace tensorrt_llm::executor

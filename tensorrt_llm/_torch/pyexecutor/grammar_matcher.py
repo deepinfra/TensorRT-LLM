@@ -30,7 +30,7 @@ class GrammarMatcher(ABC):
         pass
 
     @abstractmethod
-    def is_thinking(self) -> bool:
+    def guidance_started(self) -> bool:
         pass
 
 
@@ -61,8 +61,8 @@ class XGrammarMatcher(GrammarMatcher):
     def is_terminated(self) -> bool:
         return self._matcher.is_terminated()
     
-    def is_thinking(self) -> bool:
-        return False
+    def guidance_started(self) -> bool:
+        return True
 
 
 class GrammarMatcherWrapper(GrammarMatcher):
@@ -70,32 +70,32 @@ class GrammarMatcherWrapper(GrammarMatcher):
         super().__init__()
         self._matcher = matcher
         self._guided_decoding_params = guided_decoding_params
-        self._end_thinking_token_id = guided_decoding_params.end_thinking_token_id
-        self._is_thinking = self._end_thinking_token_id is not None
-        self._steps_after_thinking = 0
+        self._guidance_start_token_id = guided_decoding_params.guidance_start_token_id
+        self._guidance_started = self._guidance_start_token_id is None
+        self._steps_after_guidance_start = 0
 
     def accept_token(self, token_id: int) -> bool:
         print(token_id)
-        if self._end_thinking_token_id:
-            if self._is_thinking:
-                if token_id == self._end_thinking_token_id:
-                    self._is_thinking = False
-                    self._steps_after_thinking = 0
+        if self._guidance_start_token_id:
+            if not self._guidance_started:
+                if token_id == self._guidance_start_token_id:
+                    self._guidance_started = True
+                    self._steps_after_guidance_start = 0
                     return True
                 else:
                     return True
-            self._steps_after_thinking += 1
+            self._steps_after_guidance_start += 1
         return self._matcher.accept_token(token_id)
 
     def rollback(self, num_tokens: int) -> None:
         num_tokens_to_rollback = num_tokens
-        if self._end_thinking_token_id:
-            if self._is_thinking:
+        if self._guidance_start_token_id:
+            if not self._guidance_started:
                 return
-            # cannot rollback more than steps_after_thinking
-            num_tokens_to_rollback = min(num_tokens, self._steps_after_thinking)
-            if num_tokens > self._steps_after_thinking:
-                self._is_thinking = True
+            # cannot rollback more than _steps_after_guidance_start
+            num_tokens_to_rollback = min(num_tokens, self._steps_after_guidance_start)
+            if num_tokens > self._steps_after_guidance_start:
+                self._guidance_started = False
         self._matcher.rollback(num_tokens_to_rollback)
 
     def fill_next_token_bitmask(self, next_token_bitmask: torch.Tensor,
@@ -105,8 +105,8 @@ class GrammarMatcherWrapper(GrammarMatcher):
     def is_terminated(self) -> bool:
         return self._matcher.is_terminated()
     
-    def is_thinking(self) -> bool:
-        return self._is_thinking
+    def guidance_started(self) -> bool:
+        return self._guidance_started
 
 class GrammarMatcherFactoryWrapper(GrammarMatcherFactory):
     def __init__(self, factory: GrammarMatcherFactory):
@@ -227,8 +227,8 @@ class LLGuidanceMatcher(GrammarMatcher):
     def is_terminated(self) -> bool:
         return self._is_terminated
 
-    def is_thinking(self) -> bool:
-        return False
+    def guidance_started(self) -> bool:
+        return True
 
     def _check_err(self) -> None:
         if self._matcher.is_error():

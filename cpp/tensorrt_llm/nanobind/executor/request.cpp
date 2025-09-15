@@ -542,7 +542,7 @@ void initRequestBindings(nb::module_& m)
         .value("STRUCTURAL_TAG", tle::GuidedDecodingParams::GuideType::kSTRUCTURAL_TAG);
 
     auto guidedDecodingParamsGetstate
-        = [](tle::GuidedDecodingParams const& self) { return nb::make_tuple(self.getGuideType(), self.getGuide(), self.getThinkingEndTokenId()); };
+        = [](tle::GuidedDecodingParams const& self) { return nb::make_tuple(self.getGuideType(), self.getGuide(), self.getGuidanceStartTokenId()); };
 
     auto guidedDecodingParamsSetstate = [](tle::GuidedDecodingParams& self, nb::tuple const& state)
     {
@@ -559,7 +559,7 @@ void initRequestBindings(nb::module_& m)
             nb::arg("guide") = nb::none())
         .def_prop_ro("guide_type", &tle::GuidedDecodingParams::getGuideType)
         .def_prop_ro("guide", &tle::GuidedDecodingParams::getGuide)
-        .def_prop_ro("thinking_end_token_id", &tle::GuidedDecodingParams::getThinkingEndTokenId)
+        .def_prop_ro("guidance_start_token_id", &tle::GuidedDecodingParams::getGuidanceStartTokenId)
         .def("__getstate__", guidedDecodingParamsGetstate)
         .def("__setstate__", guidedDecodingParamsSetstate);
 

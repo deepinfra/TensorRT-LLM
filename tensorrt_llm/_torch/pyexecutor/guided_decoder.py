@@ -250,7 +250,7 @@ class GuidedDecoder:
 
             self.num_advanced_tokens[slot] += 1
             if not matcher.is_terminated():
-                if not matcher.is_thinking():
+                if matcher.guidance_started():
                     matcher.fill_next_token_bitmask(self.bitmask_host, offset)
                     self.token_mask_host[offset] = 1
                     self.num_guided_tokens[slot] += 1
@@ -262,13 +262,11 @@ class GuidedDecoder:
                     self.num_advanced_tokens[slot] += 1
                     if matcher.is_terminated():
                         break
-                    if matcher.is_thinking():
-                        # don't apply bitmask when the matcher is thinking
-                        continue
-                    matcher.fill_next_token_bitmask(self.bitmask_host,
+                    if matcher.guidance_started():
+                        matcher.fill_next_token_bitmask(self.bitmask_host,
                                                     offset + i)
-                    self.token_mask_host[offset + i] = 1
-                    self.num_guided_tokens[slot] += 1
+                        self.token_mask_host[offset + i] = 1
+                        self.num_guided_tokens[slot] += 1
 
             if req.is_draft:
                 assert len(req.draft_tokens) == 0
