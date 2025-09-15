@@ -75,10 +75,14 @@ class GrammarMatcherWrapper(GrammarMatcher):
         self._steps_after_thinking = 0
 
     def accept_token(self, token_id: int) -> bool:
-        if token_id == self._end_thinking_token_id and self._is_thinking:
-            self._is_thinking = False
-            self._steps_after_thinking = 0
-            return True
+        print(token_id)
+        if self._is_thinking:
+            if token_id == self._end_thinking_token_id:
+                self._is_thinking = False
+                self._steps_after_thinking = 0
+                return True
+            else:
+                return True
         self._steps_after_thinking += 1
         return self._matcher.accept_token(token_id)
 
