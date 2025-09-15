@@ -1563,7 +1563,7 @@ GuidedDecodingParams Serialization::deserializeGuidedDecodingParams(std::istream
 {
     auto guideType = su::deserializeWithGetterType<decltype(&GuidedDecodingParams::getGuideType)>(is);
     auto guide = su::deserializeWithGetterType<decltype(&GuidedDecodingParams::getGuide)>(is);
-    auto guidanceStartTokenId = su::deserializeWithGetterType<decltype(&GuidedDecodingParams::mGuidanceStartTokenId)>(is);
+    auto guidanceStartTokenId = su::deserializeWithGetterType<decltype(&GuidedDecodingParams::getGuidanceStartTokenId)>(is);
     return GuidedDecodingParams(guideType, guide, guidanceStartTokenId);
 }
 
