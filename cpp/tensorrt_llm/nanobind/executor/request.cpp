@@ -555,8 +555,8 @@ void initRequestBindings(nb::module_& m)
     };
 
     pyGuidedDecodingParams
-        .def(nb::init<tle::GuidedDecodingParams::GuideType, std::optional<std::string>>(), nb::arg("guide_type"),
-            nb::arg("guide") = nb::none())
+        .def(nb::init<tle::GuidedDecodingParams::GuideType, std::optional<std::string>, std::optional<std::int32_t>(), nb::arg("guide_type"),
+            nb::arg("guide") = nb::none(), nb::arg("guidance_start_token_id") = nb::none())
         .def_prop_ro("guide_type", &tle::GuidedDecodingParams::getGuideType)
         .def_prop_ro("guide", &tle::GuidedDecodingParams::getGuide)
         .def_prop_ro("guidance_start_token_id", &tle::GuidedDecodingParams::getGuidanceStartTokenId)
