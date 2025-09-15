@@ -542,16 +542,16 @@ void initRequestBindings(nb::module_& m)
         .value("STRUCTURAL_TAG", tle::GuidedDecodingParams::GuideType::kSTRUCTURAL_TAG);
 
     auto guidedDecodingParamsGetstate
-        = [](tle::GuidedDecodingParams const& self) { return nb::make_tuple(self.getGuideType(), self.getGuide()); };
+        = [](tle::GuidedDecodingParams const& self) { return nb::make_tuple(self.getGuideType(), self.getGuide(), self.getThinkingEndTokenId()); };
 
     auto guidedDecodingParamsSetstate = [](tle::GuidedDecodingParams& self, nb::tuple const& state)
     {
-        if (state.size() != 2)
+        if (state.size() != 3)
         {
             throw std::runtime_error("Invalid GuidedDecodingParams state!");
         }
         new (&self) tle::GuidedDecodingParams(
-            nb::cast<tle::GuidedDecodingParams::GuideType>(state[0]), nb::cast<std::optional<std::string>>(state[1]));
+            nb::cast<tle::GuidedDecodingParams::GuideType>(state[0]), nb::cast<std::optional<std::string>>(state[1]), nb::cast<std::optional<int32_t>>(state[2]));
     };
 
     pyGuidedDecodingParams
@@ -559,6 +559,7 @@ void initRequestBindings(nb::module_& m)
             nb::arg("guide") = nb::none())
         .def_prop_ro("guide_type", &tle::GuidedDecodingParams::getGuideType)
         .def_prop_ro("guide", &tle::GuidedDecodingParams::getGuide)
+        .def_prop_ro("thinking_end_token_id", &tle::GuidedDecodingParams::getThinkingEndTokenId)
         .def("__getstate__", guidedDecodingParamsGetstate)
         .def("__setstate__", guidedDecodingParamsSetstate);
 

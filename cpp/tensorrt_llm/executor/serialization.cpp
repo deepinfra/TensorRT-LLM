@@ -1563,13 +1563,15 @@ GuidedDecodingParams Serialization::deserializeGuidedDecodingParams(std::istream
 {
     auto guideType = su::deserializeWithGetterType<decltype(&GuidedDecodingParams::getGuideType)>(is);
     auto guide = su::deserializeWithGetterType<decltype(&GuidedDecodingParams::getGuide)>(is);
-    return GuidedDecodingParams(guideType, guide);
+    auto thinkingEndTokenId = su::deserializeWithGetterType<decltype(&GuidedDecodingParams::getThinkingEndTokenId)>(is);
+    return GuidedDecodingParams(guideType, guide, thinkingEndTokenId);
 }
 
 void Serialization::serialize(GuidedDecodingParams const& guidedDecodingParams, std::ostream& os)
 {
     su::serialize(guidedDecodingParams.getGuideType(), os);
     su::serialize(guidedDecodingParams.getGuide(), os);
+    su::serialize(guidedDecodingParams.getThinkingEndTokenId(), os);
 }
 
 size_t Serialization::serializedSize(GuidedDecodingParams const& guidedDecodingParams)
@@ -1577,6 +1579,7 @@ size_t Serialization::serializedSize(GuidedDecodingParams const& guidedDecodingP
     size_t totalSize = 0;
     totalSize += su::serializedSize(guidedDecodingParams.getGuideType());
     totalSize += su::serializedSize(guidedDecodingParams.getGuide());
+    totalSize += su::serializedSize(guidedDecodingParams.getThinkingEndTokenId());
     return totalSize;
 }
 

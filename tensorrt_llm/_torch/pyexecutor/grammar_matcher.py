@@ -70,30 +70,33 @@ class GrammarMatcherWrapper(GrammarMatcher):
         super().__init__()
         self._matcher = matcher
         self._guided_decoding_params = guided_decoding_params
-        self._end_thinking_token_id = 128799
-        self._is_thinking = True
+        self._end_thinking_token_id = guided_decoding_params.end_thinking_token_id
+        self._is_thinking = self._end_thinking_token_id is not None
         self._steps_after_thinking = 0
 
     def accept_token(self, token_id: int) -> bool:
         print(token_id)
-        if self._is_thinking:
-            if token_id == self._end_thinking_token_id:
-                self._is_thinking = False
-                self._steps_after_thinking = 0
-                return True
-            else:
-                return True
-        self._steps_after_thinking += 1
+        if self._end_thinking_token_id:
+            if self._is_thinking:
+                if token_id == self._end_thinking_token_id:
+                    self._is_thinking = False
+                    self._steps_after_thinking = 0
+                    return True
+                else:
+                    return True
+            self._steps_after_thinking += 1
         return self._matcher.accept_token(token_id)
 
     def rollback(self, num_tokens: int) -> None:
-        if self._is_thinking:
-            return
-        # cannot rollback more than steps_after_thinking
-        num_tokens_to_rollback = min(num_tokens, self._steps_after_thinking)
+        num_tokens_to_rollback = num_tokens
+        if self._end_thinking_token_id:
+            if self._is_thinking:
+                return
+            # cannot rollback more than steps_after_thinking
+            num_tokens_to_rollback = min(num_tokens, self._steps_after_thinking)
+            if num_tokens > self._steps_after_thinking:
+                self._is_thinking = True
         self._matcher.rollback(num_tokens_to_rollback)
-        if num_tokens > self._steps_after_thinking:
-            self._is_thinking = True
 
     def fill_next_token_bitmask(self, next_token_bitmask: torch.Tensor,
                                 index: int) -> None:
