@@ -87,13 +87,13 @@ class GrammarMatcherWrapper(GrammarMatcher):
         return self._matcher.accept_token(token_id)
 
     def rollback(self, num_tokens: int) -> None:
-        if not self._is_thinking:
+        if self._is_thinking:
             return
         # cannot rollback more than steps_after_thinking
         num_tokens_to_rollback = min(num_tokens, self._steps_after_thinking)
         self._matcher.rollback(num_tokens_to_rollback)
         if num_tokens > self._steps_after_thinking:
-            self._is_thinking = False
+            self._is_thinking = True
 
     def fill_next_token_bitmask(self, next_token_bitmask: torch.Tensor,
                                 index: int) -> None:
