@@ -46,7 +46,7 @@ std::optional<std::string> GuidedDecodingParams::getGuide() const
     return mGuide;
 }
 
-std::optional<std::int32_t GuidedDecodingParams::getThinkingEndTokenId() const
+std::optional<std::int32_t> GuidedDecodingParams::getThinkingEndTokenId() const
 {
     return mThinkingEndTokenId;
 }
