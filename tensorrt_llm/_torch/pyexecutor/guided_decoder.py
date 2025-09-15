@@ -250,9 +250,10 @@ class GuidedDecoder:
 
             self.num_advanced_tokens[slot] += 1
             if not matcher.is_terminated():
-                matcher.fill_next_token_bitmask(self.bitmask_host, offset)
-                self.token_mask_host[offset] = 1
-                self.num_guided_tokens[slot] += 1
+                if not matcher.is_thinking():
+                    matcher.fill_next_token_bitmask(self.bitmask_host, offset)
+                    self.token_mask_host[offset] = 1
+                    self.num_guided_tokens[slot] += 1
                 # Process draft tokens
                 for i, tid in enumerate(req.draft_tokens, 1):
                     accepted = matcher.accept_token(tid)
