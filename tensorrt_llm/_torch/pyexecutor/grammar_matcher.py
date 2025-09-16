@@ -66,35 +66,32 @@ class XGrammarMatcher(GrammarMatcher):
 
 
 class GrammarMatcherWrapper(GrammarMatcher):
-    def __init__(self, matcher: GrammarMatcher, guided_decoding_params: GuidedDecodingParams):
+    def __init__(self, matcher: GrammarMatcher, guidance_start_token_id: int):
         super().__init__()
         self._matcher = matcher
-        self._guided_decoding_params = guided_decoding_params
-        self._guidance_start_token_id = guided_decoding_params.guidance_start_token_id
-        self._guidance_started = self._guidance_start_token_id is None
+        self._guidance_start_token_id = guidance_start_token_id
+        self._guidance_started = False
         self._steps_after_guidance_start = 0
 
     def accept_token(self, token_id: int) -> bool:
-        if self._guidance_start_token_id:
-            if not self._guidance_started:
-                if token_id == self._guidance_start_token_id:
-                    self._guidance_started = True
-                    self._steps_after_guidance_start = 0
-                    return True
-                else:
-                    return True
-            self._steps_after_guidance_start += 1
+        if not self._guidance_started:
+            if token_id == self._guidance_start_token_id:
+                self._guidance_started = True
+                self._steps_after_guidance_start = 0
+                return True
+            else:
+                return True
+        self._steps_after_guidance_start += 1
         return self._matcher.accept_token(token_id)
 
     def rollback(self, num_tokens: int) -> None:
         num_tokens_to_rollback = num_tokens
-        if self._guidance_start_token_id:
-            if not self._guidance_started:
-                return
-            # cannot rollback more than _steps_after_guidance_start
-            num_tokens_to_rollback = min(num_tokens, self._steps_after_guidance_start)
-            if num_tokens > self._steps_after_guidance_start:
-                self._guidance_started = False
+        if not self._guidance_started:
+            return
+        # cannot rollback more than _steps_after_guidance_start
+        num_tokens_to_rollback = min(num_tokens, self._steps_after_guidance_start)
+        if num_tokens > self._steps_after_guidance_start:
+            self._guidance_started = False
         self._matcher.rollback(num_tokens_to_rollback)
 
     def fill_next_token_bitmask(self, next_token_bitmask: torch.Tensor,
@@ -115,7 +112,9 @@ class GrammarMatcherFactoryWrapper(GrammarMatcherFactory):
     def create(self,
                guided_decoding_params: GuidedDecodingParams) -> GrammarMatcher:
         matcher = self._factory.create(guided_decoding_params)
-        return GrammarMatcherWrapper(matcher, guided_decoding_params)
+        if guided_decoding_params.guidance_start_token_id:
+            return GrammarMatcherWrapper(matcher, guided_decoding_params.guidance_start_token_id)
+        return matcher
 
 class XGrammarMatcherFactory(GrammarMatcherFactory):
 
