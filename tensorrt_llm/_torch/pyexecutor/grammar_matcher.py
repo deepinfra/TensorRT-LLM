@@ -85,7 +85,6 @@ class GrammarMatcherWrapper(GrammarMatcher):
         return self._matcher.accept_token(token_id)
 
     def rollback(self, num_tokens: int) -> None:
-        num_tokens_to_rollback = num_tokens
         if not self._guidance_started:
             return
         # cannot rollback more than _steps_after_guidance_start
