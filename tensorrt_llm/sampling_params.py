@@ -30,8 +30,11 @@ class GuidedDecodingParams:
     guidance_start_token_id: Optional[int] = None
 
     def _validate(self):
+        exclude_fields = set(["guidance_start_token_id"])
         num_guides = 0
         for _field in fields(self):
+            if _field.name in exclude_fields:
+                continue
             num_guides += bool(getattr(self, _field.name))
         if num_guides > 1:
             raise ValueError(f"Only one guide can be used for a request, but got {num_guides}.")
