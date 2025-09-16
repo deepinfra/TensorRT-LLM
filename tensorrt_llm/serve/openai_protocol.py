@@ -98,6 +98,7 @@ class ResponseFormat(OpenAIBaseModel):
     ebnf: Optional[str] = None
     format: Optional[xgrammar.structural_tag.Format] = None
 
+    guidance_start_token_id: Optional[int] = None
 
 class DisaggregatedParams(OpenAIBaseModel):
     request_type: str
@@ -186,17 +187,18 @@ def _response_format_to_guided_decoding_params(
             raise ValueError(
                 "The 'schema' field is required when response_format.type is 'json'."
             )
-        return GuidedDecodingParams(json=response_format.schema)
+        return GuidedDecodingParams(json=response_format.schema, guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "json_object":
-        return GuidedDecodingParams(json_object=True)
+        return GuidedDecodingParams(json_object=True, guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "regex":
-        return GuidedDecodingParams(regex=response_format.regex)
+        return GuidedDecodingParams(regex=response_format.regex, guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "ebnf":
-        return GuidedDecodingParams(grammar=response_format.ebnf)
+        return GuidedDecodingParams(grammar=response_format.ebnf, guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "structural_tag":
         return GuidedDecodingParams(
             structural_tag=response_format.model_dump_json(by_alias=True,
-                                                           exclude_none=True))
+                                                           exclude_none=True),
+            guidance_start_token_id=response_format.guidance_start_token_id)
     else:
         raise ValueError(f"Unsupported response format: {response_format.type}")
 
