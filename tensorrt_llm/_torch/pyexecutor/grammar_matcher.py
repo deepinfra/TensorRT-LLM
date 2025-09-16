@@ -75,7 +75,6 @@ class GrammarMatcherWrapper(GrammarMatcher):
         self._steps_after_guidance_start = 0
 
     def accept_token(self, token_id: int) -> bool:
-        print(token_id)
         if self._guidance_start_token_id:
             if not self._guidance_started:
                 if token_id == self._guidance_start_token_id:
