@@ -241,8 +241,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
         final_usage_chunk = ChatCompletionStreamResponse(choices=[],
                                                          model=args.model,
                                                          usage=final_usage)
-        final_usage_data = final_usage_chunk.model_dump_json()
-        res.append(f"data: {final_usage_data}\n\n")
+        res.append(final_usage_chunk)
     return res
 
 
