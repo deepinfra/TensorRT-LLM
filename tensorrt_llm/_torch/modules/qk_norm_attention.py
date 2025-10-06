@@ -140,23 +140,23 @@ class QKNormRoPEAttention(Attention):
     """
 
     def __init__(
-        self,
-        *,
-        hidden_size: int,
-        num_attention_heads: int,
-        num_key_value_heads: int,
-        max_position_embeddings: int,
-        bias: bool,
-        pos_embd_params: Optional[PositionalEmbeddingParams] = None,
-        skip_rope: bool = False,
-        fuse_qk_norm_rope: bool = True,
-        layer_idx: Optional[int] = None,
-        dtype: torch.dtype = None,
-        dense_bias: Optional[bool] = None,
-        config: ModelConfig,
-        q_scaling: float = 1.0,
-        disable_deep_gemm: bool = False,
-        aux_stream: Optional[torch.cuda.Stream] = None,
+            self,
+            *,
+            hidden_size: int,
+            num_attention_heads: int,
+            num_key_value_heads: int,
+            max_position_embeddings: int,
+            bias: bool,
+            pos_embd_params: Optional[PositionalEmbeddingParams] = None,
+            skip_rope: bool = False,
+            fuse_qk_norm_rope: bool = True,
+            layer_idx: Optional[int] = None,
+            dtype: torch.dtype = None,
+            dense_bias: Optional[bool] = None,
+            config: ModelConfig,
+            q_scaling: float = 1.0,
+            disable_deep_gemm: bool = False,
+            aux_stream: Optional[torch.cuda.Stream] = torch.cuda.Stream(),
     ):
         self.pretrained_config = config.pretrained_config
 
@@ -191,8 +191,7 @@ class QKNormRoPEAttention(Attention):
                               eps=self.pretrained_config.rms_norm_eps,
                               dtype=self.pretrained_config.torch_dtype,
                               has_weights=True)
-        self.aux_stream = aux_stream if aux_stream is not None else torch.cuda.Stream(
-        )
+        self.aux_stream = aux_stream
         self.ln_events = [torch.cuda.Event(), torch.cuda.Event()]
 
     def apply_qk_norm(self, q, k):
