@@ -41,6 +41,7 @@ from transformers import PretrainedConfig
 from transformers import Glm4MoeConfig
 
 from tensorrt_llm._ipc_utils import can_access_peer
+from tensorrt_llm._torch.modules.qk_norm_attention import compute_yarn_parameters
 from tensorrt_llm._utils import get_sm_version
 from tensorrt_llm.functional import LayerNormType, PositionEmbeddingType
 from ..modules.attention import Attention
@@ -370,7 +371,7 @@ class DeepseekV3Gate(DeepSeekV3MoeRoutingMethod):
         topk_group: int,
         routed_scaling_factor: float,
         dtype: Optional[torch.dtype] = None,
-        fuse_routing_kernel: bool = True,
+        fuse_routing_kernel: bool = False,
         apply_routing: bool = False,
         moe_backend: str = 'CUTLASS',
     ):
@@ -640,10 +641,10 @@ class GLMAttention(Attention):
         self,
         model_config: ModelConfig[PretrainedConfig],
         layer_idx: Optional[int] = None,
-        fuse_qk_norm_rope: bool = True,
+        fuse_qk_norm_rope: bool = False,
         aux_stream: Optional[torch.cuda.Stream] = None,
     ):
-        config = model_config.pretrained_config
+        self.config = model_config.pretrained_config
 
         pos_embd_params=PositionalEmbeddingParams(
                             type=PositionEmbeddingType.yarn,
@@ -654,28 +655,28 @@ class GLMAttention(Attention):
         self.fuse_qk_norm_rope = fuse_qk_norm_rope
 
         super().__init__(
-            hidden_size=config.hidden_size,
-            num_attention_heads=config.num_attention_heads,
-            num_key_value_heads=config.num_key_value_heads,
-            max_position_embeddings=config.max_position_embeddings,
-            bias=config.attention_bias,
+            hidden_size=self.config.hidden_size,
+            num_attention_heads=self.config.num_attention_heads,
+            num_key_value_heads=self.config.num_key_value_heads,
+            max_position_embeddings=self.config.max_position_embeddings,
+            bias=self.config.attention_bias,
             pos_embd_params=pos_embd_params,
             rope_fusion=not self.
             fuse_qk_norm_rope,  # If fuse_qk_norm_rope is true, do not apply fused RoPE in attention OP, and self.rotary_emb will be skipped in the overridden apply_rope.
             layer_idx=layer_idx,
-            dtype=config.torch_dtype,
+            dtype=self.config.torch_dtype,
             dense_bias=False,
             config=model_config,
         )
-        self.use_qk_norm = config.use_qk_norm
+        self.use_qk_norm = self.config.use_qk_norm
         if self.use_qk_norm:
             self.q_norm = RMSNorm(hidden_size=self.head_dim,
                               eps=1e-6,
-                              dtype=config.torch_dtype,
+                              dtype=self.config.torch_dtype,
                               has_weights=True)
             self.k_norm = RMSNorm(hidden_size=self.head_dim,
                               eps=1e-6,
-                              dtype=config.torch_dtype,
+                              dtype=self.config.torch_dtype,
                               has_weights=True)
         self.aux_stream = aux_stream
         self.ln_events = [torch.cuda.Event(), torch.cuda.Event()]
@@ -701,12 +702,15 @@ class GLMAttention(Attention):
         return q, k
 
     def apply_qk_norm_rope(self, qkv, position_ids):
+        factor, low, high, attention_factor = compute_yarn_parameters(
+            self.pretrained_config)
         torch.ops.trtllm.fused_qk_norm_rope(
             qkv, self.num_heads, self.num_key_value_heads,
             self.num_key_value_heads, self.head_dim,
             self.q_norm.variance_epsilon, self.q_norm.weight,
-            self.k_norm.weight, self.pos_embd_params.rope.theta,
-            self.pos_embd_params.is_neox, position_ids.view(-1))
+            self.k_norm.weight,
+            self.pos_embd_params.rope.theta, self.pos_embd_params.is_neox,
+            position_ids.view(-1), factor, low, high, attention_factor)
         return qkv, None, None
 
     def apply_rope(self, q: torch.Tensor, k: Optional[torch.Tensor],
@@ -1284,7 +1288,9 @@ class Glm4MoeForCausalLM(DecoderModelForCausalLM[DeepseekV3Model,
             model_config._frozen = True
 
         super().__init__(model=DeepseekV3Model(model_config),
-                         model_config=model_config)
+                         config=model_config,
+                         hidden_size=model_config.pretrained_config.hidden_size,
+                         vocab_size=model_config.pretrained_config.vocab_size)
 
         self.model_nextn = 0
         if model_config.spec_config is not None and model_config.spec_config.spec_dec_mode.is_mtp(
