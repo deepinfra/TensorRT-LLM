@@ -648,7 +648,7 @@ class GLMAttention(Attention):
 
         pos_embd_params=PositionalEmbeddingParams(
                             type=PositionEmbeddingType.yarn,
-                            rope=RopeParams.from_config(config),
+                            rope=RopeParams.from_config(self.config),
                             is_neox=True,
                         )
 
