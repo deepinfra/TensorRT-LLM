@@ -155,6 +155,7 @@ class QKNormRoPEAttention(Attention):
         dense_bias: Optional[bool] = None,
         config: ModelConfig,
         q_scaling: float = 1.0,
+        aux_stream: Optional[torch.cuda.Stream] = torch.cuda.Stream(),
     ):
         self.pretrained_config = config.pretrained_config
 
@@ -188,7 +189,7 @@ class QKNormRoPEAttention(Attention):
                               eps=self.pretrained_config.rms_norm_eps,
                               dtype=self.pretrained_config.torch_dtype,
                               has_weights=True)
-        self.aux_stream = torch.cuda.Stream()
+        self.aux_stream = aux_stream
         self.ln_events = [torch.cuda.Event(), torch.cuda.Event()]
 
     def apply_qk_norm(self, q, k):
