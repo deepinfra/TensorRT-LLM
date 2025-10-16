@@ -891,7 +891,7 @@ class MTPWorker(nn.Module):
 
         # Strict acceptance
         else:
-            if False:
+            if True:
                 # Temporary buffer
                 target_tokens_cache = torch.zeros(batch_size *
                                                   (mtp_num_modules + 1),
