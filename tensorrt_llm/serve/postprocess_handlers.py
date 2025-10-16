@@ -69,26 +69,15 @@ def create_logprobs(token_ids: List[int], tokenizer: TransformersTokenizer,
                     logprobs: List[float] | TokenLogprobs,
                     top_logprobs: bool) -> ChatCompletionLogProbs:
     content: List[ChatCompletionLogProbsContent] = []
-    for token_id, logprob in zip(token_ids, logprobs):
-        logprob: float | dict[int, Logprob]
+    for logprob in logprobs:
+        logprob: dict[int, Logprob]
+        token_id, lp = list(logprob.items())[0]
         token = tokenizer.decode(token_id)
         chat_logprob = ChatCompletionLogProbsContent(
             token=token,
+            logprob=max(lp.logprob, -9999.0),
             bytes=list(token.encode("utf-8", errors="replace")),
         )
-        if isinstance(logprob, dict):
-            if token_id in logprob:
-                chat_logprob.logprob = max(logprob[token_id].logprob, -9999.0)
-                if top_logprobs:
-                    chat_logprob.top_logprobs = [
-                        ChatCompletionLogProbsContent(
-                            token=(tk := tokenizer.decode(tid)),
-                            logprob=max(logprob.logprob, -9999.0),
-                            bytes=list(tk.encode("utf-8", errors="replace")))
-                        for tid, logprob in logprob.items()
-                    ]
-        else:
-            chat_logprob.logprob = max(logprob, -9999.0)
         content.append(chat_logprob)
     chat_logprobs = ChatCompletionLogProbs(content=content)
     return chat_logprobs
