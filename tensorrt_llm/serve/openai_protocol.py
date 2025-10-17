@@ -203,7 +203,7 @@ def _response_format_to_guided_decoding_params(
                                     guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "structural_tag":
         return GuidedDecodingParams(
-            structural_tag=response_format.model_dump_json(by_alias=True,
+            structural_tag=response_format.format.model_dump_json(by_alias=True,
                                                            exclude_none=True),
             guidance_start_token_id=response_format.guidance_start_token_id)
     else:
