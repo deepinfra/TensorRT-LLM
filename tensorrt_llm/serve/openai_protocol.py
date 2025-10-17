@@ -203,7 +203,7 @@ def _response_format_to_guided_decoding_params(
                                     guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "structural_tag":
         return GuidedDecodingParams(
-            structural_tag=response_format.format.model_dump_json(by_alias=True,
+            structural_tag=response_format.model_dump_json(by_alias=True,
                                                            exclude_none=True),
             guidance_start_token_id=response_format.guidance_start_token_id)
     else:
@@ -622,7 +622,6 @@ class ChatCompletionRequest(OpenAIBaseModel):
             best_of=self.best_of,
             use_beam_search=self.use_beam_search,
             top_k=max(0, self.top_k), # web users sometimes pass in -1
-            top_k=self.top_k,
             top_p=(self.top_p if self.top_p is not None else 1.0),
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,

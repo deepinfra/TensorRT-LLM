@@ -156,7 +156,6 @@ def get_llm_args(model: str,
                  trust_remote_code: bool = False,
                  reasoning_parser: Optional[str] = None,
                  fail_fast_on_attention_window_too_large: bool = False,
-                 enable_chunked_prefill: bool = False,
                  **llm_args_extra_dict: Any):
 
     if gpus_per_node is None:
@@ -232,7 +231,6 @@ def get_llm_args(model: str,
         disable_overlap_scheduler,
         "fail_fast_on_attention_window_too_large":
         fail_fast_on_attention_window_too_large,
-        "enable_chunked_prefill": enable_chunked_prefill,
     }
 
     return llm_args, llm_args_extra_dict
