@@ -598,7 +598,7 @@ __global__ void group_idx_and_topk_idx_kernel(T* scores, T const* group_scores, 
 
     if (case_id < num_tokens)
     {
-        if (if_proceed_next_topk)
+        if (true)
         {
             for (int i = lane_id; i < topk; i += WARP_SIZE)
             {
