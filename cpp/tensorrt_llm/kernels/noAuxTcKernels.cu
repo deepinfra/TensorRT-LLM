@@ -589,7 +589,7 @@ __global__ void group_idx_and_topk_idx_kernel(T* scores, T const* group_scores, 
     }
     __syncthreads();
 
-    warp_topk::WarpSelect</*capability*/ WARP_SIZE, /*greater*/ true, T, int32_t, /* is_stable */ true> queue(
+    warp_topk::WarpSelect</*capability*/ 256, /*greater*/ true, T, int32_t, /* is_stable */ true> queue(
         (int32_t) topk, -INFINITY);
 
     int count_equalto_topkth_group = 0;
