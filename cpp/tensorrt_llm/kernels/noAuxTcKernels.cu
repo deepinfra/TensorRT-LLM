@@ -492,6 +492,7 @@ __device__ void topk_with_k2(T* output, T const* input, cg::thread_block_tile<32
     if (count_max1 == 1)
     {
         largest = (largest == max1) ? second_largest : largest;
+        __syncwarp();
         max2 = cg::reduce(tile, largest, cg::greater<T>());
     }
 
