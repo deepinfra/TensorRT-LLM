@@ -137,7 +137,7 @@ class Glm4MoE(nn.Module):
             topk_group=config.topk_group,
             routed_scaling_factor=config.routed_scaling_factor,
             dtype=dtype,
-            fuse_routing_kernel=False,
+            fuse_routing_kernel=True,
             apply_routing=False,
             moe_backend=model_config.moe_backend)
         self.experts = create_moe(

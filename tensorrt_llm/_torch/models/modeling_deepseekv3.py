@@ -622,6 +622,7 @@ class Deepseekv3RoutingImpl():
             topk_values, topk_indices = torch.ops.trtllm.noaux_tc_op(
                 scores, scores_with_bias, n_group, self.topk_group, self.top_k,
                 self.routed_scaling_factor)
+            print(topk_values, topk_indices)
             return topk_values, topk_indices
 
     def apply(
