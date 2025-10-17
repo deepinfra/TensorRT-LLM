@@ -749,7 +749,7 @@ class OpenAIServer:
             try:
                 async for res in promise:
                     pp_results = res.outputs[0]._postprocess_result if self.postproc_worker_enabled else post_processor(res, args)
-                    await self._extract_metrics(res)
+                    await self._extract_metrics(res, raw_request)
                     for pp_res in pp_results:
                         for choice in pp_res.choices:
                             if choice.finish_reason is not None:
@@ -1014,7 +1014,7 @@ class OpenAIServer:
                         pp_result = post_processor(output, args)
                     else:
                         pp_result = output.outputs[0]._postprocess_result
-                    await self._extract_metrics(output)
+                    await self._extract_metrics(output, raw_request)
                     for pp_res in pp_result:
                         for choice in pp_res.choices:
                             if choice.finish_reason is not None:

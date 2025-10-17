@@ -137,7 +137,6 @@ def _signal_handler_cleanup_child(signum, frame):
     sys.exit(128 + signum)
 
 
-<<<<<<< HEAD
 def get_llm_args(
         model: str,
         served_model_name: str,
@@ -166,6 +165,7 @@ def get_llm_args(
         enable_chunked_prefill: bool = False,
         guided_decoding_backend: Optional[str] = None,
         **llm_args_extra_dict: Any):
+
 
     if gpus_per_node is None:
         gpus_per_node = device_count()
@@ -241,7 +241,6 @@ def get_llm_args(
         "fail_fast_on_attention_window_too_large":
         fail_fast_on_attention_window_too_large,
         "otlp_traces_endpoint": otlp_traces_endpoint,
-        "enable_chunked_prefill": enable_chunked_prefill,
     }
 
     return llm_args, llm_args_extra_dict
