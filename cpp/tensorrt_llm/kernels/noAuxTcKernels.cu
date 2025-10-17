@@ -553,42 +553,9 @@ __global__ void group_idx_and_topk_idx_kernel(T* scores, T const* group_scores, 
     T* s_topk_value = reinterpret_cast<T*>(s_topk_idx + NUM_WARPS_PER_BLOCK * topk) + warp_id * topk;
     s_topk_idx += warp_id * topk;
 
-    T value = cuda::std::numeric_limits<T>::min();
-    T topk_group_value = cuda::std::numeric_limits<T>::min();
-    int32_t num_equalto_topkth_group;
-
 #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900))
     asm volatile("griddepcontrol.wait;"); // I think all prolog can be put before acqbulk because it's ptr arithmetic
 #endif
-
-    if (case_id < num_tokens)
-    {
-        // calculate group_idx
-        int32_t target_num_min = WARP_SIZE - n_group + topk_group;
-        if (lane_id < n_group
-            && (isfinite(cuda_cast<float, T>(group_scores[lane_id])))) // The check is necessary to avoid abnormal input
-        {
-            value = group_scores[lane_id];
-        }
-
-        int count_equal_to_top_value = WARP_SIZE - n_group;
-        int pre_count_equal_to_top_value = 0;
-        // Use loop to find the largset top_group
-        while (count_equal_to_top_value < target_num_min)
-        {
-            __syncwarp(); // Ensure all threads have valid data before reduction
-            topk_group_value = cg::reduce(tile, value, cg::greater<T>());
-            if (value == topk_group_value)
-            {
-                value = cuda::std::numeric_limits<T>::min();
-            }
-            pre_count_equal_to_top_value = count_equal_to_top_value;
-            count_equal_to_top_value
-                = __popc(__ballot_sync(FULL_WARP_MASK, (value == cuda::std::numeric_limits<T>::min())));
-        }
-        num_equalto_topkth_group = target_num_min - pre_count_equal_to_top_value;
-    }
-    __syncthreads();
 
     warp_topk::WarpSelect</*capability*/ WARP_SIZE, /*greater*/ true, T, int32_t, /* is_stable */ true> queue(
         (int32_t) topk, -INFINITY);
@@ -597,27 +564,15 @@ __global__ void group_idx_and_topk_idx_kernel(T* scores, T const* group_scores, 
     bool if_proceed_next_topk = (topk_group_value != cuda::std::numeric_limits<T>::min());
     if (case_id < num_tokens && if_proceed_next_topk)
     {
-        for (int i_group = 0; i_group < n_group; i_group++)
+        for (int32_t i = lane_id; i < align_num_experts_per_group; i += WARP_SIZE)
         {
-            if ((group_scores[i_group] > topk_group_value)
-                || ((group_scores[i_group] == topk_group_value)
-                    && (count_equalto_topkth_group < num_equalto_topkth_group)))
-            {
-                int32_t offset = i_group * num_experts_per_group;
-                for (int32_t i = lane_id; i < align_num_experts_per_group; i += WARP_SIZE)
-                {
-                    T candidates
-                        = (i < num_experts_per_group) && isfinite(cuda_cast<float, T>(scores_with_bias[offset + i]))
-                        ? scores_with_bias[offset + i]
-                        : cuda::std::numeric_limits<T>::min();
-                    queue.add(candidates, offset + i);
-                }
-                if (group_scores[i_group] == topk_group_value)
-                {
-                    count_equalto_topkth_group++;
-                }
-            }
+            T candidates
+                = (i < num_experts_per_group) && isfinite(cuda_cast<float, T>(scores_with_bias[i]))
+                ? scores_with_bias[i]
+                : cuda::std::numeric_limits<T>::min();
+            queue.add(candidates, i);
         }
+     
         queue.done();
         __syncwarp();
         // Get the topk_idx
@@ -675,21 +630,6 @@ void invokeNoAuxTc(T* scores, T* group_scores, T* topk_values, IdxT* topk_indice
     int64_t const topk, double const routed_scaling_factor, cudaStream_t const stream)
 {
     int64_t num_cases = num_tokens * n_group;
-    int64_t topk_with_k2_num_blocks = (num_cases - 1) / NUM_WARPS_PER_BLOCK + 1;
-    auto* kernel_instance1 = &topk_with_k2_kernel<T>;
-    cudaLaunchConfig_t config;
-    config.gridDim = topk_with_k2_num_blocks;
-    config.blockDim = BLOCK_SIZE;
-    config.dynamicSmemBytes = 0;
-    config.stream = stream;
-    cudaLaunchAttribute attrs[1];
-    attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
-    attrs[0].val.programmaticStreamSerializationAllowed = tensorrt_llm::common::getEnvEnablePDL();
-    config.numAttrs = 1;
-    config.attrs = attrs;
-    cudaLaunchKernelEx(&config, kernel_instance1, group_scores, scores_with_bias, num_tokens, num_cases, n_group,
-        num_experts / n_group);
-    sync_check_cuda_error(stream);
 
     int64_t topk_with_k_group_num_blocks = (num_tokens - 1) / NUM_WARPS_PER_BLOCK + 1;
     size_t dynamic_smem_in_bytes = warp_topk::calc_smem_size_for_block_wide<T, int32_t>(NUM_WARPS_PER_BLOCK, topk);
