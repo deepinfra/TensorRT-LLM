@@ -561,8 +561,7 @@ __global__ void group_idx_and_topk_idx_kernel(T* scores, T const* group_scores, 
         (int32_t) topk, -INFINITY);
 
     int count_equalto_topkth_group = 0;
-    bool if_proceed_next_topk = (topk_group_value != cuda::std::numeric_limits<T>::min());
-    if (case_id < num_tokens && if_proceed_next_topk)
+    if (case_id < num_tokens)
     {
         for (int32_t i = lane_id; i < align_num_experts_per_group; i += WARP_SIZE)
         {
@@ -582,7 +581,7 @@ __global__ void group_idx_and_topk_idx_kernel(T* scores, T const* group_scores, 
     // Load the valid score value
     // Calculate the summation
     float topk_sum = 1e-20;
-    if (case_id < num_tokens && if_proceed_next_topk)
+    if (case_id < num_tokens)
     {
         for (int i = lane_id; i < warp_topk::round_up_to_multiple_of<WARP_SIZE>(topk); i += WARP_SIZE)
         {
@@ -634,10 +633,12 @@ void invokeNoAuxTc(T* scores, T* group_scores, T* topk_values, IdxT* topk_indice
     int64_t topk_with_k_group_num_blocks = (num_tokens - 1) / NUM_WARPS_PER_BLOCK + 1;
     size_t dynamic_smem_in_bytes = warp_topk::calc_smem_size_for_block_wide<T, int32_t>(NUM_WARPS_PER_BLOCK, topk);
     auto* kernel_instance2 = &group_idx_and_topk_idx_kernel<T, IdxT>;
+    cudaLaunchConfig_t config;
     config.gridDim = topk_with_k_group_num_blocks;
     config.blockDim = BLOCK_SIZE;
     config.dynamicSmemBytes = dynamic_smem_in_bytes;
     config.stream = stream;
+    cudaLaunchAttribute attrs[1];
     attrs[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
     attrs[0].val.programmaticStreamSerializationAllowed = tensorrt_llm::common::getEnvEnablePDL();
     config.numAttrs = 1;
