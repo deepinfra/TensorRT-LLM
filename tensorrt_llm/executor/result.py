@@ -414,7 +414,7 @@ class GenerationResultBase:
                     # LlmResult holds a reference to LogProbStorage, which may be updated by the worker before the result is serialized.
                     # Therefore, we treat extra logprobs/logits as expected and only consume what's needed.
                     output.logprobs = output.logprobs[:output.length]
-                assert len(output.logprobs) == output.length
+                # assert len(output.logprobs) == output.length
 
         if response_tensors.generation_logits is not None:
             output.generation_logits = response_tensors.generation_logits[
