@@ -1352,6 +1352,10 @@ class PyTorchModelEngine(ModelEngine):
                     prompt_lengths.append(1 + self.runtime_draft_len)
                 else:
                     prompt_lengths.append(request.py_prompt_len)
+                temperatures.extend([get_request_temperature(request)] * (self.max_draft_len + 1))
+                top_k.extend([get_request_top_k(request)] * (self.max_draft_len + 1))
+                top_p.extend([get_request_top_p(request)] * (self.max_draft_len + 1))
+                min_p.extend([get_request_min_p(request)] * (self.max_draft_len + 1))
 
         for request in first_draft_requests:
             request_ids.append(request.py_request_id)
