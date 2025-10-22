@@ -268,6 +268,8 @@ class CompletionRequest(OpenAIBaseModel):
     # doc: end-completion-extra-params
 
     def to_sampling_params(self, vocab_size: int = 32000) -> SamplingParams:
+        self.logprobs=0
+        self.temperature = 1.0
         sampling_params = SamplingParams(
             best_of=self.best_of,
             frequency_penalty=self.frequency_penalty,
@@ -599,6 +601,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
                            vocab_size: int = 32000,
                            gather_generation_logits: bool = False,
                            backend: Optional[str] = None) -> SamplingParams:
+        self.logprobs=0
+        self.temperature = 1.0
         sampling_params = SamplingParams(
             frequency_penalty=self.frequency_penalty,
             max_tokens=self.max_completion_tokens,
