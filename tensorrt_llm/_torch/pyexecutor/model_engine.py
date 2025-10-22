@@ -1445,7 +1445,10 @@ class PyTorchModelEngine(ModelEngine):
             top_k.extend([get_request_top_k(request)] * (self.max_draft_len + 1))
             top_p.extend([get_request_top_p(request)] * (self.max_draft_len + 1))
             min_p.extend([get_request_min_p(request)] * (self.max_draft_len + 1))
-
+        print("temperatures", len(temperatures))
+        print("generation_requests", len(generation_requests))
+        print("first_draft_requests", len(first_draft_requests))
+        print("extend_requests", len(extend_requests))
         previous_batch_len = len(previous_batch_indices)
 
         def previous_seq_slots_device():
