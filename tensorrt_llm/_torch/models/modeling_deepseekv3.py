@@ -583,10 +583,6 @@ class Deepseekv3RoutingImpl():
                 )
 
         if not self.is_fused:
-            topk_values, topk_indices = torch.ops.trtllm.noaux_tc_op(
-                scores, scores_with_bias, n_group, self.topk_group, self.top_k,
-                self.routed_scaling_factor)
-            print(topk_values, topk_indices)
             group_scores = torch.sum(torch.topk(
                 scores_with_bias.view(scores_shape[:-1] +
                                       [n_group, scores_shape[-1] // n_group]),
@@ -621,13 +617,11 @@ class Deepseekv3RoutingImpl():
                                                    k=self.top_k,
                                                    dim=-1,
                                                    largest=True)
-            print(topk_values, topk_indices)
             return topk_values, topk_indices
         else:
             topk_values, topk_indices = torch.ops.trtllm.noaux_tc_op(
                 scores, scores_with_bias, n_group, self.topk_group, self.top_k,
                 self.routed_scaling_factor)
-            print(topk_values, topk_indices)
             return topk_values, topk_indices
 
     def apply(

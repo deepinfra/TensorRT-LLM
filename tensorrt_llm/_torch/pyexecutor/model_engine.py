@@ -1310,10 +1310,10 @@ class PyTorchModelEngine(ModelEngine):
                               past_seen_token_num + 1 + num_draft_tokens)))
                 num_cached_tokens_per_seq.append(past_seen_token_num)
 
-                temperatures.extend([get_request_temperature(request)] * (num_draft_tokens + 1))
-                top_k.extend([get_request_top_k(request)] * (num_draft_tokens + 1))
-                top_p.extend([get_request_top_p(request)] * (num_draft_tokens + 1))
-                min_p.extend([get_request_min_p(request)] * (num_draft_tokens + 1))
+                temperatures.extend([get_request_temperature(request)] * (self.max_draft_len + 1))
+                top_k.extend([get_request_top_k(request)] * (self.max_draft_len + 1))
+                top_p.extend([get_request_top_p(request)] * (self.max_draft_len + 1))
+                min_p.extend([get_request_min_p(request)] * (self.max_draft_len + 1))
                 # update batch index
                 request.py_batch_idx = request.py_seq_slot
             else:
