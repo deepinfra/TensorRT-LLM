@@ -6,7 +6,6 @@ import torch
 from ..._utils import nvtx_range
 from ...bindings.executor import GuidedDecodingConfig
 from ...logger import logger
-from ..hostfunc import hostfunc
 from .grammar_matcher import (GrammarMatcher, GrammarMatcherFactory, GrammarMatcherFactoryWrapper, LLGuidanceMatcherFactory,
                               XGrammarMatcherFactory)
 from .llm_request import LlmRequest
