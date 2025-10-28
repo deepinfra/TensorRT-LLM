@@ -11,7 +11,7 @@ from tensorrt_llm._torch.models.modeling_qwen3 import compute_yarn_parameters
 from ..modules.attention import Attention
 
 from tensorrt_llm._ipc_utils import can_access_peer
-from tensorrt_llm._utils import get_sm_version, is_sm_100f
+from tensorrt_llm._utils import get_sm_version
 from tensorrt_llm.functional import PositionEmbeddingType
 from tensorrt_llm.models.modeling_utils import QuantConfig
 from tensorrt_llm.quantization.mode import QuantAlgo
@@ -935,7 +935,6 @@ class Glm4MoeForCausalLM(SpecDecOneEngineForCausalLM[Glm4Model,
                 r'\1w1\2',
             })
 
-    def post_load_weights(self):
         all_named_modules = dict(self.model.named_modules())
         for name, module in tqdm(all_named_modules.items(),
                                  desc="Post loading weights"):
@@ -943,7 +942,7 @@ class Glm4MoeForCausalLM(SpecDecOneEngineForCausalLM[Glm4Model,
                 continue
             else:
                 if self.model_config.quant_config.layer_quant_mode.has_fp8_block_scales(
-                ) and is_sm_100f() and hasattr(module, "weight_scale"):
+                ) and hasattr(module, "weight_scale"):
                     weight, weight_scale = resmooth_to_fp8_e8m0(
                         module.weight, module.weight_scale)
                     transfromed_scale = transform_sf_into_required_layout(
