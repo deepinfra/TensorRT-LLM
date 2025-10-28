@@ -7,6 +7,9 @@ from torch import nn
 from tqdm import tqdm
 from transformers import PretrainedConfig
 
+from tensorrt_llm._torch.models.modeling_qwen3 import compute_yarn_parameters
+from ..modules.attention import Attention
+
 from tensorrt_llm._ipc_utils import can_access_peer
 from tensorrt_llm._utils import get_sm_version, is_sm_100f
 from tensorrt_llm.functional import PositionEmbeddingType
@@ -26,7 +29,6 @@ from ..modules.fused_moe import MoEWeightLoadingMode, create_moe
 from ..modules.gated_mlp import GatedMLP
 from ..modules.linear import Linear, TensorParallelMode
 from ..modules.multi_stream_utils import maybe_execute_in_parallel
-from ..modules.qk_norm_attention import QKNormRoPEAttention
 from ..modules.rms_norm import RMSNorm
 from ..speculative import SpecMetadata
 from ..utils import AuxStreamType, EventType, Fp4QuantizedTensor
@@ -36,8 +38,7 @@ from .modeling_speculative import SpecDecOneEngineForCausalLM
 from .modeling_utils import (DecoderModel, EagerFusionConfig,
                              _load_weights_impl, register_auto_model)
 
-
-class Glm4Attention(QKNormRoPEAttention):
+class Glm4Attention(Attention):
 
     def __init__(
         self,
@@ -45,6 +46,9 @@ class Glm4Attention(QKNormRoPEAttention):
         layer_idx: Optional[int] = None,
     ):
         config = model_config.pretrained_config
+        self.pretrained_config = config
+        self.fuse_qk_norm_rope = False
+
         pos_embd_params = PositionalEmbeddingParams(
             type=PositionEmbeddingType.yarn,
             rope=RopeParams.from_config(config),
@@ -57,13 +61,67 @@ class Glm4Attention(QKNormRoPEAttention):
             max_position_embeddings=config.max_position_embeddings,
             bias=config.attention_bias,
             pos_embd_params=pos_embd_params,
-            fuse_qk_norm_rope=False,
+            rope_fusion=not self.fuse_qk_norm_rope,  # If fuse_qk_norm_rope is true, do not apply fused RoPE in attention OP, and self.rotary_emb will be skipped in the overridden apply_rope.
             layer_idx=layer_idx,
             dtype=config.torch_dtype,
             dense_bias=False,
             config=model_config,
         )
 
+        self.q_norm = RMSNorm(hidden_size=self.head_dim,
+                              eps=1e-6,
+                              dtype=config.torch_dtype,
+                              has_weights=True)
+        self.k_norm = RMSNorm(hidden_size=self.head_dim,
+                              eps=1e-6,
+                              dtype=config.torch_dtype,
+                              has_weights=True)
+        self.aux_stream = torch.cuda.Stream()
+        self.ln_events = [torch.cuda.Event(), torch.cuda.Event()]
+
+    def apply_qk_norm(self, q, k):
+
+        def q_l2norm():
+            return self.q_norm(q.reshape(-1, self.head_dim)).reshape(
+                -1, self.q_size)
+
+        def k_l2norm():
+            return self.k_norm(k.reshape(-1, self.head_dim)).reshape(
+                -1, self.kv_size)
+
+        q, k = maybe_execute_in_parallel(
+            q_l2norm,
+            k_l2norm,
+            self.ln_events[0],
+            self.ln_events[1],
+            self.aux_stream,
+        )
+
+        return q, k
+
+    def apply_qk_norm_rope(self, qkv, position_ids):
+        factor, low, high, attention_factor = compute_yarn_parameters(
+            self.pretrained_config)
+        torch.ops.trtllm.fused_qk_norm_rope(
+            qkv, self.num_heads, self.num_key_value_heads,
+            self.num_key_value_heads, self.head_dim,
+            self.q_norm.variance_epsilon, self.q_norm.weight,
+            self.k_norm.weight,
+            self.pos_embd_params.rope.theta, self.pos_embd_params.is_neox,
+            position_ids.view(-1), factor, low, high, attention_factor)
+        return qkv, None, None
+
+    def apply_rope(self, q: torch.Tensor, k: Optional[torch.Tensor],
+                   v: Optional[torch.Tensor], position_ids: torch.Tensor):
+        # Qwen3 applies QK norm before RoPE.
+        if not self.fuse_qk_norm_rope:
+            q, k, v = self.split_qkv(q, k, v)
+            q, k = self.apply_qk_norm(q, k)
+            return super().apply_rope(q, k, v, position_ids)
+
+        assert k is None and v is None, "The input should be a concatenated qkv tensor to apply_qk_norm_rope"
+        qkv = q
+        return self.apply_qk_norm_rope(qkv, position_ids)
 
 class Glm4MoE(nn.Module):
 
