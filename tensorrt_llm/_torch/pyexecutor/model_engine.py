@@ -1472,7 +1472,6 @@ class PyTorchModelEngine(ModelEngine):
                         range(past_seen_token_num,
                               past_seen_token_num + 1 + num_draft_tokens)))
                 num_cached_tokens_per_seq.append(past_seen_token_num)
-                request_ids.append(request.py_request_id)
                 temperatures.extend([get_request_temperature(request)] * (num_draft_tokens + 1))
                 top_k.extend([get_request_top_k(request)] * (num_draft_tokens + 1))
                 top_p.extend([get_request_top_p(request)] * (num_draft_tokens + 1))
