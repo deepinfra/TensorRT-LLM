@@ -233,7 +233,7 @@ class MTPSampler(TorchSampler):
         next_draft_tokens: torch.Tensor
         new_tokens_lens: torch.Tensor
         max_total_draft_tokens: torch.Tensor
-        logprobs: torch.Tensor
+        log_probs: torch.Tensor
 
     def create_store(self) -> Store:
         num_tokens, seq_slots, _ = self.NEW_TOKENS_SHAPE
@@ -245,7 +245,7 @@ class MTPSampler(TorchSampler):
             next_draft_tokens=int_tensor((seq_slots, draft_len)),
             new_tokens_lens=int_tensor((seq_slots, )),
             max_total_draft_tokens=int_tensor((seq_slots, draft_len)),
-            logprobs=float_tensor(self.NEW_TOKENS_SHAPE),
+            log_probs=float_tensor(self.NEW_TOKENS_SHAPE),
         )
 
     def _request_common_handling(self, request: LlmRequest,
