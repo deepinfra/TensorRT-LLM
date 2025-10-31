@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import repeat
-from typing import Any, Callable, List, Optional, TypeVar, cast
+from typing import Any, Callable, List, Optional, TypeVar, cast, Literal
 
 import torch
 import torch.nn.functional as F

@@ -412,10 +412,6 @@ class ChoiceWithAlias(click.Choice):
                 default=0,
                 help="Size of the host cache in bytes. "
                 "Set to 0 to disable host cache. ")
-@click.option("--enable_chunked_prefill",
-              type=bool,
-              default=True,
-              help="Flag to control chunked prefill. ")
 @click.option("--guided_decoding_backend",
               type=str,
               default=None,
@@ -470,7 +466,6 @@ class ChoiceWithAlias(click.Choice):
     help=
     "Exit with runtime error when attention window is too large to fit even a single sequence in the KV cache."
 )
-<<<<<<< HEAD
 @click.option("--otlp_traces_endpoint",
               type=str,
               default=None,
@@ -532,7 +527,6 @@ def serve(
         free_gpu_memory_fraction=kv_cache_free_gpu_memory_fraction,
         event_buffer_max_size=event_buffer_max_size,
         host_cache_size=host_cache_size,
-        enable_chunked_prefill=enable_chunked_prefill,
         guided_decoding_backend=guided_decoding_backend,
         disable_overlap_scheduler=disable_overlap_scheduler,
         num_postprocess_workers=num_postprocess_workers,
