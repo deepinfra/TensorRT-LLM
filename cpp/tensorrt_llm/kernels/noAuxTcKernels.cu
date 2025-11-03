@@ -21,6 +21,7 @@
 #include "tensorrt_llm/kernels/noAuxTcKernels.h"
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
+#include <math.h>
 
 namespace cg = cooperative_groups;
 using namespace tensorrt_llm::common;
@@ -76,7 +77,7 @@ __global__ void deepseek_v3_topk_kernel(InputT* scores, OutputT* topkValues, Idx
     // note that for invalid scores, we simply use a negative value:
     // they work well even with the compacted format used in topK, and
     // sigmoid / bias activated scores cannot be negative
-    static constexpr float invalidScoreFloat = -1.F;
+    static constexpr float invalidScoreFloat = -INFINITY
     const OutputT invalidScore = OutputT{invalidScoreFloat};
 
     // load bias already; each warp represents one expert group
