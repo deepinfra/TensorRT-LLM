@@ -304,8 +304,6 @@ class PyTorchModelEngine(ModelEngine):
             ) or self.model_is_wrapped
             self.max_draft_len = spec_config.max_draft_len
 
-            self.max_total_draft_tokens = spec_config.max_total_draft_tokens
-
             self.temperatures_cuda = torch.empty((self.batch_size * (self.max_draft_len + 1), ),
                                                dtype=torch.float,
                                                device='cuda')
