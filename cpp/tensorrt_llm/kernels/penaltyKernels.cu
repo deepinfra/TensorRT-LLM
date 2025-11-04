@@ -175,13 +175,16 @@ __global__ void batchApplyPenalty(T const* const* inputLogits, T* outputLogits, 
             if (accumulateVocab)
             {
                 SizeType32 numOccurences = penaltyWorkspace[index];
-                if (numOccurences > 0)
+                if (numOccurences != 0)
                 {
                     // Repetition
                     if (repetitionPenalties != nullptr)
                     {
                         logit = logit < 0.0f ? logit * repetitionPenalty : logit / repetitionPenalty;
                     }
+                }
+                if (numOccurences > 0)
+                {
                     // Presence
                     if (presencePenalties != nullptr)
                     {
