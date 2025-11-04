@@ -152,7 +152,6 @@ class PyTorchModelEngine(ModelEngine):
         model: Optional[torch.nn.Module] = None,
     ):
 
-        assert llm_args is not None, "llm_args must be provided for PyTorchModelEngine"
         self.forward_pass_callable = None
         torch.manual_seed(0)
         self.ub_buffers = None
