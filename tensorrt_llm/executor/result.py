@@ -401,8 +401,7 @@ class GenerationResultBase:
             #     response_tensors.log_probs[src_idx]
             # ), (f"_last_logprobs_len ({output._last_logprobs_len}) > log_probs length ("
             #     f"{len(response_tensors.log_probs[src_idx])})")
-            output.logprobs += response_tensors.log_probs[src_idx][
-                output._last_logprobs_len:]
+            output.logprobs += response_tensors.log_probs[src_idx]
             # overcome some WAR in the cpp executor
             if finish_reasons[src_idx] != tllm.FinishReason.CANCELLED:
                 # Check if logprobs is a list (not a dict or other structure)
