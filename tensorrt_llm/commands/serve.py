@@ -28,7 +28,6 @@ from tensorrt_llm.llmapi import (BuildConfig, CapacitySchedulerPolicy,
                                  SchedulerConfig, CudaGraphConfig)
 from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
                                               MetadataServerConfig, ServerRole,
-                                              extract_disagg_cluster_config,
                                               parse_disagg_config_file,
                                               parse_metadata_server_config_file)
 from tensorrt_llm.llmapi.llm_utils import update_llm_args_with_extra_dict
