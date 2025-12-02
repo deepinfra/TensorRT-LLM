@@ -253,7 +253,7 @@ class MTPSampler(TorchSampler):
             new_tokens_lens=int_tensor((seq_slots, )),
             max_total_draft_tokens=int_tensor(
                 (seq_slots, args.max_total_draft_tokens)),
-            log_probs=float_tensor(max_tokens, seq_slots, self.max_beam_width),
+            log_probs=float_tensor((max_tokens, seq_slots, self.max_beam_width)),
         )
 
     def _request_common_handling(self, request: LlmRequest,
