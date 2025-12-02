@@ -21,7 +21,7 @@ except ModuleNotFoundError:
 
 
 from .._ray_utils import unwrap_ray_errors
-from .._utils import mpi_disabled, nvtx_range_debug, ray_use_rpc
+from .._utils import mpi_disabled, nvtx_range_debug
 from tensorrt_llm.metrics.enums import RequestKVCacheStats
 from .._utils import nvtx_range_debug
 from ..bindings import executor as tllm
