@@ -20,7 +20,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cached_property
 from itertools import repeat
-from typing import Any, Callable, Generic, List, Optional, Type, TypeVar, cast
+
+from typing import Any, Callable, Generic, List, Optional, Type, TypeVar, cast, Literal
 
 import numpy as np
 import torch
