@@ -32,7 +32,7 @@ from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
                                               extract_disagg_cluster_config,
                                               parse_disagg_config_file,
                                               parse_metadata_server_config_file)
-from tensorrt_llm.llmapi.llm_args import CudaGraphConfig
+from tensorrt_llm.llmapi.llm_args import CudaGraphConfig, AttentionDpConfig
 from tensorrt_llm.llmapi.llm_utils import update_llm_args_with_extra_dict
 from tensorrt_llm.llmapi.mpi_session import find_free_ipc_addr
 from tensorrt_llm.llmapi.reasoning_parser import ReasoningParserFactory
