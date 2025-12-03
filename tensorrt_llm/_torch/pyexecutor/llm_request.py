@@ -2,7 +2,6 @@ from copy import copy, deepcopy
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Dict, List, Optional, TypeAlias, Union
-import copy
 
 import torch
 
