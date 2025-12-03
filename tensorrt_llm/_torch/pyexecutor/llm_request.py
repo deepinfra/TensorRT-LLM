@@ -2,7 +2,6 @@ from copy import copy, deepcopy
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any, Dict, List, Optional, TypeAlias, Union
-import copy
 
 import torch
 
@@ -615,7 +614,7 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
 
         # Performs a deep copy of py_result._log_probs to eliminate race conditions that may occur between IPC communication and the overriding of newly generated log_probs in streaming mode.
         if self.streaming and self.py_result.log_probs and self.sampling_config.beam_width <= 1:
-            py_result = copy(self.py_result)
+            py_result = copy.copy(self.py_result)
             py_result._log_probs = deepcopy(self.py_result._log_probs)
 
             for log_prob in self.py_result.log_probs:
