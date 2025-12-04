@@ -231,7 +231,8 @@ class GuidedDecoder:
                         req.guided_decoding_params)
                     self.grammar_matchers[slot] = matcher
                 except Exception as e:
-                    logger.error(f"Grammar matcher initialization failed with params: {req.guided_decoding_params}")
+                    logger.error(f"Grammar matcher initialization failed with params: {req.guided_decoding_params.guide}")
+                    continue
 
             if matcher_advance:
                 matcher = self.grammar_matchers[slot]
@@ -368,7 +369,8 @@ class GuidedDecoder:
                 raise ValueError(
                     f"Failed to rollback: num_advanced_tokens={self.num_advanced_tokens[slot]}, num_accepted_tokens={num_accepted_tokens}, num_rollback_tokens={num_rollback_tokens}"
                 )
-            self.grammar_matchers[slot].rollback(num_rollback_tokens)
+            if self.grammar_matchers[slot]:
+                self.grammar_matchers[slot].rollback(num_rollback_tokens)
 
     def _rollback_draft_tokens(self, requests: GuidedRequests) -> None:
         """Rollback the grammar matcher for draft tokens.
