@@ -224,12 +224,17 @@ class GuidedDecoder:
                 continue
 
             if matcher_init:
-                matcher = self.grammar_matcher_factory.create(
-                    req.guided_decoding_params)
-                self.grammar_matchers[slot] = matcher
+                try:
+                    matcher = self.grammar_matcher_factory.create(
+                        req.guided_decoding_params)
+                    self.grammar_matchers[slot] = matcher
+                except Exception as e:
+                    logger.error(f"Grammar matcher initialization failed with params: {req.guided_decoding_params}")
 
             if matcher_advance:
                 matcher = self.grammar_matchers[slot]
+                if not matcher:
+                    continue
                 # The last new token must be acceptable unless the matcher is terminated:
                 # 1. For the main model loop, when overlap scheduler is enabled, the matcher may have accepted the EOS token in the draft tokens at the previous iteration.
                 # 2. For the draft model loop, the matcher may have accepted the EOS token at the previous drafting iteration.
