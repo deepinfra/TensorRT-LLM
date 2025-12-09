@@ -415,23 +415,6 @@ class ChoiceWithAlias(click.Choice):
               default=0.9,
               help="Free GPU memory fraction reserved for KV Cache, "
               "after allocating model weights and buffers.")
-@click.option("--event_buffer_max_size",
-              type=int,
-              default=1000000,
-              help="Maximum size of the event buffer. If set to 0, the event buffer will not be used.")
-@click.option("--host_cache_size",
-                type=int,
-                default=0,
-                help="Size of the host cache in bytes. "
-                "Set to 0 to disable host cache. ")
-@click.option("--guided_decoding_backend",
-              type=str,
-              default=None,
-              help="Backend for guided decoding.")
-@click.option("--disable_overlap_scheduler",
-              type=bool,
-              default=False,
-              help="Disable overlap scheduler. ")
 @click.option(
     "--num_postprocess_workers",
     type=int,
