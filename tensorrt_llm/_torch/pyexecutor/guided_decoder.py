@@ -232,6 +232,7 @@ class GuidedDecoder:
                     self.grammar_matchers[slot] = matcher
                 except Exception as e:
                     logger.error(f"Grammar matcher initialization failed with params: {req.guided_decoding_params.guide}")
+                    self.grammar_matchers[slot] = None
                     continue
 
             if matcher_advance:
