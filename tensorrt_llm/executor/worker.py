@@ -1,23 +1,26 @@
 import gc
+import json
 import os
 import traceback
+import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Callable
 
 import zmq
 
 from tensorrt_llm.logger import logger
 from tensorrt_llm.metrics.enums import RequestKVCacheStats
 
-from .._utils import mpi_comm, mpi_rank
+from .._utils import KVCacheEventSerializer, mpi_comm, mpi_rank
 from ..bindings import executor as tllm
 from ..builder import Engine
 from ..llmapi.llm_args import BaseLlmArgs
 from ..llmapi.mpi_session import set_mpi_session_cpp
 from ..llmapi.tokenizer import TokenizerBase
 from ..llmapi.tracer import VizTracer, set_global_tracer
-from ..llmapi.utils import ManagedThread, logger_debug, print_traceback_on_error
+from ..llmapi.utils import (AsyncQueue, ManagedThread, _SyncQueue,
+                            logger_debug, print_traceback_on_error)
 from ..sampling_params import BatchedLogitsProcessor
 from .base_worker import BaseWorker, _init_hf_modules
 from .ipc import FusedIpcQueue, IpcQueue
@@ -26,6 +29,9 @@ from .postproc_worker import (PostprocWorker, PostprocWorkerConfig,
 from .request import CancellingRequest, GenerationRequest
 from .rpc_worker_mixin import RpcWorkerMixin
 from .utils import ErrorResponse, RequestError, WorkerCommIpcAddrs
+from .executor import IterationResultQueue
+from .result import IterationResult
+
 
 __all__ = [
     "GenerationExecutorWorker",
