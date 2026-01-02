@@ -181,6 +181,7 @@ class PyExecutor:
         self.enable_iter_perf_stats = self.llm_args.enable_iter_perf_stats
         self.enable_iter_req_stats = self.llm_args.enable_iter_req_stats
         self.stream_interval = self.llm_args.stream_interval
+        self.stream_emit_interval_ms = self.llm_args.stream_emit_interval_ms
         self.attention_dp_enable_balance = (
             self.llm_args.attention_dp_config is not None
             and self.llm_args.attention_dp_config.enable_balance)
@@ -2601,8 +2602,18 @@ class PyExecutor:
                 request.update_perf_metrics(self.iter_counter)
 
             request_done = False
-            if request.py_decoding_iter == 1 or request.is_finished or \
-                    request.py_decoding_iter % self.stream_interval == 0:
+            now = get_steady_clock_now_in_seconds()
+            should_emit = (
+                request.py_decoding_iter == 1
+                or request.is_finished
+                or request.py_decoding_iter % self.stream_interval == 0
+                or (self.stream_emit_interval_ms > 0
+                    and request.py_last_stream_emit_time
+                    and (now - request.py_last_stream_emit_time) * 1000 >
+                    self.stream_emit_interval_ms)
+            )
+            if should_emit:
+                request.py_last_stream_emit_time = now
                 response = request.create_response(False, self.dist.rank)
                 if response:
                     request_done = request.is_finished

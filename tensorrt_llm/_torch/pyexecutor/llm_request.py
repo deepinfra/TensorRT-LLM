@@ -530,6 +530,7 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         self.py_num_accepted_draft_tokens_indices = []
         self.py_rewind_draft_token_separate_adjustment = 0
         self.py_decoding_iter = 0
+        self.py_last_stream_emit_time = None
         self.is_attention_dp_dummy = False
         self.is_cuda_graph_dummy = False
         self.py_lora_task_layer_module_configs: list[
