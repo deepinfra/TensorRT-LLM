@@ -500,8 +500,9 @@ class ChoiceWithAlias(click.Choice):
               help="[Experimental] Specify a custom chat template. "
               "Can be a file path or one-liner template string")
 def serve(
-        model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
-        host: str, port: int, log_level: str, backend: str, max_beam_width: int,
+        model: str, served_model_name: Optional[str],
+        tokenizer: Optional[str], custom_tokenizer: Optional[str], host: str,
+        port: int, log_level: str, backend: str, max_beam_width: int,
         max_batch_size: int, max_num_tokens: int, max_seq_len: int,
         tensor_parallel_size: int, pipeline_parallel_size: int,
         context_parallel_size: int, moe_expert_parallel_size: Optional[int],
