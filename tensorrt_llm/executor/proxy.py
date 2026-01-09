@@ -6,6 +6,7 @@ import threading
 import weakref
 from typing import Dict, List, Optional
 
+from pyparsing import Union
 import torch
 import zmq
 import zmq.asyncio
@@ -25,7 +26,7 @@ from .request import CancellingRequest, GenerationRequest
 from .result import GenerationResult, IterationResult
 from .rpc import RPCClient
 from .rpc.rpc_common import get_unique_ipc_addr
-from .utils import (ErrorResponse, WorkerCommIpcAddrs, create_mpi_comm_session,
+from .utils import (ErrorResponse, IntraProcessQueue, WorkerCommIpcAddrs, create_mpi_comm_session,
                     get_spawn_proxy_process_env, is_llm_response,
                     print_alive_threads)
 from .worker import GenerationExecutorWorker, worker_main
