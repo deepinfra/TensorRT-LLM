@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+from queue import Queue
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -30,7 +31,7 @@ from .postproc_worker import (PostprocWorker, PostprocWorkerConfig,
                               postproc_worker_main)
 from .request import CancellingRequest, GenerationRequest
 from .rpc_worker_mixin import RpcWorkerMixin
-from .utils import ErrorResponse, RequestError, WorkerCommIpcAddrs
+from .utils import ErrorResponse, RequestError, WorkerCommIpcAddrs, has_event_loop
 
 __all__ = [
     "GenerationExecutorWorker",
@@ -76,6 +77,20 @@ class GenerationExecutorWorker(RpcWorkerMixin, BaseWorker):
             self.await_response_task,
             error_queue=self._error_queue,
             name="await_response_thread")
+        
+    def _create_iteration_result_queue(self,
+                                       it_result_queue: IterationResultQueue):
+        if not it_result_queue.is_initialized:
+            # not yet initialized
+            it_result_queue.is_initialized = True
+            if has_event_loop():
+                _queue = AsyncQueue()
+                it_result_queue.queue = _queue.sync_q
+                it_result_queue.aqueue = _queue
+            else:
+                _queue = Queue()
+                it_result_queue.queue = _queue
+                it_result_queue.aqueue = None        
 
     def start_thread(self, thread: ManagedThread):
         if self.engine.can_enqueue_requests() and not thread.is_alive():
