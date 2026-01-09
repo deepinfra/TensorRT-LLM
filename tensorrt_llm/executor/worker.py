@@ -77,6 +77,16 @@ class GenerationExecutorWorker(RpcWorkerMixin, BaseWorker):
             error_queue=self._error_queue,
             name="await_response_thread")
         
+        self.dispatch_stats_thread = ManagedThread(
+            self.dispatch_stats_task,
+            error_queue=self._error_queue,
+            name="dispatch_stats_thread")
+
+        self.dispatch_kv_cache_events_thread = ManagedThread(
+            self.dispatch_kv_cache_events_task,
+            error_queue=self._error_queue,
+            name="dispatch_kv_cache_events_thread")        
+        
     def _create_iteration_result_queue(self,
                                        it_result_queue: IterationResultQueue):
         if not it_result_queue.is_initialized:
@@ -180,6 +190,12 @@ class GenerationExecutorWorker(RpcWorkerMixin, BaseWorker):
                 if self.await_response_thread.is_alive():
                     self.await_response_thread.stop()
                     self.await_response_thread.join()
+            if self.dispatch_stats_thread.is_alive():
+                self.dispatch_stats_thread.stop()
+                self.dispatch_stats_thread.join()
+            if self.dispatch_kv_cache_events_thread.is_alive():
+                self.dispatch_kv_cache_events_thread.stop()
+                self.dispatch_kv_cache_events_thread.join()                    
 
             self.engine.shutdown()
             self.engine = None
