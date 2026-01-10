@@ -2,7 +2,7 @@ import gc
 import json
 import os
 from queue import Queue
-from time import time
+import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
