@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import logging
 import signal
 import socket
+import time
 import traceback
 from collections import deque
 from contextlib import asynccontextmanager
@@ -713,11 +714,14 @@ class OpenAIServer:
                             self.process_kv_event(event_id, block_hash, parent_hash, -1)
                         )
                 elif type == "updated":
-                    block_hash = data['block_hash']
-                    cache_level = data['cache_level']['new_value']
-                    kv_events.append(
-                        self.process_kv_event(event_id, block_hash, parent_hash, cache_level)
-                    )
+                    # we don't care about updated events for now
+                    # this reduces the number of events sent to kv-cache-monitor
+                    pass
+                    # block_hash = data['block_hash']
+                    # cache_level = data['cache_level']['new_value']
+                    # kv_events.append(
+                    #     self.process_kv_event(event_id, block_hash, parent_hash, cache_level)
+                    # )
                 else:
                     logger.info(f'{event}')
                     continue
@@ -758,7 +762,7 @@ class OpenAIServer:
         queue = asyncio.Queue()
         self.kv_listeners.append(queue)
 
-        BATCH_SIZE = 1000
+        BATCH_SIZE = 1024
         items = list(self.kv_map.values())
         logger.info(f"kv_cache_generator: {len(items)} items in kv_map")
         for kv_events in [items[i:i + BATCH_SIZE] for i in range(0, len(items), BATCH_SIZE)]:
@@ -767,8 +771,24 @@ class OpenAIServer:
         # yield empty event to signal that we are ready to receive events
         yield format_sse_event([])
         while True:
+            # Get at least one item (blocking)
             all_kv_events = await queue.get()
-            for kv_events in [all_kv_events[i:i + BATCH_SIZE] for i in range(0, len(all_kv_events), BATCH_SIZE)]:
+            accumulated_events = list(all_kv_events)
+
+            # Wait at most MAX_TOTAL_TIME
+            MAX_TOTAL_TIME = 0.05  # 50ms max total wait
+            start_time = time.monotonic()
+            while len(accumulated_events) < BATCH_SIZE:
+                elapsed = time.monotonic() - start_time
+                if elapsed >= MAX_TOTAL_TIME:
+                    break
+                try:
+                    more_events = await asyncio.wait_for(queue.get(), timeout=MAX_TOTAL_TIME - elapsed)
+                    accumulated_events.extend(more_events)
+                except asyncio.TimeoutError:
+                    break
+
+            for kv_events in [accumulated_events[i:i + BATCH_SIZE] for i in range(0, len(accumulated_events), BATCH_SIZE)]:
                 yield format_sse_event(kv_events)
 
     async def get_kv_cache_events(self) -> StreamingResponse:
