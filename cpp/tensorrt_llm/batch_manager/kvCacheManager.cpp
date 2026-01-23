@@ -1596,6 +1596,10 @@ std::pair<SizeType32, std::optional<KVCacheBlock::IdType>> WindowBlockManager::s
             TLLM_CHECK_WITH_INFO(block->getBlockId() == bid,
                 "Block id mismatch " + std::to_string(block->getBlockId()) + " != " + std::to_string(bid));
             needMatch = false; // no matching needed for following blocks
+            if (block->getPrevBlock() != nullptr)
+            {
+		block->getPrevBlock()->removeNextBlock(block->getBlockKey());
+            }
             block->setBlockKey(blockKey, static_cast<SizeType32>(blockKey.uniqueTokens.size()) == mTokensPerBlock);
             block->setPrevBlock(searchRoot);
             block->setPrevBlockInSeq(searchRoot);
