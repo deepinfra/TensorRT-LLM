@@ -2354,6 +2354,7 @@ class TRTLLMSampler(Sampler):
     ) -> SampleStateTRTLLM:
         batch_size = scheduled_requests.batch_size
         beam_width = self.beam_width(scheduled_requests.all_requests())
+
         if (batch_size > 1 and beam_width > 1
                 and any(request.py_return_log_probs
                         for request in scheduled_requests.all_requests())):

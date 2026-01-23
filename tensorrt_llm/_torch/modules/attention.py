@@ -1141,6 +1141,7 @@ class MLA(nn.Module):
         # copy full_compressed_kv and full_k_pe from paged kv cache
         full_compressed_kv, full_k_pe = trtllm_attention.load_paged_kv_cache_for_mla(
             attn_metadata, q.dtype)
+
         assert full_compressed_kv.shape[
             0] == attn_metadata.num_ctx_cached_tokens + attn_metadata.num_ctx_tokens
         assert full_compressed_kv.shape[1] == self.kv_lora_rank
@@ -1198,6 +1199,7 @@ class MLA(nn.Module):
         output: torch.Tensor,
     ) -> torch.Tensor:
         trtllm_attention = cast(TrtllmAttention, self.mha)
+
         # apply RoPE, append compressed_kv + k_pe to paged kv cache and assign q_pe to q
         trtllm_attention.mla_rope_append_paged_kv_assign_q(
             q, latent_cache, attn_metadata)
@@ -1293,6 +1295,7 @@ class MLA(nn.Module):
                 runtime_features.chunked_prefill_buffer_batch_size,
                 output=temp_attn_output,
             )
+
             # merge attn result
             temp_merge_op = attn_metadata.merge_op_tensor[loop_idx]
             trtllm_attention.merge_attention_for_mla(
@@ -1342,11 +1345,13 @@ class MLA(nn.Module):
             chunked_prefill_buffer_batch_size,
             output=temp_attn_output,
         )
+
         temp_merge_op = attn_metadata.merge_op_tensor[chunked_loop_num]
         trtllm_attention.merge_attention_for_mla(attn_output, temp_attn_output,
                                                  self.softmax_stats_tensor,
                                                  self.temp_softmax_stats_tensor,
                                                  temp_merge_op, attn_metadata)
+
         # copy back kv_lens_runtime and kv_lens_cuda_runtime
         attn_metadata.kv_lens_runtime = origin_kv_lens_runtime
         attn_metadata.kv_lens_cuda_runtime = origin_kv_lens_cuda_runtime
@@ -1493,6 +1498,7 @@ class MLA(nn.Module):
                               hidden_states,
                               attn_metadata,
                               output=attn_output)
+
         attn_output = self.o_proj(attn_output,
                                   all_reduce_params=all_reduce_params)
         return attn_output

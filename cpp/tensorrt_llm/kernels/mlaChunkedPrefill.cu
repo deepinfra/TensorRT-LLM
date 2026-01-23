@@ -25,10 +25,10 @@
 namespace
 {
 
-template <typename T>
+template <typename T, int HeadSize = 128>
 struct MergeSoftmaxTraits
 {
-    static constexpr int kQKNopeSize = 128;
+    static constexpr int kQKNopeSize = HeadSize;
     static constexpr int kHeadSize = kQKNopeSize;
 
     static constexpr int kBytesPerElem = sizeof(T);
@@ -137,12 +137,12 @@ inline __device__ void dequantCopy(
 
 // merged_attn [q_total_len, H=128, D=128] (T)
 // merged_softmax_sum [q_total_len, H, 2] (float, max/sum)
-template <typename T>
+template <typename T, int HeadSize>
 __global__ void mergeAttnWithSoftmaxKernel(T* merged_attn, float2* merged_softmax_stats, T const* pre_attn,
     float2 const* pre_softmax_stats, T const* curr_attn, float2 const* curr_softmax_stats, int64_t const* cu_q_seq_len,
     int64_t const* merge_op, int const num_heads, int const head_size)
 {
-    using KT = MergeSoftmaxTraits<T>;
+    using KT = MergeSoftmaxTraits<T, HeadSize>;
     int const batch_idx = static_cast<int>(blockIdx.y);
     int const head_idx = static_cast<int>(blockIdx.z);
 
@@ -301,21 +301,50 @@ namespace kernels
 // if merge_op[b] == 0, we just skip this batch, if merge_op[b] == 1, we merge the pre-attn and curr-attn, if
 // merge_op[b]
 // == 2, we only copy curr_attn and curr_softmax_sum to merged_attn and merged_softmax_sum
+template <typename T, int HeadSize>
+void invokeMergeAttnWithSoftmaxImpl(T* merged_attn, float* merged_softmax_stats, T const* pre_attn,
+    float const* pre_softmax_stats, T const* curr_attn, float const* curr_softmax_stats, int const batch_size,
+    int64_t const* cu_q_seq_len, int max_q_seq_len, int64_t const* merge_op, int const num_heads, int const head_size,
+    cudaStream_t stream)
+{
+    using KT = MergeSoftmaxTraits<T, HeadSize>;
+
+    dim3 grid(static_cast<int>(tensorrt_llm::common::divUp(max_q_seq_len, KT::kTokenPerBlock)), batch_size, num_heads);
+    dim3 block(KT::kNumThreads);
+
+    mergeAttnWithSoftmaxKernel<T, HeadSize><<<grid, block, 0, stream>>>(merged_attn,
+        reinterpret_cast<float2*>(merged_softmax_stats), pre_attn, reinterpret_cast<float2 const*>(pre_softmax_stats),
+        curr_attn, reinterpret_cast<float2 const*>(curr_softmax_stats), cu_q_seq_len, merge_op, num_heads, head_size);
+}
+
 template <typename T>
 void invokeMergeAttnWithSoftmax(T* merged_attn, float* merged_softmax_stats, T const* pre_attn,
     float const* pre_softmax_stats, T const* curr_attn, float const* curr_softmax_stats, int const batch_size,
     int64_t const* cu_q_seq_len, int max_q_seq_len, int64_t const* merge_op, int const num_heads, int const head_size,
     cudaStream_t stream)
 {
-    using KT = MergeSoftmaxTraits<T>;
-    TLLM_CHECK_WITH_INFO(head_size == KT::kHeadSize, "head dim should be equal to %d", KT::kHeadSize);
-
-    dim3 grid(static_cast<int>(tensorrt_llm::common::divUp(max_q_seq_len, KT::kTokenPerBlock)), batch_size, num_heads);
-    dim3 block(KT::kNumThreads);
-
-    mergeAttnWithSoftmaxKernel<T><<<grid, block, 0, stream>>>(merged_attn,
-        reinterpret_cast<float2*>(merged_softmax_stats), pre_attn, reinterpret_cast<float2 const*>(pre_softmax_stats),
-        curr_attn, reinterpret_cast<float2 const*>(curr_softmax_stats), cu_q_seq_len, merge_op, num_heads, head_size);
+    if (head_size == 128)
+    {
+        invokeMergeAttnWithSoftmaxImpl<T, 128>(merged_attn, merged_softmax_stats, pre_attn, pre_softmax_stats,
+            curr_attn, curr_softmax_stats, batch_size, cu_q_seq_len, max_q_seq_len, merge_op, num_heads, head_size,
+            stream);
+    }
+    else if (head_size == 192)
+    {
+        invokeMergeAttnWithSoftmaxImpl<T, 192>(merged_attn, merged_softmax_stats, pre_attn, pre_softmax_stats,
+            curr_attn, curr_softmax_stats, batch_size, cu_q_seq_len, max_q_seq_len, merge_op, num_heads, head_size,
+            stream);
+    }
+    else if (head_size == 256)
+    {
+        invokeMergeAttnWithSoftmaxImpl<T, 256>(merged_attn, merged_softmax_stats, pre_attn, pre_softmax_stats,
+            curr_attn, curr_softmax_stats, batch_size, cu_q_seq_len, max_q_seq_len, merge_op, num_heads, head_size,
+            stream);
+    }
+    else
+    {
+        TLLM_CHECK_WITH_INFO(false, "head dim %d is not supported, only 128, 192, and 256 are supported", head_size);
+    }
 }
 
 // load single chunk kv from kv_cache for each request
