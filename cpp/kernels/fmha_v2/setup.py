@@ -4842,6 +4842,38 @@ def enumerate_hmma_flash_kernels_base(specs,
                     enable_attn_logit_softcapping=enable_attn_logit_softcapping,
                     is_mtp=(head_size == 576 and head_size_v == 512)))
 
+    # Custom MLA 256x192 tiled kernels (GLM-4 style)
+    if input_layout == InputLayout.SEPARATE_Q_K_V and sm_mma == 80:
+        specs.append(
+            kernel_spec(
+                sm=sm,
+                sm_mma=sm_mma,
+                dtype=dtype,
+                flash_attention=True,
+                tiled=1,
+                seq_len=0,  # means any sequence here
+                kv_loop_step=64,
+                limit_qk_fragments=True,
+                limit_v_fragments=True,
+                head_size=256,
+                head_size_v=192,
+                warps_m=4,
+                warps_n=1,
+                version=2,
+                interleaved=False,
+                ldgsts_q=True,
+                ldgsts_k=False,
+                ldgsts_v=False,
+                share_smem_k_v=False,
+                loop_step=64,
+                has_noloop=1,
+                noloop_step=64,
+                unroll_threshold=1,
+                has_scale_max=False,
+                ctas_per_head=1,
+                input_layout=input_layout,
+                enable_attn_logit_softcapping=enable_attn_logit_softcapping))
+
     for head_size in [
             16, 32, 40, 48, 64, 72, 80, 96, 104, 128, 160, 192, 256, 512
     ]:
@@ -6296,6 +6328,10 @@ def enumerate_kernels():
     enumerate_hmma_paged_kv_flash_kernels(specs, sm=90, dtype='fp16')
     enumerate_hmma_paged_kv_flash_kernels(specs, sm=90, dtype='bf16')
 
+    # SM 90 MLA 256x192 HMMA flash kernels (for GLM-4 style models needing alibi)
+    enumerate_hmma_flash_kernels(specs, sm=90, dtype='fp16', head_size_v=192)
+    enumerate_hmma_flash_kernels(specs, sm=90, dtype='bf16', head_size_v=192)
+
     if 'ENABLE_SM100' in os.environ:
         # SM 100
         enumerate_hmma_flash_kernels(specs, sm=100, dtype='fp16')
@@ -6463,6 +6499,18 @@ def enumerate_kernels():
                   and kspec.warp_specialization == True
                   and kspec.alibi == False
                   and kspec.enable_attn_logit_softcapping == False)
+                  # Custom MLA 256/192 HMMA tiled kernels (for GLM-4 with alibi)
+                  or (kspec.sm            == 90
+                  and kspec.dtype         in ['bf16', 'fp16']
+                  and kspec.head_size     == 256
+                  and kspec.head_size_v   == 192
+                  and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
+                  and kspec.sage_block_sizes is None
+                  and kspec.version       == 2
+                  and kspec.cross_mha     == False
+                  and kspec.flash_attention == True
+                  and kspec.warp_specialization == False
+                  and kspec.tiled == True)
                   # SageAttention (warp_spec, head_size in (80, 128), packed QKV, padding mask)
                   or (kspec.sm            == 90
                   and kspec.head_size     in [80, 128]
