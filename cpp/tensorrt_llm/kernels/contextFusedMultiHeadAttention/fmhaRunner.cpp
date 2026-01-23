@@ -442,27 +442,26 @@ void FusedMHARunnerV2::setupLaunchParams(MHARunnerParams runnerParams)
     }
 
     // TODO: Refactor these dirty hacks.
-    // For Deepseek-v2(MLA), all of SM80, SM89 and SM90 kernels use tiled flash attention
-    // in both context (192/128 dimensions) and generation (576/512 dimensions)
-    if (mFixedParams.headSize == mFixedParams.headSizeV + 64)
+    // For MLA models (Deepseek-v2/v3, GLM-4, etc.), use tiled flash attention.
+    // Use headSizeQkNope > 0 to detect MLA mode (more general than dimension check).
+    bool const isMLA = mFixedParams.headSizeQkNope > 0;
+    if (isMLA)
     {
         mLaunchParams.flash_attention = true;
         mLaunchParams.force_unroll = true;
         mLaunchParams.kernel_s = 0;
 
-        // Now we have SM90 context and FP8 generation MLA kernels
+        // Hopper-optimized kernels only exist for specific dimensions (DeepSeek)
         bool isHopperContextMLA = isSm90 && mFixedParams.headSizeV == 128;
         bool isHopperFP8GenerationMLA
             = isSm90 && mFixedParams.dataType == DATA_TYPE_E4M3 && mFixedParams.headSizeV == 512;
 
-        // These treatments are only for other MLA cases
+        // For MLA configs without optimized Hopper kernels, use ampere-style
         if (!isHopperContextMLA && !isHopperFP8GenerationMLA)
         {
             mLaunchParams.granular_tiling = true;
-            // Even on SM90, we use ampere-style kernel, will be optimized later
             mLaunchParams.warp_specialization = false;
             mLaunchParams.useKernelWithoutAlibi = false;
-            // Deepseek-V2 kernel is not hooper style right now.
             mLaunchParams.useBase2ExpTrick = false;
             mLaunchParams.use_tma = false;
             mLaunchParams.dynamic_scheduler = false;
@@ -472,25 +471,34 @@ void FusedMHARunnerV2::setupLaunchParams(MHARunnerParams runnerParams)
     mLaunchParams.sage_block_size_q = mFixedParams.sageBlockSizeQ;
     mLaunchParams.sage_block_size_k = mFixedParams.sageBlockSizeK;
     mLaunchParams.sage_block_size_v = mFixedParams.sageBlockSizeV;
-    // for not (sm90 + warp_specialization + flash attention kernel) kernel:
-    //   all kernels enable saving softmaxStatsPtr, just let softmaxStatsPtr != null
-    // for (sm90 + warp_specialization + flash attention) kernel:
-    //   we need to explicitly set supportReturnSoftmaxStats to true when
-    //  satisfying the following constrains
+
+    // Softmax stats support:
+    // - Non-SM90: always supported
+    // - SM90 with warp_specialization=false (ampere-style): always supported
+    // - SM90 with warp_specialization=true: only specific layouts supported
     if (!isSm90)
     {
         mLaunchParams.supportReturnSoftmaxStats = true;
     }
     else
     {
-        bool isHopperContextMLA = (mFixedParams.headSize == mFixedParams.headSizeV + 64) && isSm90
-            && (mFixedParams.dataType == DATA_TYPE_BF16 || mFixedParams.dataType == DATA_TYPE_E4M3)
-            && mFixedParams.headSizeV == 128;
-        mLaunchParams.supportReturnSoftmaxStats = (runnerParams.softmaxStatsPtr != nullptr
-            && mLaunchParams.flash_attention && mLaunchParams.warp_specialization
-            && ((!isHopperContextMLA && mLaunchParams.attention_input_layout == AttentionInputLayout::Q_CONTIGUOUS_KV)
-                || (isHopperContextMLA
-                    && (mLaunchParams.attention_input_layout == AttentionInputLayout::SEPARATE_Q_K_V))));
+        // For MLA on SM90 without warp_specialization (e.g., GLM), softmax stats are supported
+        if (!mLaunchParams.warp_specialization)
+        {
+            mLaunchParams.supportReturnSoftmaxStats = (runnerParams.softmaxStatsPtr != nullptr);
+        }
+        else
+        {
+            // Hopper warp-specialized kernels have specific layout requirements
+            bool isHopperContextMLA = isMLA && isSm90
+                && (mFixedParams.dataType == DATA_TYPE_BF16 || mFixedParams.dataType == DATA_TYPE_E4M3)
+                && mFixedParams.headSizeV == 128;
+            mLaunchParams.supportReturnSoftmaxStats = (runnerParams.softmaxStatsPtr != nullptr
+                && mLaunchParams.flash_attention
+                && ((!isHopperContextMLA && mLaunchParams.attention_input_layout == AttentionInputLayout::Q_CONTIGUOUS_KV)
+                    || (isHopperContextMLA
+                        && (mLaunchParams.attention_input_layout == AttentionInputLayout::SEPARATE_Q_K_V))));
+        }
     }
 
     // Setup launch params for skip softmax attention

@@ -2678,6 +2678,7 @@ class PyTorchModelEngine(ModelEngine):
         num_tokens = len(input_ids)
         num_draft_tokens = len(draft_tokens)
         total_num_tokens = len(position_ids)
+
         assert total_num_tokens <= self.max_num_tokens, (
             f"total_num_tokens ({total_num_tokens}) should be less than or equal to max_num_tokens ({self.max_num_tokens})"
         )
@@ -3935,6 +3936,7 @@ class PyTorchModelEngine(ModelEngine):
                       gather_ids: Optional[torch.Tensor],
                       gather_context_logits: bool = False) -> Dict[str, Any]:
         inputs = self._preprocess_inputs(inputs)
+
         if inputs.get('spec_metadata', None):
             gather_ids = inputs['spec_metadata'].gather_ids
 
