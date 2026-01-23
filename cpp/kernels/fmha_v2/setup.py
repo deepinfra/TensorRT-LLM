@@ -3064,7 +3064,8 @@ def get_kernel_traits_code(specs_names):
 # You should set the condition `use_cubin_header` to false if you have modified the source codes of those kernels that use cubins.
 # This ensures that the kernels will be recompiled using the updated source code rather than relying on precompiled cubins.
 def use_cubin_header(sm, head_size, dtype):
-    return (sm == 90 and head_size in [128, 256]) or (sm == 89 and 'e4m3' in dtype)
+    return False
+    #return (sm == 90 and head_size in [128, 256]) or (sm == 89 and 'e4m3' in dtype)
 
 
 def get_cubin_header(kernel_traits, specs_names):
