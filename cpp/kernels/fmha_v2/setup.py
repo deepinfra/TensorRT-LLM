@@ -3767,6 +3767,40 @@ def enumerate_hgmma_flash_warpspec_kernels(specs, sm=90, dtype='fp16'):
                     return_softmax_stats=return_softmax,
                     scheduling_mode=scheduling_mode,
                     input_layout=input_layout))
+            # Custom MLA (context 256/192 separate-q-k-v)
+            # smem size with kv_step=64: ~176 KB (fits in Hopper's 228KB)
+            specs.append(
+                kernel_spec(
+                    sm=sm,
+                    sm_mma=90,
+                    dtype=dtype,
+                    seq_len=0,  # support any sequence length
+                    head_size=256,
+                    head_size_v=192,
+                    warps_m=4,  #4x1 warpgroups
+                    warps_n=1,
+                    version=2,
+                    interleaved=False,
+                    ldgsts_q=
+                    False,  # for Hopper kernels, ldgsts = False signals TMA usage.
+                    ldgsts_k=False,
+                    ldgsts_v=False,
+                    share_smem_k_v=False,
+                    loop_step=64,
+                    q_tile_buffers=1,  # only used by warp specialized kernels
+                    has_noloop=0,
+                    noloop_step=64,
+                    kv_loop_step=64,
+                    kv_tile_buffers=2,  # only used by warp specialized kernels
+                    unroll_threshold=1,
+                    has_scale_max=False,
+                    flash_attention=True,
+                    warp_specialization=True,
+                    alibi=alibi,
+                    enable_attn_logit_softcapping=enable_attn_logit_softcapping,
+                    return_softmax_stats=return_softmax,
+                    scheduling_mode=scheduling_mode,
+                    input_layout=input_layout))
 
 
 # Note this will be used in TRT-LLM.
@@ -4718,7 +4752,8 @@ def enumerate_hmma_flash_kernels(specs, sm=80, dtype='fp16', head_size_v=0):
         InputLayout.Q_PAGED_KV
     ]
     # Deepseek MLA (context 192/128 separate-q-k-v)
-    if head_size_v == 128:
+    # Custom MLA (context 256/192 separate-q-k-v)
+    if head_size_v in [128, 192]:
         input_layouts.append(InputLayout.SEPARATE_Q_K_V)
     for (input_layout,
          enable_attn_logit_softcapping) in product(input_layouts,
@@ -6413,6 +6448,19 @@ def enumerate_kernels():
                   and kspec.flash_attention == True
                   and ((kspec.warp_specialization == True and kspec.alibi == False)   # sm90
                     or (kspec.warp_specialization == False and kspec.tiled == True))  # non-sm90
+                  and kspec.enable_attn_logit_softcapping == False)
+                  # Custom MLA (context 256/192 separate-q-k-v)
+                  or (kspec.sm            == 90
+                  and kspec.dtype         in ['bf16', 'fp16']
+                  and kspec.head_size     == 256
+                  and kspec.head_size_v   == 192
+                  and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
+                  and kspec.sage_block_sizes is None
+                  and kspec.version       == 2
+                  and kspec.cross_mha     == False
+                  and kspec.flash_attention == True
+                  and kspec.warp_specialization == True
+                  and kspec.alibi == False
                   and kspec.enable_attn_logit_softcapping == False)
                   # SageAttention (warp_spec, head_size in (80, 128), packed QKV, padding mask)
                   or (kspec.sm            == 90
