@@ -3768,8 +3768,9 @@ def enumerate_hgmma_flash_warpspec_kernels(specs, sm=90, dtype='fp16'):
                     return_softmax_stats=return_softmax,
                     scheduling_mode=scheduling_mode,
                     input_layout=input_layout))
-        # Custom MLA (context 256/192 separate-q-k-v)
-        # smem size with kv_step=64: ~176 KB (fits in Hopper's 228KB)
+        # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
+        # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+        # smem size with kv_step=64: fits in Hopper's 228KB
         if input_layout == InputLayout.SEPARATE_Q_K_V and not alibi and not enable_attn_logit_softcapping:
             specs.append(
                 kernel_spec(
@@ -3778,7 +3779,7 @@ def enumerate_hgmma_flash_warpspec_kernels(specs, sm=90, dtype='fp16'):
                     dtype=dtype,
                     seq_len=0,  # support any sequence length
                     head_size=256,
-                    head_size_v=192,
+                    head_size_v=256,
                     warps_m=4,  #4x1 warpgroups
                     warps_n=1,
                     version=2,
@@ -4754,8 +4755,8 @@ def enumerate_hmma_flash_kernels(specs, sm=80, dtype='fp16', head_size_v=0):
         InputLayout.Q_PAGED_KV
     ]
     # Deepseek MLA (context 192/128 separate-q-k-v)
-    # Custom MLA (context 256/192 separate-q-k-v)
-    if head_size_v in [128, 192]:
+    # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
+    if head_size_v in [128, 256]:
         input_layouts.append(InputLayout.SEPARATE_Q_K_V)
     for (input_layout,
          enable_attn_logit_softcapping) in product(input_layouts,
@@ -4843,7 +4844,8 @@ def enumerate_hmma_flash_kernels_base(specs,
                     enable_attn_logit_softcapping=enable_attn_logit_softcapping,
                     is_mtp=(head_size == 576 and head_size_v == 512)))
 
-    # Custom MLA 256x192 tiled kernels (GLM-4 style)
+    # Custom MLA 256x256 tiled kernels (GLM-4 style)
+    # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
     if input_layout == InputLayout.SEPARATE_Q_K_V and sm_mma == 80:
         specs.append(
             kernel_spec(
@@ -4857,7 +4859,7 @@ def enumerate_hmma_flash_kernels_base(specs,
                 limit_qk_fragments=True,
                 limit_v_fragments=True,
                 head_size=256,
-                head_size_v=192,
+                head_size_v=256,
                 warps_m=4,
                 warps_n=1,
                 version=2,
@@ -6329,9 +6331,10 @@ def enumerate_kernels():
     enumerate_hmma_paged_kv_flash_kernels(specs, sm=90, dtype='fp16')
     enumerate_hmma_paged_kv_flash_kernels(specs, sm=90, dtype='bf16')
 
-    # SM 90 MLA 256x192 HMMA flash kernels (for GLM-4 style models needing alibi)
-    enumerate_hmma_flash_kernels(specs, sm=90, dtype='fp16', head_size_v=192)
-    enumerate_hmma_flash_kernels(specs, sm=90, dtype='bf16', head_size_v=192)
+    # SM 90 MLA 256x256 HMMA flash kernels (for GLM-4 style models)
+    # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+    enumerate_hmma_flash_kernels(specs, sm=90, dtype='fp16', head_size_v=256)
+    enumerate_hmma_flash_kernels(specs, sm=90, dtype='bf16', head_size_v=256)
 
     if 'ENABLE_SM100' in os.environ:
         # SM 100
@@ -6487,11 +6490,11 @@ def enumerate_kernels():
                   and ((kspec.warp_specialization == True and kspec.alibi == False)   # sm90
                     or (kspec.warp_specialization == False and kspec.tiled == True))  # non-sm90
                   and kspec.enable_attn_logit_softcapping == False)
-                  # Custom MLA (context 256/192 separate-q-k-v)
+                  # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
                   or (kspec.sm            == 90
                   and kspec.dtype         in ['bf16', 'fp16']
                   and kspec.head_size     == 256
-                  and kspec.head_size_v   == 192
+                  and kspec.head_size_v   == 256
                   and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
                   and kspec.sage_block_sizes is None
                   and kspec.version       == 2
@@ -6500,11 +6503,11 @@ def enumerate_kernels():
                   and kspec.warp_specialization == True
                   and kspec.alibi == False
                   and kspec.enable_attn_logit_softcapping == False)
-                  # Custom MLA 256/192 HMMA tiled kernels (for GLM-4 with alibi)
+                  # Custom MLA 256/256 HMMA tiled kernels (for GLM-4 style models)
                   or (kspec.sm            == 90
                   and kspec.dtype         in ['bf16', 'fp16']
                   and kspec.head_size     == 256
-                  and kspec.head_size_v   == 192
+                  and kspec.head_size_v   == 256
                   and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
                   and kspec.sage_block_sizes is None
                   and kspec.version       == 2

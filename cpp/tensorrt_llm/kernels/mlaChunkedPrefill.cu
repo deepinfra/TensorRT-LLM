@@ -335,9 +335,15 @@ void invokeMergeAttnWithSoftmax(T* merged_attn, float* merged_softmax_stats, T c
             curr_attn, curr_softmax_stats, batch_size, cu_q_seq_len, max_q_seq_len, merge_op, num_heads, head_size,
             stream);
     }
+    else if (head_size == 256)
+    {
+        invokeMergeAttnWithSoftmaxImpl<T, 256>(merged_attn, merged_softmax_stats, pre_attn, pre_softmax_stats,
+            curr_attn, curr_softmax_stats, batch_size, cu_q_seq_len, max_q_seq_len, merge_op, num_heads, head_size,
+            stream);
+    }
     else
     {
-        TLLM_CHECK_WITH_INFO(false, "head dim %d is not supported, only 128 and 192 are supported", head_size);
+        TLLM_CHECK_WITH_INFO(false, "head dim %d is not supported, only 128, 192, and 256 are supported", head_size);
     }
 }
 
