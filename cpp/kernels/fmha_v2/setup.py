@@ -3767,8 +3767,9 @@ def enumerate_hgmma_flash_warpspec_kernels(specs, sm=90, dtype='fp16'):
                     return_softmax_stats=return_softmax,
                     scheduling_mode=scheduling_mode,
                     input_layout=input_layout))
-            # Custom MLA (context 256/192 separate-q-k-v)
-            # smem size with kv_step=64: ~176 KB (fits in Hopper's 228KB)
+        # Custom MLA (context 256/192 separate-q-k-v)
+        # smem size with kv_step=64: ~176 KB (fits in Hopper's 228KB)
+        if input_layout == InputLayout.SEPARATE_Q_K_V and not alibi and not enable_attn_logit_softcapping:
             specs.append(
                 kernel_spec(
                     sm=sm,
@@ -3796,11 +3797,11 @@ def enumerate_hgmma_flash_warpspec_kernels(specs, sm=90, dtype='fp16'):
                     has_scale_max=False,
                     flash_attention=True,
                     warp_specialization=True,
-                    alibi=alibi,
-                    enable_attn_logit_softcapping=enable_attn_logit_softcapping,
+                    alibi=False,
+                    enable_attn_logit_softcapping=False,
                     return_softmax_stats=return_softmax,
                     scheduling_mode=scheduling_mode,
-                    input_layout=input_layout))
+                    input_layout=InputLayout.SEPARATE_Q_K_V))
 
 
 # Note this will be used in TRT-LLM.
