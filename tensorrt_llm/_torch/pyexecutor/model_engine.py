@@ -1282,6 +1282,13 @@ class PyTorchModelEngine(ModelEngine):
             begin_compute = request.context_current_position
             end_compute = begin_compute + request.context_chunk_size
             prompt_tokens = all_prompt_tokens[begin_compute:end_compute]
+            # Debug: print context position info
+            print(f"DEBUG ctx_request processing: request_id={request.py_request_id}, "
+                  f"context_current_position={request.context_current_position}, "
+                  f"context_chunk_size={request.context_chunk_size}, "
+                  f"prompt_len={len(all_prompt_tokens)}, "
+                  f"begin_compute={begin_compute}, end_compute={end_compute}, "
+                  f"prompt_tokens={prompt_tokens[:5] if len(prompt_tokens) > 5 else prompt_tokens}")
             # Debug: check for corrupted token IDs
             for i, tok in enumerate(prompt_tokens):
                 if tok < 0 or tok >= 200000:  # reasonable vocab size upper bound
@@ -1598,9 +1605,10 @@ class PyTorchModelEngine(ModelEngine):
         num_draft_tokens = len(draft_tokens)
         total_num_tokens = len(position_ids)
 
-        # Debug: log token counts
+        # Debug: log token counts and position_ids
         print(f"DEBUG: num_tokens={num_tokens}, total_num_tokens={total_num_tokens}, "
               f"input_ids[:10]={input_ids[:10] if input_ids else []}, "
+              f"position_ids[:10]={position_ids[:10] if position_ids else []}, "
               f"num_ctx_requests={len(scheduled_requests.context_requests)}, "
               f"num_gen_requests={len(generation_requests)}, "
               f"len(extend_requests)={len(extend_requests)}, "
