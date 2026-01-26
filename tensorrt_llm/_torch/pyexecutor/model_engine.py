@@ -1592,7 +1592,12 @@ class PyTorchModelEngine(ModelEngine):
         total_num_tokens = len(position_ids)
 
         # Debug: log token counts
-        print(f"DEBUG: num_tokens={num_tokens}, total_num_tokens={total_num_tokens}, input_ids[:10]={input_ids[:10] if input_ids else []}")
+        print(f"DEBUG: num_tokens={num_tokens}, total_num_tokens={total_num_tokens}, "
+              f"input_ids[:10]={input_ids[:10] if input_ids else []}, "
+              f"num_ctx_requests={len(scheduled_requests.context_requests)}, "
+              f"num_gen_requests={len(generation_requests)}, "
+              f"len(extend_requests)={len(extend_requests)}, "
+              f"previous_batch_indices={previous_batch_indices}")
 
         assert total_num_tokens <= self.max_num_tokens, (
             "total_num_tokens should be less than or equal to max_num_tokens")
