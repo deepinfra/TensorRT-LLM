@@ -1282,6 +1282,18 @@ class PyTorchModelEngine(ModelEngine):
             begin_compute = request.context_current_position
             end_compute = begin_compute + request.context_chunk_size
             prompt_tokens = all_prompt_tokens[begin_compute:end_compute]
+            # Debug: check for corrupted token IDs
+            for i, tok in enumerate(prompt_tokens):
+                if tok < 0 or tok >= 200000:  # reasonable vocab size upper bound
+                    raise RuntimeError(
+                        f"Corrupted token ID detected at position {begin_compute + i}: {tok}. "
+                        f"Request ID: {request.py_request_id}, "
+                        f"begin_compute: {begin_compute}, end_compute: {end_compute}, "
+                        f"context_current_position: {request.context_current_position}, "
+                        f"context_chunk_size: {request.context_chunk_size}, "
+                        f"all_prompt_tokens length: {len(all_prompt_tokens)}, "
+                        f"prompt_tokens: {prompt_tokens}"
+                    )
             position_ids.extend(
                 range(begin_compute, begin_compute + len(prompt_tokens)))
             input_ids.extend(prompt_tokens)
