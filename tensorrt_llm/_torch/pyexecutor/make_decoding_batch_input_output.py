@@ -43,7 +43,11 @@ class MakeDecodingBatchInputOutput:
         active_slots = [[]]
         generation_steps = []
         logits_vec = [[]]
+        print(f"DEBUG make_decoding_batch_input_output: num_ctx_requests={len(scheduled_requests.context_requests)}, "
+              f"num_gen_requests={len(scheduled_requests.generation_requests)}")
         for i, r in enumerate(scheduled_requests.context_requests):
+            print(f"  ctx_req[{i}]: py_seq_slot={r.py_seq_slot}, is_last_context_chunk={r.is_last_context_chunk}, "
+                  f"decoding_iter={r.decoding_iter}")
             if r.is_last_context_chunk:
                 active_slots[0].append(r.py_seq_slot)
                 generation_steps.append(r.decoding_iter)
@@ -66,5 +70,7 @@ class MakeDecodingBatchInputOutput:
         decoding_input.batch_slots = [
             torch.tensor(active_slots[0], dtype=torch.int32)
         ]
+        print(f"DEBUG make_decoding_batch_input_output: active_slots={active_slots}, "
+              f"generation_steps={generation_steps}")
 
         return decoding_input

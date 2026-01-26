@@ -2363,6 +2363,17 @@ class TRTLLMSampler(Sampler):
     ) -> SampleStateTRTLLM:
         batch_size = scheduled_requests.batch_size
         beam_width = self.beam_width(scheduled_requests.all_requests())
+
+        # Debug: print context request info
+        print(f"DEBUG TRTLLMSampler.sample_async: batch_size={batch_size}, beam_width={beam_width}")
+        for i, req in enumerate(scheduled_requests.context_requests):
+            print(f"  ctx_req[{i}]: request_id={req.py_request_id}, py_seq_slot={req.py_seq_slot}, "
+                  f"py_batch_idx={req.py_batch_idx}, is_last_context_chunk={req.is_last_context_chunk}, "
+                  f"context_remaining_length={req.context_remaining_length}")
+        for i, req in enumerate(scheduled_requests.generation_requests):
+            print(f"  gen_req[{i}]: request_id={req.py_request_id}, py_seq_slot={req.py_seq_slot}, "
+                  f"py_batch_idx={req.py_batch_idx}")
+
         if (batch_size > 1 and beam_width > 1
                 and any(request.py_return_log_probs
                         for request in scheduled_requests.all_requests())):
@@ -2387,6 +2398,12 @@ class TRTLLMSampler(Sampler):
         self.algs.decoder.forward_async(
             self.store["decoder_state"],
             self.store["decoding_input"][self.micro_batch_idx])
+
+        # Debug: print all_new_tokens after decoder runs
+        torch.cuda.synchronize()
+        all_new_tokens_cpu = self.store["decoder_state"].all_new_tokens.cpu()
+        print(f"DEBUG TRTLLMSampler: all_new_tokens after decoder: shape={all_new_tokens_cpu.shape}, "
+              f"values[:, :4, :]={all_new_tokens_cpu[:, :4, :].tolist()}")
 
         finalize_events = {}
         gathered_ids = None
