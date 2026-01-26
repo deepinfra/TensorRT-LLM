@@ -163,8 +163,8 @@ def pre_comm_embedding_ops(
             vocab_end_index,
         )
 
-    # Debug check for input_ids out of bounds
-    if input_.numel() > 0:
+    # Debug check for input_ids out of bounds (skip during CUDA graph capture)
+    if input_.numel() > 0 and not torch.cuda.is_current_stream_capturing():
         max_id = input_.max().item()
         vocab_size = weight.shape[0]
         if max_id >= vocab_size:

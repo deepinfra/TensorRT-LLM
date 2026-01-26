@@ -39,14 +39,15 @@ class RotaryEmbedding(nn.Module):
                 flashinfer_apply_rope_with_cos_sin_cache_inplace
             q = targets[0]
             k = targets[1]
-            # Debug check for position_ids out of bounds
-            flat_pos = position_ids.view(-1)
-            max_pos = flat_pos.max().item() if flat_pos.numel() > 0 else 0
-            if max_pos >= self.max_positions:
-                raise RuntimeError(
-                    f"RoPE (flashinfer) position_ids out of range: max position {max_pos} >= max_positions {self.max_positions}. "
-                    f"Position IDs shape: {position_ids.shape}, range: [{flat_pos.min().item()}, {max_pos}]"
-                )
+            # Debug check for position_ids out of bounds (skip during CUDA graph capture)
+            if not torch.cuda.is_current_stream_capturing():
+                flat_pos = position_ids.view(-1)
+                max_pos = flat_pos.max().item() if flat_pos.numel() > 0 else 0
+                if max_pos >= self.max_positions:
+                    raise RuntimeError(
+                        f"RoPE (flashinfer) position_ids out of range: max position {max_pos} >= max_positions {self.max_positions}. "
+                        f"Position IDs shape: {position_ids.shape}, range: [{flat_pos.min().item()}, {max_pos}]"
+                    )
             flashinfer_apply_rope_with_cos_sin_cache_inplace(
                 position_ids.view(-1),
                 q,
@@ -61,14 +62,15 @@ class RotaryEmbedding(nn.Module):
         q_or_k = targets[0]
         remove_input_padding = (len(q_or_k.size()) == 2)
 
-        # Debug check for position_ids out of bounds
-        flat_pos = position_ids.view(-1)
-        max_pos = flat_pos.max().item() if flat_pos.numel() > 0 else 0
-        if max_pos >= self.max_positions:
-            raise RuntimeError(
-                f"RoPE position_ids out of range: max position {max_pos} >= max_positions {self.max_positions}. "
-                f"Position IDs shape: {position_ids.shape}, range: [{flat_pos.min().item()}, {max_pos}]"
-            )
+        # Debug check for position_ids out of bounds (skip during CUDA graph capture)
+        if not torch.cuda.is_current_stream_capturing():
+            flat_pos = position_ids.view(-1)
+            max_pos = flat_pos.max().item() if flat_pos.numel() > 0 else 0
+            if max_pos >= self.max_positions:
+                raise RuntimeError(
+                    f"RoPE position_ids out of range: max position {max_pos} >= max_positions {self.max_positions}. "
+                    f"Position IDs shape: {position_ids.shape}, range: [{flat_pos.min().item()}, {max_pos}]"
+                )
         cos_sin = self.rotary_cos_sin[position_ids.view(-1)]
         cos, sin = cos_sin[:, 0, :], cos_sin[:, 1, :]
         cos = cos.to(dtype=q_or_k.dtype).unsqueeze(0)
