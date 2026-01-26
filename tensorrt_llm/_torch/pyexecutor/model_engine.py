@@ -2466,6 +2466,10 @@ class PyTorchModelEngine(ModelEngine):
                       inputs: Dict[str, Any],
                       gather_ids: Optional[torch.Tensor],
                       gather_context_logits: bool = False) -> Dict[str, Any]:
+        # Sync to avoid race conditions with block reuse
+        attn_metadata = inputs.get('attn_metadata')
+        if attn_metadata is not None and hasattr(attn_metadata, 'num_ctx_cached_tokens') and attn_metadata.num_ctx_cached_tokens > 0:
+            torch.cuda.current_stream().synchronize()
         inputs = self._preprocess_inputs(inputs)
         if inputs.get('spec_metadata', None):
             gather_ids = inputs['spec_metadata'].gather_ids
