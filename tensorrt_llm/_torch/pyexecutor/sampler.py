@@ -2406,10 +2406,12 @@ class TRTLLMSampler(Sampler):
                 self.store["decoder_input_buffers"][self.micro_batch_idx],
                 self.store["decoder_state"], self.store["buffer_manager"])
 
-        # Debug: print decoding_input info
+        # Debug: print decoding_input info (C++ binding)
         decoding_input = self.store["decoding_input"][self.micro_batch_idx]
-        print(f"DEBUG TRTLLMSampler: decoding_input batch_slots={[s.tolist() for s in decoding_input.batch_slots]}, "
-              f"generation_steps={decoding_input.generation_steps}")
+        try:
+            print(f"DEBUG TRTLLMSampler: decoding_input type={type(decoding_input)}")
+        except Exception as e:
+            print(f"DEBUG TRTLLMSampler: decoding_input debug failed: {e}")
 
         # Debug: print all_new_tokens BEFORE decoder runs
         torch.cuda.synchronize()
