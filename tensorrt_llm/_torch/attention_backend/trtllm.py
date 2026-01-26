@@ -1044,6 +1044,10 @@ class TrtllmAttentionMetadata(AttentionMetadata):
                      out=self.host_ctx_kv_indptr[1:self.num_contexts + 1])
         self.ctx_kv_indptr[:self.num_contexts + 1].copy_(
             self.host_ctx_kv_indptr[:self.num_contexts + 1], non_blocking=True)
+        # Synchronize to ensure all H2D copies complete before attention kernels run.
+        # This helps prevent race conditions when cached KV blocks are used.
+        if self.enable_context_mla_with_cached_kv and self.num_ctx_cached_tokens > 0:
+            torch.cuda.current_stream().synchronize()
 
     def update_spec_dec_param(self, is_spec_decoding_enabled, is_spec_dec_tree,
                               is_spec_dec_dynamic_tree, max_draft_tokens):
