@@ -163,6 +163,15 @@ def pre_comm_embedding_ops(
             vocab_end_index,
         )
 
+    # Debug check for input_ids out of bounds
+    if input_.numel() > 0:
+        max_id = input_.max().item()
+        vocab_size = weight.shape[0]
+        if max_id >= vocab_size:
+            raise RuntimeError(
+                f"Embedding input_ids out of range: max id {max_id} >= vocab_size {vocab_size}. "
+                f"Input shape: {input_.shape}, range: [{input_.min().item()}, {max_id}]"
+            )
     # Get the embeddings.
     output = F.embedding(input_, weight)
 
