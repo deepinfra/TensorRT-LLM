@@ -2416,6 +2416,18 @@ class PyTorchModelEngine(ModelEngine):
                 padded_requests, kv_cache_manager, attn_metadata, spec_metadata,
                 new_tensors_device, cache_indirection_buffer)
 
+            # Debug: check for corrupted input_ids right after _prepare_inputs
+            input_ids_tensor = inputs.get('input_ids')
+            if input_ids_tensor is not None and input_ids_tensor.numel() > 0:
+                torch.cuda.synchronize()
+                max_id = input_ids_tensor.max().item()
+                if max_id >= 200000:
+                    raise RuntimeError(
+                        f"Corrupted input_ids right after _prepare_inputs: max id {max_id}. "
+                        f"Shape: {input_ids_tensor.shape}, "
+                        f"First 10 values: {input_ids_tensor[:10].tolist()}"
+                    )
+
             self.iter_counter += 1
             with with_shared_pool(self.cuda_graph_runner.get_graph_pool()):
                 if not maybe_graph:
