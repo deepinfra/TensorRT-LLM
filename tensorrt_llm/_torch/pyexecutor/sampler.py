@@ -1629,6 +1629,11 @@ class TorchSampler(Sampler):
             [r.py_seq_slot for r in requests],
             dtype=torch.int64,  # for index_fill_
             pin_memory=True)
+        # Debug: print sampler info
+        print(f"DEBUG sampler: num_ctx_requests={len(scheduled_requests.context_requests)}, "
+              f"num_gen_requests={len(scheduled_requests.generation_requests)}, "
+              f"seq_slots={seq_slots_host.tolist()}, "
+              f"new_tokens_shape={new_tokens.shape}")
         new_tokens_host = self._process_requests(
             scheduled_requests,
             model_outputs,
@@ -1637,6 +1642,10 @@ class TorchSampler(Sampler):
             seq_slots=seq_slots_host,
             log_probs_host=log_probs_host,
             resource_manager=resource_manager)
+        # Debug: print what was written
+        import torch as _torch
+        _torch.cuda.synchronize()
+        print(f"DEBUG sampler after: new_tokens[:, seq_slots, :] = {new_tokens[:, seq_slots_host, :].cpu().tolist()}")
 
         sampler_event = torch.cuda.Event()
         sampler_event.record()

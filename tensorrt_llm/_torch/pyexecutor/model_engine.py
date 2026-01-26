@@ -1354,6 +1354,9 @@ class PyTorchModelEngine(ModelEngine):
                 multimodal_params_list.append(multimodal_params)
 
             request.py_batch_idx = request.py_seq_slot
+            # Debug: print seq_slot assignment for context requests
+            print(f"DEBUG ctx_request: request_id={request.py_request_id}, "
+                  f"py_seq_slot={request.py_seq_slot}, py_batch_idx={request.py_batch_idx}")
 
         if len(multimodal_params_list) > 0:
             # discard the text token indices as it only includes context tokens at this moment
@@ -1507,6 +1510,10 @@ class PyTorchModelEngine(ModelEngine):
 
         for request in generation_requests:
             request_ids.append(request.py_request_id)
+            # Debug: print generation request info
+            print(f"DEBUG gen_request: request_id={request.py_request_id}, "
+                  f"py_seq_slot={request.py_seq_slot}, py_batch_idx={request.py_batch_idx}, "
+                  f"new_tokens_device_is_None={new_tokens_device is None}, is_dummy={request.is_dummy}")
             beam_width = request.sampling_config.beam_width
             for beam in range(beam_width):
                 # the request has no previous tensor:
@@ -1693,6 +1700,15 @@ class PyTorchModelEngine(ModelEngine):
             torch.cuda.current_stream().synchronize()
             seq_slots_device = previous_seq_slots_device()
             max_draft_len = max(draft_lens)
+            # Debug: print new_tokens_device info
+            print(f"DEBUG new_tokens_device: shape={new_tokens_device.shape}, "
+                  f"seq_slots_device={seq_slots_device.tolist()}, "
+                  f"previous_batch_indices={previous_batch_indices}, "
+                  f"max_draft_len={max_draft_len}")
+            # Debug: print the actual values at the indexed positions
+            torch.cuda.synchronize()
+            print(f"DEBUG new_tokens_device values at seq_slots: "
+                  f"{new_tokens_device[:max_draft_len + 1, seq_slots_device, :self.max_beam_width].cpu().tolist()}")
             new_tokens = new_tokens_device[:max_draft_len + 1,
                                            seq_slots_device, :self.
                                            max_beam_width]
