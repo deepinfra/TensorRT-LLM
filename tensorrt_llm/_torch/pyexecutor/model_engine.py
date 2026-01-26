@@ -1626,6 +1626,11 @@ class PyTorchModelEngine(ModelEngine):
             self.previous_kv_lens_offsets_cuda *= 0
 
             if previous_batch_len > 0:
+                # Synchronize to ensure the previous batch's sampling has completed
+                # before reading from new_tokens_device. This is critical for the
+                # overlap scheduler where the sampler_event.synchronize() in
+                # _update_requests happens AFTER _forward_step has already started.
+                torch.cuda.current_stream().synchronize()
                 previous_slots = previous_seq_slots_device()
                 # previous input ids
                 previous_batch_tokens = previous_batch_len * (
@@ -1681,6 +1686,11 @@ class PyTorchModelEngine(ModelEngine):
                         non_blocking=True)
 
         elif new_tokens_device is not None:
+            # Synchronize to ensure the previous batch's sampling has completed
+            # before reading from new_tokens_device. This is critical for the
+            # overlap scheduler where the sampler_event.synchronize() in
+            # _update_requests happens AFTER _forward_step has already started.
+            torch.cuda.current_stream().synchronize()
             seq_slots_device = previous_seq_slots_device()
             max_draft_len = max(draft_lens)
             new_tokens = new_tokens_device[:max_draft_len + 1,
