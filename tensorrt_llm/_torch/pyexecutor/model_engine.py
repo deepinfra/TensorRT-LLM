@@ -2483,6 +2483,19 @@ class PyTorchModelEngine(ModelEngine):
         if attn_metadata is not None and hasattr(attn_metadata, 'num_ctx_cached_tokens') and attn_metadata.num_ctx_cached_tokens > 0:
             torch.cuda.current_stream().synchronize()
         inputs = self._preprocess_inputs(inputs)
+
+        # Debug: check for corrupted input_ids after preprocessing
+        input_ids_tensor = inputs.get('input_ids')
+        if input_ids_tensor is not None and input_ids_tensor.numel() > 0:
+            torch.cuda.synchronize()  # Ensure async copies complete
+            max_id = input_ids_tensor.max().item()
+            if max_id >= 200000:  # reasonable vocab size upper bound
+                raise RuntimeError(
+                    f"Corrupted input_ids after _preprocess_inputs: max id {max_id}. "
+                    f"Shape: {input_ids_tensor.shape}, "
+                    f"First 10 values: {input_ids_tensor[:10].tolist()}"
+                )
+
         if inputs.get('spec_metadata', None):
             gather_ids = inputs['spec_metadata'].gather_ids
 
