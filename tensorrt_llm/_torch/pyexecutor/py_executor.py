@@ -1003,6 +1003,8 @@ class PyExecutor:
                         self._update_requests(previous_batch.sample_state)
 
                         if self.block_reuse_enabled and not self.kv_cache_manager.is_vswa and self.kv_cache_transceiver:
+                            # Ensure all CUDA operations complete before blocks are marked for reuse
+                            torch.cuda.current_stream().synchronize()
                             for req in previous_batch.scheduled_ctx_reqs:
                                 if req.is_context_only_request and (
                                         req.is_context_finished
@@ -1213,6 +1215,8 @@ class PyExecutor:
                     self._update_request_states(scheduled_batch)
                     self._update_requests(sample_state, self.resource_manager)
                     if self.block_reuse_enabled and not self.kv_cache_manager.is_vswa and self.kv_cache_transceiver:
+                        # Ensure all CUDA operations complete before blocks are marked for reuse
+                        torch.cuda.current_stream().synchronize()
                         for req in scheduled_batch.context_requests:
                             if req.is_context_only_request and (
                                     req.is_context_finished
@@ -1383,6 +1387,8 @@ class PyExecutor:
                         self._update_requests(self.previous_batch.sample_state)
 
                         if self.block_reuse_enabled and not self.kv_cache_manager.is_vswa and self.kv_cache_transceiver:
+                            # Ensure all CUDA operations complete before blocks are marked for reuse
+                            torch.cuda.current_stream().synchronize()
                             for req in self.previous_batch.sample_state.scheduled_requests.context_requests:
                                 if req.is_context_only_request and (
                                         req.is_context_finished
