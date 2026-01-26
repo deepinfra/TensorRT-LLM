@@ -2387,6 +2387,17 @@ class TRTLLMSampler(Sampler):
         if beam_width > 1:
             self._update_cache_indirection_buffer(scheduled_requests)
 
+        # Debug: check logits before decoding
+        logits = model_outputs["logits"]
+        print(f"DEBUG TRTLLMSampler: logits shape={logits.shape}, dtype={logits.dtype}, "
+              f"device={logits.device}, num_context_logits_prefix_sum={num_context_logits_prefix_sum}")
+        if logits.numel() > 0:
+            print(f"  logits min={logits.min().item():.4f}, max={logits.max().item():.4f}, "
+                  f"has_nan={torch.isnan(logits).any().item()}, has_inf={torch.isinf(logits).any().item()}")
+            # Check argmax of logits (should be a valid vocab token)
+            argmax_token = logits[-1].argmax().item()
+            print(f"  logits[-1] argmax token={argmax_token}")
+
         self.store["decoding_input"][
             self.micro_batch_idx] = make_decoding_batch_input(
                 scheduled_requests.context_requests,
@@ -2395,14 +2406,25 @@ class TRTLLMSampler(Sampler):
                 self.store["decoder_input_buffers"][self.micro_batch_idx],
                 self.store["decoder_state"], self.store["buffer_manager"])
 
+        # Debug: print decoding_input info
+        decoding_input = self.store["decoding_input"][self.micro_batch_idx]
+        print(f"DEBUG TRTLLMSampler: decoding_input batch_slots={[s.tolist() for s in decoding_input.batch_slots]}, "
+              f"generation_steps={decoding_input.generation_steps}")
+
+        # Debug: print all_new_tokens BEFORE decoder runs
+        torch.cuda.synchronize()
+        all_new_tokens_before = self.store["decoder_state"].all_new_tokens.cpu()
+        print(f"DEBUG TRTLLMSampler: all_new_tokens BEFORE decoder: shape={all_new_tokens_before.shape}, "
+              f"values[:, :4, :]={all_new_tokens_before[:, :4, :].tolist()}")
+
         self.algs.decoder.forward_async(
             self.store["decoder_state"],
             self.store["decoding_input"][self.micro_batch_idx])
 
-        # Debug: print all_new_tokens after decoder runs
+        # Debug: print all_new_tokens AFTER decoder runs
         torch.cuda.synchronize()
         all_new_tokens_cpu = self.store["decoder_state"].all_new_tokens.cpu()
-        print(f"DEBUG TRTLLMSampler: all_new_tokens after decoder: shape={all_new_tokens_cpu.shape}, "
+        print(f"DEBUG TRTLLMSampler: all_new_tokens AFTER decoder: shape={all_new_tokens_cpu.shape}, "
               f"values[:, :4, :]={all_new_tokens_cpu[:, :4, :].tolist()}")
 
         finalize_events = {}
