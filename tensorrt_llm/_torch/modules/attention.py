@@ -1025,6 +1025,16 @@ class MLA(nn.Module):
         Returns:
             torch.Tensor: The output tensor.
         """
+        # Debug: check hidden_states input for layers 21 and 22
+        if self.layer_idx in [21, 22]:
+            torch.cuda.synchronize()
+            hs_has_nan = torch.isnan(hidden_states).any().item()
+            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
+            if hs_has_nan:
+                print(f"DEBUG forward_impl layer {self.layer_idx}: hidden_states INPUT has NaN! num_ctx_cached={num_cached}")
+            else:
+                print(f"DEBUG forward_impl layer {self.layer_idx}: hidden_states INPUT OK, num_ctx_cached={num_cached}")
+
         # split q, k, v into context and gen batches
         num_contexts = attn_metadata.num_contexts
         num_generations = attn_metadata.num_generations
@@ -1061,6 +1071,14 @@ class MLA(nn.Module):
             self.ln_events[1],
             self.aux_stream,
         )
+
+        # Debug: check q after q_b_proj for layer 22
+        if self.layer_idx == 22:
+            torch.cuda.synchronize()
+            q_has_nan = torch.isnan(q).any().item()
+            latent_has_nan = torch.isnan(latent_cache).any().item()
+            if q_has_nan or latent_has_nan:
+                print(f"DEBUG forward_impl layer 22: after q_b_proj - q_has_nan={q_has_nan}, latent_has_nan={latent_has_nan}")
 
         assert q.shape[
             0] == num_tokens, f"Expect q.shape[0] to be {num_tokens}, but got {q.shape[0]}"
@@ -1407,6 +1425,12 @@ class MLA(nn.Module):
         q_nope, q_pe = q.view([-1, self.num_heads, self.qk_head_dim]).split(
             [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
 
+        # Debug: check inputs for NaN
+        torch.cuda.synchronize()
+        q_has_nan = torch.isnan(q).any().item()
+        if q_has_nan and self.layer_idx == 22:
+            print(f"DEBUG forward_generation layer {self.layer_idx}: q has NaN!")
+
         # fused_q contains 1) the result of the following bmm with shape [num_tokens, num_heads, kv_lora_rank]
         # 2) rope(q_pe) with shape [num_tokens, num_heads, qk_rope_head_dim]. rope is applied inside AttentionOp
         fused_q = torch.empty(
@@ -1452,6 +1476,12 @@ class MLA(nn.Module):
             self.num_heads * (self.kv_lora_rank + self.qk_rope_head_dim)
         ])
 
+        # Debug: check fused_q before mqa.forward
+        torch.cuda.synchronize()
+        fused_q_has_nan = torch.isnan(fused_q).any().item()
+        if fused_q_has_nan and self.layer_idx == 22:
+            print(f"DEBUG forward_generation layer {self.layer_idx}: fused_q has NaN BEFORE mqa.forward!")
+
         attn_out_latent = self.mqa.forward(
             fused_q,
             None,
@@ -1463,6 +1493,14 @@ class MLA(nn.Module):
             q_pe=q_pe,  # used by `invokeMLARopeGeneration`
         )
         fused_q = None
+
+        # Debug: check attn_out_latent for NaN after mqa.forward
+        torch.cuda.synchronize()
+        attn_out_has_nan = torch.isnan(attn_out_latent).any().item()
+        if attn_out_has_nan and self.layer_idx == 22:
+            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
+            print(f"DEBUG forward_generation layer {self.layer_idx}: attn_out_latent has NaN after mqa.forward! "
+                  f"shape={attn_out_latent.shape}, num_ctx_cached={num_cached}")
 
         assert (attn_out_latent.shape[0] == q.shape[0] and
                 attn_out_latent.shape[1] == self.num_heads * self.kv_lora_rank)
