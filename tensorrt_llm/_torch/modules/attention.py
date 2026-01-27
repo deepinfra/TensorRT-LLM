@@ -1170,6 +1170,13 @@ class MLA(nn.Module):
         assert latent_cache is not None
         trtllm_attention = cast(TrtllmAttention, self.mha)
 
+        # Debug: check q and latent_cache before processing
+        if self.layer_idx in [0, 21, 22]:
+            torch.cuda.synchronize()
+            q_has_nan = torch.isnan(q).any().item()
+            lc_has_nan = torch.isnan(latent_cache).any().item()
+            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx} ENTRY: q_has_nan={q_has_nan}, latent_cache_has_nan={lc_has_nan}")
+
         # apply RoPE, append compressed_kv + k_pe to paged kv cache and assign q_pe to q
         trtllm_attention.mla_rope_append_paged_kv_assign_q(
             q, latent_cache, attn_metadata)
@@ -1177,6 +1184,14 @@ class MLA(nn.Module):
         # copy full_compressed_kv and full_k_pe from paged kv cache
         full_compressed_kv, full_k_pe = trtllm_attention.load_paged_kv_cache_for_mla(
             attn_metadata, q.dtype)
+
+        # Debug: check loaded KV cache for NaN
+        if self.layer_idx in [0, 21, 22]:
+            torch.cuda.synchronize()
+            ckv_has_nan = torch.isnan(full_compressed_kv).any().item()
+            kpe_has_nan = torch.isnan(full_k_pe).any().item()
+            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: loaded KV cache - ckv_has_nan={ckv_has_nan}, kpe_has_nan={kpe_has_nan}, "
+                  f"ckv_shape={full_compressed_kv.shape}, kpe_shape={full_k_pe.shape}")
         assert full_compressed_kv.shape[
             0] == attn_metadata.num_ctx_cached_tokens + attn_metadata.num_ctx_tokens
         assert full_compressed_kv.shape[1] == self.kv_lora_rank
@@ -1196,12 +1211,25 @@ class MLA(nn.Module):
             -1,
         )
 
+        # Debug: check after kv_b_proj
+        if self.layer_idx in [0, 21, 22]:
+            torch.cuda.synchronize()
+            kv_has_nan = torch.isnan(full_kv).any().item()
+            v_has_nan = torch.isnan(full_v).any().item()
+            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: after kv_b_proj - kv_has_nan={kv_has_nan}, v_has_nan={v_has_nan}")
+
         full_k_nope = full_k_nope.view(-1, self.num_heads,
                                        self.qk_nope_head_dim)
         full_k_pe = full_k_pe.view(-1, 1, self.qk_rope_head_dim)
         full_k = compiled_cat(
             (full_k_nope, full_k_pe.expand(-1, self.num_heads, -1)), dim=-1)
         full_k = full_k.view(-1, self.num_heads * self.qk_head_dim)
+
+        # Debug: check full_k before attention
+        if self.layer_idx in [0, 21, 22]:
+            torch.cuda.synchronize()
+            k_has_nan = torch.isnan(full_k).any().item()
+            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: before mha.forward - k_has_nan={k_has_nan}, q_shape={q.shape}, k_shape={full_k.shape}")
 
         # release pytorch activation memory
         full_compressed_kv = None
@@ -1221,6 +1249,12 @@ class MLA(nn.Module):
             out_scale=self.out_scale,
             output=output,
         )
+
+        # Debug: check attn_output after mha.forward
+        if self.layer_idx in [0, 21, 22]:
+            torch.cuda.synchronize()
+            out_has_nan = torch.isnan(attn_output).any().item()
+            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: after mha.forward - out_has_nan={out_has_nan}")
 
         return attn_output
 
@@ -1404,11 +1438,17 @@ class MLA(nn.Module):
             trtllm_attention = cast(TrtllmAttention, self.mha)
             if trtllm_attention.is_chunked_prefill_for_mla_context(
                     attn_metadata):
+                if self.layer_idx == 0:
+                    print(f"DEBUG forward_context layer 0: using forward_context_with_chunked_prefill")
                 return self.forward_context_with_chunked_prefill(
                     q, compressed_kv, latent_cache, attn_metadata, output)
             elif trtllm_attention.has_cached_kv_for_mla_context(attn_metadata):
+                if self.layer_idx == 0:
+                    print(f"DEBUG forward_context layer 0: using forward_context_with_cached_kv")
                 return self.forward_context_with_cached_kv(
                     q, latent_cache, attn_metadata, output)
+        if self.layer_idx == 0:
+            print(f"DEBUG forward_context layer 0: using forward_context_default")
         return self.forward_context_default(q, compressed_kv, k_pe,
                                             attn_metadata, output, latent_cache)
 
