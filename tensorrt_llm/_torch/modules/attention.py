@@ -1518,11 +1518,13 @@ class MLA(nn.Module):
                               attn_metadata,
                               output=attn_output)
 
-        # Debug: check attn_output for NaN (layer 0 only)
-        if self.layer_idx == 0:
-            out_has_nan = torch.isnan(attn_output).any().item()
-            if out_has_nan:
-                print(f"DEBUG MLA.forward layer 0: attn_output has NaN AFTER attention!")
+        # Debug: check attn_output for NaN (all layers, with sync)
+        torch.cuda.synchronize()
+        out_has_nan = torch.isnan(attn_output).any().item()
+        if out_has_nan:
+            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
+            print(f"DEBUG MLA.forward layer {self.layer_idx}: attn_output has NaN! "
+                  f"num_ctx_cached={num_cached}")
 
         attn_output = self.o_proj(attn_output,
                                   all_reduce_params=all_reduce_params)
