@@ -1609,6 +1609,7 @@ class PyTorchModelEngine(ModelEngine):
         print(f"DEBUG: num_tokens={num_tokens}, total_num_tokens={total_num_tokens}, "
               f"input_ids[:10]={input_ids[:10] if input_ids else []}, "
               f"position_ids[:10]={position_ids[:10] if position_ids else []}, "
+              f"num_cached_tokens_per_seq={num_cached_tokens_per_seq}, "
               f"num_ctx_requests={len(scheduled_requests.context_requests)}, "
               f"num_gen_requests={len(generation_requests)}, "
               f"len(extend_requests)={len(extend_requests)}, "
@@ -2537,6 +2538,7 @@ class PyTorchModelEngine(ModelEngine):
         attn_metadata = inputs.get('attn_metadata')
         if attn_metadata is not None and hasattr(attn_metadata, 'num_ctx_cached_tokens') and attn_metadata.num_ctx_cached_tokens > 0:
             torch.cuda.current_stream().synchronize()
+            print(f"DEBUG _forward_step: Block reuse active! num_ctx_cached_tokens={attn_metadata.num_ctx_cached_tokens}")
         # Debug: check for corrupted input_ids BEFORE preprocessing
         input_ids_tensor = inputs.get('input_ids')
         if input_ids_tensor is not None and input_ids_tensor.numel() > 0:
@@ -2573,6 +2575,16 @@ class PyTorchModelEngine(ModelEngine):
             return_context_logits=gather_ids is not None
             or gather_context_logits,
         )
+
+        # Debug: check model output for NaN
+        if isinstance(outputs, dict) and 'logits' in outputs:
+            logits_out = outputs['logits']
+            if logits_out is not None and logits_out.numel() > 0:
+                has_nan = torch.isnan(logits_out).any().item()
+                if has_nan:
+                    print(f"DEBUG _forward_step: Model output logits contain NaN! "
+                          f"shape={logits_out.shape}, "
+                          f"num_ctx_cached_tokens={getattr(inputs.get('attn_metadata'), 'num_ctx_cached_tokens', 'N/A')}")
 
         if self.without_logits:
             return outputs
