@@ -1393,16 +1393,29 @@ class MLA(nn.Module):
             )
 
             # Debug: check temp_attn_output after mha.forward in loop
-            if self.layer_idx == 22:
+            if self.layer_idx in [0, 22]:
                 torch.cuda.synchronize()
                 out_has_nan = torch.isnan(temp_attn_output).any().item()
-                print(f"DEBUG chunked_prefill layer 22 loop {loop_idx}: after mha.forward - out_has_nan={out_has_nan}")
+                temp_softmax_min = self.temp_softmax_stats_tensor.min().item()
+                temp_softmax_max = self.temp_softmax_stats_tensor.max().item()
+                loop_merge_op = attn_metadata.merge_op_tensor[loop_idx].item() if attn_metadata.merge_op_tensor[loop_idx].numel() == 1 else attn_metadata.merge_op_tensor[loop_idx].tolist()
+                print(f"DEBUG chunked_prefill layer {self.layer_idx} loop {loop_idx}: after mha.forward - "
+                      f"out_has_nan={out_has_nan}, temp_softmax min={temp_softmax_min:.6f} max={temp_softmax_max:.6f}, "
+                      f"merge_op={loop_merge_op}")
 
             # merge attn result
             temp_merge_op = attn_metadata.merge_op_tensor[loop_idx]
             trtllm_attention.merge_attention_for_mla(
                 attn_output, temp_attn_output, self.softmax_stats_tensor,
                 self.temp_softmax_stats_tensor, temp_merge_op, attn_metadata)
+
+            # Debug: check after merge in loop
+            if self.layer_idx in [0, 22]:
+                torch.cuda.synchronize()
+                softmax_min = self.softmax_stats_tensor.min().item()
+                softmax_max = self.softmax_stats_tensor.max().item()
+                print(f"DEBUG chunked_prefill layer {self.layer_idx} loop {loop_idx}: after merge - "
+                      f"softmax_stats min={softmax_min:.6f} max={softmax_max:.6f}")
 
         # Debug: check state after chunked loop
         if self.layer_idx in [0, 22]:
