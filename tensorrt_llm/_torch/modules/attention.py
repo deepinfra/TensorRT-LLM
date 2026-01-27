@@ -1404,6 +1404,14 @@ class MLA(nn.Module):
                 attn_output, temp_attn_output, self.softmax_stats_tensor,
                 self.temp_softmax_stats_tensor, temp_merge_op, attn_metadata)
 
+        # Debug: check state after chunked loop
+        if self.layer_idx in [0, 22]:
+            torch.cuda.synchronize()
+            attn_out_has_nan = torch.isnan(attn_output).any().item()
+            softmax_has_nan = torch.isnan(self.softmax_stats_tensor).any().item()
+            print(f"DEBUG chunked_prefill layer {self.layer_idx} AFTER LOOP: "
+                  f"attn_output_has_nan={attn_out_has_nan}, softmax_stats_has_nan={softmax_has_nan}")
+
         # deal with the uncached kv
         kv = self.kv_b_proj(compressed_kv)
         _, k_pe = latent_cache.view([
@@ -1447,6 +1455,18 @@ class MLA(nn.Module):
             chunked_prefill_buffer_batch_size,
             output=temp_attn_output,
         )
+
+        # Debug: check before final merge
+        if self.layer_idx in [0, 22]:
+            torch.cuda.synchronize()
+            temp_out_has_nan = torch.isnan(temp_attn_output).any().item()
+            attn_out_has_nan = torch.isnan(attn_output).any().item()
+            softmax_has_nan = torch.isnan(self.softmax_stats_tensor).any().item()
+            temp_softmax_has_nan = torch.isnan(self.temp_softmax_stats_tensor).any().item()
+            print(f"DEBUG chunked_prefill layer {self.layer_idx} BEFORE FINAL MERGE: "
+                  f"temp_attn_output_has_nan={temp_out_has_nan}, attn_output_has_nan={attn_out_has_nan}, "
+                  f"softmax_stats_has_nan={softmax_has_nan}, temp_softmax_stats_has_nan={temp_softmax_has_nan}")
+
         temp_merge_op = attn_metadata.merge_op_tensor[chunked_loop_num]
         trtllm_attention.merge_attention_for_mla(attn_output, temp_attn_output,
                                                  self.softmax_stats_tensor,
@@ -1454,10 +1474,10 @@ class MLA(nn.Module):
                                                  temp_merge_op, attn_metadata)
 
         # Debug: check final attn_output after merge
-        if self.layer_idx == 22:
+        if self.layer_idx in [0, 22]:
             torch.cuda.synchronize()
             final_has_nan = torch.isnan(attn_output).any().item()
-            print(f"DEBUG chunked_prefill layer 22 FINAL: after merge - attn_output_has_nan={final_has_nan}")
+            print(f"DEBUG chunked_prefill layer {self.layer_idx} FINAL: after merge - attn_output_has_nan={final_has_nan}")
 
         # copy back kv_lens_runtime and kv_lens_cuda_runtime
         attn_metadata.kv_lens_runtime = origin_kv_lens_runtime
