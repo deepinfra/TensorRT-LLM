@@ -1709,15 +1709,6 @@ class PyTorchModelEngine(ModelEngine):
             torch.cuda.current_stream().synchronize()
             seq_slots_device = previous_seq_slots_device()
             max_draft_len = max(draft_lens)
-            # Debug: print new_tokens_device info
-            print(f"DEBUG new_tokens_device: shape={new_tokens_device.shape}, "
-                  f"seq_slots_device={seq_slots_device.tolist()}, "
-                  f"previous_batch_indices={previous_batch_indices}, "
-                  f"max_draft_len={max_draft_len}")
-            # Debug: print the actual values at the indexed positions
-            torch.cuda.synchronize()
-            print(f"DEBUG new_tokens_device values at seq_slots: "
-                  f"{new_tokens_device[:max_draft_len + 1, seq_slots_device, :self.max_beam_width].cpu().tolist()}")
             new_tokens = new_tokens_device[:max_draft_len + 1,
                                            seq_slots_device, :self.
                                            max_beam_width]
@@ -2460,18 +2451,6 @@ class PyTorchModelEngine(ModelEngine):
                 padded_requests, kv_cache_manager, attn_metadata, spec_metadata,
                 new_tensors_device, cache_indirection_buffer)
 
-            # Debug: check for corrupted input_ids right after _prepare_inputs
-            input_ids_tensor = inputs.get('input_ids')
-            if input_ids_tensor is not None and input_ids_tensor.numel() > 0:
-                torch.cuda.synchronize()
-                max_id = input_ids_tensor.max().item()
-                if max_id >= 200000:
-                    raise RuntimeError(
-                        f"Corrupted input_ids right after _prepare_inputs: max id {max_id}. "
-                        f"Shape: {input_ids_tensor.shape}, "
-                        f"First 10 values: {input_ids_tensor[:10].tolist()}"
-                    )
-
             self.iter_counter += 1
             with with_shared_pool(self.cuda_graph_runner.get_graph_pool()):
                 if not maybe_graph:
@@ -2535,35 +2514,7 @@ class PyTorchModelEngine(ModelEngine):
                       gather_ids: Optional[torch.Tensor],
                       gather_context_logits: bool = False) -> Dict[str, Any]:
         # Sync to avoid race conditions with block reuse
-        attn_metadata = inputs.get('attn_metadata')
-        if attn_metadata is not None and hasattr(attn_metadata, 'num_ctx_cached_tokens') and attn_metadata.num_ctx_cached_tokens > 0:
-            torch.cuda.current_stream().synchronize()
-            print(f"DEBUG _forward_step: Block reuse active! num_ctx_cached_tokens={attn_metadata.num_ctx_cached_tokens}")
-        # Debug: check for corrupted input_ids BEFORE preprocessing
-        input_ids_tensor = inputs.get('input_ids')
-        if input_ids_tensor is not None and input_ids_tensor.numel() > 0:
-            torch.cuda.synchronize()  # Ensure async copies complete
-            max_id = input_ids_tensor.max().item()
-            if max_id >= 200000:
-                raise RuntimeError(
-                    f"Corrupted input_ids BEFORE _preprocess_inputs: max id {max_id}. "
-                    f"Shape: {input_ids_tensor.shape}, "
-                    f"First 10 values: {input_ids_tensor[:10].tolist()}"
-                )
-
         inputs = self._preprocess_inputs(inputs)
-
-        # Debug: check for corrupted input_ids after preprocessing
-        input_ids_tensor = inputs.get('input_ids')
-        if input_ids_tensor is not None and input_ids_tensor.numel() > 0:
-            torch.cuda.synchronize()  # Ensure async copies complete
-            max_id = input_ids_tensor.max().item()
-            if max_id >= 200000:  # reasonable vocab size upper bound
-                raise RuntimeError(
-                    f"Corrupted input_ids after _preprocess_inputs: max id {max_id}. "
-                    f"Shape: {input_ids_tensor.shape}, "
-                    f"First 10 values: {input_ids_tensor[:10].tolist()}"
-                )
 
         if inputs.get('spec_metadata', None):
             gather_ids = inputs['spec_metadata'].gather_ids
