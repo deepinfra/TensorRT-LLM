@@ -1523,19 +1523,17 @@ class MLA(nn.Module):
         if isinstance(self.mha, TrtllmAttention):
             assert isinstance(attn_metadata, TrtllmAttentionMetadata)
             trtllm_attention = cast(TrtllmAttention, self.mha)
-            # WORKAROUND: Prefer forward_context_with_cached_kv over chunked_prefill
-            # to avoid softmax_stats bug in chunked prefill path for certain layers
-            if trtllm_attention.has_cached_kv_for_mla_context(attn_metadata):
-                if self.layer_idx == 0:
-                    print(f"DEBUG forward_context layer 0: using forward_context_with_cached_kv (workaround)")
-                return self.forward_context_with_cached_kv(
-                    q, latent_cache, attn_metadata, output)
-            elif trtllm_attention.is_chunked_prefill_for_mla_context(
+            if trtllm_attention.is_chunked_prefill_for_mla_context(
                     attn_metadata):
                 if self.layer_idx == 0:
                     print(f"DEBUG forward_context layer 0: using forward_context_with_chunked_prefill")
                 return self.forward_context_with_chunked_prefill(
                     q, compressed_kv, latent_cache, attn_metadata, output)
+            elif trtllm_attention.has_cached_kv_for_mla_context(attn_metadata):
+                if self.layer_idx == 0:
+                    print(f"DEBUG forward_context layer 0: using forward_context_with_cached_kv")
+                return self.forward_context_with_cached_kv(
+                    q, latent_cache, attn_metadata, output)
         if self.layer_idx == 0:
             print(f"DEBUG forward_context layer 0: using forward_context_default")
         return self.forward_context_default(q, compressed_kv, k_pe,
