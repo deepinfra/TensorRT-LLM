@@ -522,12 +522,13 @@ class Attention(nn.Module):
         Returns:
             torch.Tensor: The output tensor.
         """
-        # Debug: check hidden_states for NaN (only for first layer to reduce noise)
-        if self.layer_idx == 0 and hasattr(attn_metadata, 'num_ctx_cached_tokens') and attn_metadata.num_ctx_cached_tokens > 0:
+        # Debug: check hidden_states for NaN (only for layer 0)
+        if self.layer_idx == 0:
             hs_tensor = hidden_states.data if hasattr(hidden_states, 'data') else hidden_states
-            if torch.isnan(hs_tensor).any().item():
-                print(f"DEBUG Attention layer {self.layer_idx}: NaN in hidden_states INPUT! "
-                      f"num_ctx_cached_tokens={attn_metadata.num_ctx_cached_tokens}")
+            hs_has_nan = torch.isnan(hs_tensor).any().item()
+            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0) if attn_metadata is not None else 0
+            print(f"DEBUG Attention layer 0 INPUT: hidden_states has_nan={hs_has_nan}, "
+                  f"shape={hs_tensor.shape}, num_ctx_cached={num_cached}")
 
         qkv = self.qkv_proj(hidden_states)
 
@@ -570,13 +571,12 @@ class Attention(nn.Module):
                                         mrope_config=mrope_config,
                                         attention_sinks=attention_sinks)
 
-        # Debug: check for NaN in attention output (only for first layer to reduce noise)
+        # Debug: check for NaN in attention output (only for layer 0)
         if self.layer_idx == 0 and attn_output is not None:
-            has_nan = torch.isnan(attn_output).any().item() if isinstance(attn_output, torch.Tensor) else False
-            if has_nan:
-                num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
-                print(f"DEBUG Attention layer {self.layer_idx}: NaN in attn_output! "
-                      f"num_ctx_cached_tokens={num_cached}, q_shape={q.shape if q is not None else None}")
+            out_tensor = attn_output.data if hasattr(attn_output, 'data') else attn_output
+            out_has_nan = torch.isnan(out_tensor).any().item() if isinstance(out_tensor, torch.Tensor) else False
+            print(f"DEBUG Attention layer 0 OUTPUT: attn_output has_nan={out_has_nan}, "
+                  f"shape={out_tensor.shape if isinstance(out_tensor, torch.Tensor) else 'N/A'}")
 
         if self.attn_output_gate:
             gate = torch.sigmoid(gate)
