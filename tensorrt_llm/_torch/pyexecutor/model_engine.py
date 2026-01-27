@@ -1282,25 +1282,6 @@ class PyTorchModelEngine(ModelEngine):
             begin_compute = request.context_current_position
             end_compute = begin_compute + request.context_chunk_size
             prompt_tokens = all_prompt_tokens[begin_compute:end_compute]
-            # Debug: print context position info
-            print(f"DEBUG ctx_request processing: request_id={request.py_request_id}, "
-                  f"context_current_position={request.context_current_position}, "
-                  f"context_chunk_size={request.context_chunk_size}, "
-                  f"prompt_len={len(all_prompt_tokens)}, "
-                  f"begin_compute={begin_compute}, end_compute={end_compute}, "
-                  f"prompt_tokens={prompt_tokens[:5] if len(prompt_tokens) > 5 else prompt_tokens}")
-            # Debug: check for corrupted token IDs
-            for i, tok in enumerate(prompt_tokens):
-                if tok < 0 or tok >= 200000:  # reasonable vocab size upper bound
-                    raise RuntimeError(
-                        f"Corrupted token ID detected at position {begin_compute + i}: {tok}. "
-                        f"Request ID: {request.py_request_id}, "
-                        f"begin_compute: {begin_compute}, end_compute: {end_compute}, "
-                        f"context_current_position: {request.context_current_position}, "
-                        f"context_chunk_size: {request.context_chunk_size}, "
-                        f"all_prompt_tokens length: {len(all_prompt_tokens)}, "
-                        f"prompt_tokens: {prompt_tokens}"
-                    )
             position_ids.extend(
                 range(begin_compute, begin_compute + len(prompt_tokens)))
             input_ids.extend(prompt_tokens)
@@ -1361,9 +1342,6 @@ class PyTorchModelEngine(ModelEngine):
                 multimodal_params_list.append(multimodal_params)
 
             request.py_batch_idx = request.py_seq_slot
-            # Debug: print seq_slot assignment for context requests
-            print(f"DEBUG ctx_request: request_id={request.py_request_id}, "
-                  f"py_seq_slot={request.py_seq_slot}, py_batch_idx={request.py_batch_idx}")
 
         if len(multimodal_params_list) > 0:
             # discard the text token indices as it only includes context tokens at this moment
@@ -1517,10 +1495,6 @@ class PyTorchModelEngine(ModelEngine):
 
         for request in generation_requests:
             request_ids.append(request.py_request_id)
-            # Debug: print generation request info
-            print(f"DEBUG gen_request: request_id={request.py_request_id}, "
-                  f"py_seq_slot={request.py_seq_slot}, py_batch_idx={request.py_batch_idx}, "
-                  f"new_tokens_device_is_None={new_tokens_device is None}, is_dummy={request.is_dummy}")
             beam_width = request.sampling_config.beam_width
             for beam in range(beam_width):
                 # the request has no previous tensor:
@@ -1604,16 +1578,6 @@ class PyTorchModelEngine(ModelEngine):
         num_tokens = len(input_ids)
         num_draft_tokens = len(draft_tokens)
         total_num_tokens = len(position_ids)
-
-        # Debug: log token counts and position_ids
-        print(f"DEBUG: num_tokens={num_tokens}, total_num_tokens={total_num_tokens}, "
-              f"input_ids[:10]={input_ids[:10] if input_ids else []}, "
-              f"position_ids[:10]={position_ids[:10] if position_ids else []}, "
-              f"num_cached_tokens_per_seq={num_cached_tokens_per_seq}, "
-              f"num_ctx_requests={len(scheduled_requests.context_requests)}, "
-              f"num_gen_requests={len(generation_requests)}, "
-              f"len(extend_requests)={len(extend_requests)}, "
-              f"previous_batch_indices={previous_batch_indices}")
 
         assert total_num_tokens <= self.max_num_tokens, (
             "total_num_tokens should be less than or equal to max_num_tokens")

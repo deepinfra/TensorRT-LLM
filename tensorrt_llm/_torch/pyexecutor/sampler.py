@@ -1629,11 +1629,6 @@ class TorchSampler(Sampler):
             [r.py_seq_slot for r in requests],
             dtype=torch.int64,  # for index_fill_
             pin_memory=True)
-        # Debug: print sampler info
-        print(f"DEBUG sampler: num_ctx_requests={len(scheduled_requests.context_requests)}, "
-              f"num_gen_requests={len(scheduled_requests.generation_requests)}, "
-              f"seq_slots={seq_slots_host.tolist()}, "
-              f"new_tokens_shape={new_tokens.shape}")
         new_tokens_host = self._process_requests(
             scheduled_requests,
             model_outputs,
@@ -1642,10 +1637,6 @@ class TorchSampler(Sampler):
             seq_slots=seq_slots_host,
             log_probs_host=log_probs_host,
             resource_manager=resource_manager)
-        # Debug: print what was written
-        import torch as _torch
-        _torch.cuda.synchronize()
-        print(f"DEBUG sampler after: new_tokens[:, seq_slots, :] = {new_tokens[:, seq_slots_host, :].cpu().tolist()}")
 
         sampler_event = torch.cuda.Event()
         sampler_event.record()
@@ -2364,16 +2355,6 @@ class TRTLLMSampler(Sampler):
         batch_size = scheduled_requests.batch_size
         beam_width = self.beam_width(scheduled_requests.all_requests())
 
-        # Debug: print context request info
-        print(f"DEBUG TRTLLMSampler.sample_async: batch_size={batch_size}, beam_width={beam_width}")
-        for i, req in enumerate(scheduled_requests.context_requests):
-            print(f"  ctx_req[{i}]: request_id={req.py_request_id}, py_seq_slot={req.py_seq_slot}, "
-                  f"py_batch_idx={req.py_batch_idx}, is_last_context_chunk={req.is_last_context_chunk}, "
-                  f"context_remaining_length={req.context_remaining_length}")
-        for i, req in enumerate(scheduled_requests.generation_requests):
-            print(f"  gen_req[{i}]: request_id={req.py_request_id}, py_seq_slot={req.py_seq_slot}, "
-                  f"py_batch_idx={req.py_batch_idx}")
-
         if (batch_size > 1 and beam_width > 1
                 and any(request.py_return_log_probs
                         for request in scheduled_requests.all_requests())):
@@ -2387,17 +2368,6 @@ class TRTLLMSampler(Sampler):
         if beam_width > 1:
             self._update_cache_indirection_buffer(scheduled_requests)
 
-        # Debug: check logits before decoding
-        logits = model_outputs["logits"]
-        print(f"DEBUG TRTLLMSampler: logits shape={logits.shape}, dtype={logits.dtype}, "
-              f"device={logits.device}, num_context_logits_prefix_sum={num_context_logits_prefix_sum}")
-        if logits.numel() > 0:
-            print(f"  logits min={logits.min().item():.4f}, max={logits.max().item():.4f}, "
-                  f"has_nan={torch.isnan(logits).any().item()}, has_inf={torch.isinf(logits).any().item()}")
-            # Check argmax of logits (should be a valid vocab token)
-            argmax_token = logits[-1].argmax().item()
-            print(f"  logits[-1] argmax token={argmax_token}")
-
         self.store["decoding_input"][
             self.micro_batch_idx] = make_decoding_batch_input(
                 scheduled_requests.context_requests,
@@ -2406,28 +2376,9 @@ class TRTLLMSampler(Sampler):
                 self.store["decoder_input_buffers"][self.micro_batch_idx],
                 self.store["decoder_state"], self.store["buffer_manager"])
 
-        # Debug: print decoding_input info (C++ binding)
-        decoding_input = self.store["decoding_input"][self.micro_batch_idx]
-        try:
-            print(f"DEBUG TRTLLMSampler: decoding_input type={type(decoding_input)}")
-        except Exception as e:
-            print(f"DEBUG TRTLLMSampler: decoding_input debug failed: {e}")
-
-        # Debug: print all_new_tokens BEFORE decoder runs
-        torch.cuda.synchronize()
-        all_new_tokens_before = self.store["decoder_state"].all_new_tokens.cpu()
-        print(f"DEBUG TRTLLMSampler: all_new_tokens BEFORE decoder: shape={all_new_tokens_before.shape}, "
-              f"values[:, :4, :]={all_new_tokens_before[:, :4, :].tolist()}")
-
         self.algs.decoder.forward_async(
             self.store["decoder_state"],
             self.store["decoding_input"][self.micro_batch_idx])
-
-        # Debug: print all_new_tokens AFTER decoder runs
-        torch.cuda.synchronize()
-        all_new_tokens_cpu = self.store["decoder_state"].all_new_tokens.cpu()
-        print(f"DEBUG TRTLLMSampler: all_new_tokens AFTER decoder: shape={all_new_tokens_cpu.shape}, "
-              f"values[:, :4, :]={all_new_tokens_cpu[:, :4, :].tolist()}")
 
         finalize_events = {}
         gathered_ids = None
