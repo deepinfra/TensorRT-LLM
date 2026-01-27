@@ -522,6 +522,9 @@ class Attention(nn.Module):
         Returns:
             torch.Tensor: The output tensor.
         """
+        # Debug: print at start of forward to confirm this code is being called
+        if self.layer_idx == 0:
+            print(f"DEBUG Attention.forward ENTERED: layer_idx=0, type(self)={type(self).__name__}")
         # Debug: check hidden_states for NaN (only for layer 0)
         if self.layer_idx == 0:
             hs_tensor = hidden_states.data if hasattr(hidden_states, 'data') else hidden_states
