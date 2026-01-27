@@ -1838,12 +1838,13 @@ def encode_name(kernel_spec):
                 feature_tags += '_alibi'
         else:
             warp_specialization_tag = ''
-        # Add _softmax tag for kernels with return_softmax_stats (both warp-specialized and tiled)
-        if kernel_spec.return_softmax_stats:
-            feature_tags += '_softmax'
     else:
         tma_or_ldgsts = ''
         warp_specialization_tag = ''
+
+    # Add _softmax tag for kernels with return_softmax_stats (all SM versions)
+    if kernel_spec.return_softmax_stats:
+        feature_tags += '_softmax'
 
     if kernel_spec.enable_attn_logit_softcapping:
         feature_tags += '_softcapping'
