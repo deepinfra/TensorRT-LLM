@@ -1409,8 +1409,11 @@ class MLA(nn.Module):
             torch.cuda.synchronize()
             attn_out_has_nan = torch.isnan(attn_output).any().item()
             softmax_has_nan = torch.isnan(self.softmax_stats_tensor).any().item()
+            softmax_min = self.softmax_stats_tensor.min().item()
+            softmax_max = self.softmax_stats_tensor.max().item()
             print(f"DEBUG chunked_prefill layer {self.layer_idx} AFTER LOOP: "
-                  f"attn_output_has_nan={attn_out_has_nan}, softmax_stats_has_nan={softmax_has_nan}")
+                  f"attn_output_has_nan={attn_out_has_nan}, softmax_stats_has_nan={softmax_has_nan}, "
+                  f"softmax_stats min={softmax_min:.6f} max={softmax_max:.6f}")
 
         # deal with the uncached kv
         kv = self.kv_b_proj(compressed_kv)
@@ -1463,9 +1466,18 @@ class MLA(nn.Module):
             attn_out_has_nan = torch.isnan(attn_output).any().item()
             softmax_has_nan = torch.isnan(self.softmax_stats_tensor).any().item()
             temp_softmax_has_nan = torch.isnan(self.temp_softmax_stats_tensor).any().item()
+            # Check actual values
+            softmax_min = self.softmax_stats_tensor.min().item()
+            softmax_max = self.softmax_stats_tensor.max().item()
+            temp_softmax_min = self.temp_softmax_stats_tensor.min().item()
+            temp_softmax_max = self.temp_softmax_stats_tensor.max().item()
+            merge_op = attn_metadata.merge_op_tensor[chunked_loop_num].item() if attn_metadata.merge_op_tensor[chunked_loop_num].numel() == 1 else attn_metadata.merge_op_tensor[chunked_loop_num].tolist()
             print(f"DEBUG chunked_prefill layer {self.layer_idx} BEFORE FINAL MERGE: "
                   f"temp_attn_output_has_nan={temp_out_has_nan}, attn_output_has_nan={attn_out_has_nan}, "
-                  f"softmax_stats_has_nan={softmax_has_nan}, temp_softmax_stats_has_nan={temp_softmax_has_nan}")
+                  f"softmax_stats_has_nan={softmax_has_nan}, temp_softmax_stats_has_nan={temp_softmax_has_nan}, "
+                  f"softmax_stats min={softmax_min:.6f} max={softmax_max:.6f}, "
+                  f"temp_softmax min={temp_softmax_min:.6f} max={temp_softmax_max:.6f}, "
+                  f"merge_op={merge_op}")
 
         temp_merge_op = attn_metadata.merge_op_tensor[chunked_loop_num]
         trtllm_attention.merge_attention_for_mla(attn_output, temp_attn_output,
