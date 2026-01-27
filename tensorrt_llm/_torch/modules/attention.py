@@ -1501,6 +1501,12 @@ class MLA(nn.Module):
         all_reduce_params: Optional[AllReduceParams] = None,
     ) -> torch.Tensor:
 
+        # Debug: trace MLA forward (layer 0 only)
+        if self.layer_idx == 0:
+            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
+            print(f"DEBUG MLA.forward layer 0: register_to_config={self.register_to_config}, "
+                  f"num_ctx_cached={num_cached}")
+
         attn_output = self.create_output(hidden_states)
         if self.register_to_config:
             torch.ops.trtllm.mla_custom_op_inplace(hidden_states, position_ids,
@@ -1511,6 +1517,13 @@ class MLA(nn.Module):
                               hidden_states,
                               attn_metadata,
                               output=attn_output)
+
+        # Debug: check attn_output for NaN (layer 0 only)
+        if self.layer_idx == 0:
+            out_has_nan = torch.isnan(attn_output).any().item()
+            if out_has_nan:
+                print(f"DEBUG MLA.forward layer 0: attn_output has NaN AFTER attention!")
+
         attn_output = self.o_proj(attn_output,
                                   all_reduce_params=all_reduce_params)
         return attn_output
