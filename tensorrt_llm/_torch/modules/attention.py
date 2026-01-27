@@ -522,17 +522,6 @@ class Attention(nn.Module):
         Returns:
             torch.Tensor: The output tensor.
         """
-        # Debug: print at start of forward to confirm this code is being called
-        if self.layer_idx == 0:
-            print(f"DEBUG Attention.forward ENTERED: layer_idx=0, type(self)={type(self).__name__}")
-        # Debug: check hidden_states for NaN (only for layer 0)
-        if self.layer_idx == 0:
-            hs_tensor = hidden_states.data if hasattr(hidden_states, 'data') else hidden_states
-            hs_has_nan = torch.isnan(hs_tensor).any().item()
-            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0) if attn_metadata is not None else 0
-            print(f"DEBUG Attention layer 0 INPUT: hidden_states has_nan={hs_has_nan}, "
-                  f"shape={hs_tensor.shape}, num_ctx_cached={num_cached}")
-
         qkv = self.qkv_proj(hidden_states)
 
         if bool(lora_params):
@@ -573,13 +562,6 @@ class Attention(nn.Module):
                                         attention_mask_data,
                                         mrope_config=mrope_config,
                                         attention_sinks=attention_sinks)
-
-        # Debug: check for NaN in attention output (only for layer 0)
-        if self.layer_idx == 0 and attn_output is not None:
-            out_tensor = attn_output.data if hasattr(attn_output, 'data') else attn_output
-            out_has_nan = torch.isnan(out_tensor).any().item() if isinstance(out_tensor, torch.Tensor) else False
-            print(f"DEBUG Attention layer 0 OUTPUT: attn_output has_nan={out_has_nan}, "
-                  f"shape={out_tensor.shape if isinstance(out_tensor, torch.Tensor) else 'N/A'}")
 
         if self.attn_output_gate:
             gate = torch.sigmoid(gate)
@@ -1025,16 +1007,6 @@ class MLA(nn.Module):
         Returns:
             torch.Tensor: The output tensor.
         """
-        # Debug: check hidden_states input for layers 21 and 22
-        if self.layer_idx in [21, 22]:
-            torch.cuda.synchronize()
-            hs_has_nan = torch.isnan(hidden_states).any().item()
-            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
-            if hs_has_nan:
-                print(f"DEBUG forward_impl layer {self.layer_idx}: hidden_states INPUT has NaN! num_ctx_cached={num_cached}")
-            else:
-                print(f"DEBUG forward_impl layer {self.layer_idx}: hidden_states INPUT OK, num_ctx_cached={num_cached}")
-
         # split q, k, v into context and gen batches
         num_contexts = attn_metadata.num_contexts
         num_generations = attn_metadata.num_generations
@@ -1071,14 +1043,6 @@ class MLA(nn.Module):
             self.ln_events[1],
             self.aux_stream,
         )
-
-        # Debug: check q after q_b_proj for layer 22
-        if self.layer_idx == 22:
-            torch.cuda.synchronize()
-            q_has_nan = torch.isnan(q).any().item()
-            latent_has_nan = torch.isnan(latent_cache).any().item()
-            if q_has_nan or latent_has_nan:
-                print(f"DEBUG forward_impl layer 22: after q_b_proj - q_has_nan={q_has_nan}, latent_has_nan={latent_has_nan}")
 
         assert q.shape[
             0] == num_tokens, f"Expect q.shape[0] to be {num_tokens}, but got {q.shape[0]}"
@@ -1170,13 +1134,6 @@ class MLA(nn.Module):
         assert latent_cache is not None
         trtllm_attention = cast(TrtllmAttention, self.mha)
 
-        # Debug: check q and latent_cache before processing
-        if self.layer_idx in [0, 21, 22]:
-            torch.cuda.synchronize()
-            q_has_nan = torch.isnan(q).any().item()
-            lc_has_nan = torch.isnan(latent_cache).any().item()
-            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx} ENTRY: q_has_nan={q_has_nan}, latent_cache_has_nan={lc_has_nan}")
-
         # apply RoPE, append compressed_kv + k_pe to paged kv cache and assign q_pe to q
         trtllm_attention.mla_rope_append_paged_kv_assign_q(
             q, latent_cache, attn_metadata)
@@ -1185,13 +1142,6 @@ class MLA(nn.Module):
         full_compressed_kv, full_k_pe = trtllm_attention.load_paged_kv_cache_for_mla(
             attn_metadata, q.dtype)
 
-        # Debug: check loaded KV cache for NaN
-        if self.layer_idx in [0, 21, 22]:
-            torch.cuda.synchronize()
-            ckv_has_nan = torch.isnan(full_compressed_kv).any().item()
-            kpe_has_nan = torch.isnan(full_k_pe).any().item()
-            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: loaded KV cache - ckv_has_nan={ckv_has_nan}, kpe_has_nan={kpe_has_nan}, "
-                  f"ckv_shape={full_compressed_kv.shape}, kpe_shape={full_k_pe.shape}")
         assert full_compressed_kv.shape[
             0] == attn_metadata.num_ctx_cached_tokens + attn_metadata.num_ctx_tokens
         assert full_compressed_kv.shape[1] == self.kv_lora_rank
@@ -1211,25 +1161,12 @@ class MLA(nn.Module):
             -1,
         )
 
-        # Debug: check after kv_b_proj
-        if self.layer_idx in [0, 21, 22]:
-            torch.cuda.synchronize()
-            kv_has_nan = torch.isnan(full_kv).any().item()
-            v_has_nan = torch.isnan(full_v).any().item()
-            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: after kv_b_proj - kv_has_nan={kv_has_nan}, v_has_nan={v_has_nan}")
-
         full_k_nope = full_k_nope.view(-1, self.num_heads,
                                        self.qk_nope_head_dim)
         full_k_pe = full_k_pe.view(-1, 1, self.qk_rope_head_dim)
         full_k = compiled_cat(
             (full_k_nope, full_k_pe.expand(-1, self.num_heads, -1)), dim=-1)
         full_k = full_k.view(-1, self.num_heads * self.qk_head_dim)
-
-        # Debug: check full_k before attention
-        if self.layer_idx in [0, 21, 22]:
-            torch.cuda.synchronize()
-            k_has_nan = torch.isnan(full_k).any().item()
-            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: before mha.forward - k_has_nan={k_has_nan}, q_shape={q.shape}, k_shape={full_k.shape}")
 
         # release pytorch activation memory
         full_compressed_kv = None
@@ -1250,12 +1187,6 @@ class MLA(nn.Module):
             output=output,
         )
 
-        # Debug: check attn_output after mha.forward
-        if self.layer_idx in [0, 21, 22]:
-            torch.cuda.synchronize()
-            out_has_nan = torch.isnan(attn_output).any().item()
-            print(f"DEBUG forward_context_with_cached_kv layer {self.layer_idx}: after mha.forward - out_has_nan={out_has_nan}")
-
         return attn_output
 
     def forward_context_with_chunked_prefill(
@@ -1268,16 +1199,6 @@ class MLA(nn.Module):
         output: torch.Tensor,
     ) -> torch.Tensor:
         trtllm_attention = cast(TrtllmAttention, self.mha)
-
-        # Debug: entry check
-        if self.layer_idx == 22:
-            torch.cuda.synchronize()
-            q_has_nan = torch.isnan(q).any().item()
-            lc_has_nan = torch.isnan(latent_cache).any().item()
-            ckv_has_nan = torch.isnan(compressed_kv).any().item()
-            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
-            print(f"DEBUG chunked_prefill layer 22 ENTRY: q_has_nan={q_has_nan}, latent_cache_has_nan={lc_has_nan}, "
-                  f"compressed_kv_has_nan={ckv_has_nan}, num_ctx_cached={num_cached}")
 
         # apply RoPE, append compressed_kv + k_pe to paged kv cache and assign q_pe to q
         trtllm_attention.mla_rope_append_paged_kv_assign_q(
@@ -1325,16 +1246,6 @@ class MLA(nn.Module):
                 chunked_max_seq_len=chunked_max_seq_len,
                 out_dtype=q.dtype)
 
-            # Debug: check loaded chunked KV cache for NaN
-            if self.layer_idx in [0, 21, 22]:
-                torch.cuda.synchronize()
-                ckv_has_nan = torch.isnan(chunked_compressed_kv).any().item()
-                kpe_has_nan = torch.isnan(chunked_k_pe).any().item()
-                if ckv_has_nan or kpe_has_nan or self.layer_idx == 22:
-                    print(f"DEBUG chunked_prefill layer {self.layer_idx} loop {loop_idx}: loaded chunked KV - "
-                          f"ckv_has_nan={ckv_has_nan}, kpe_has_nan={kpe_has_nan}, "
-                          f"ckv_shape={chunked_compressed_kv.shape}, total_tokens={total_ctx_chunked_tokens}")
-
             # up proj to uncompressed kv
             # [tokens, 2, h, kv_dim], without rope_dim
             chunked_kv = self.kv_b_proj(chunked_compressed_kv)
@@ -1345,13 +1256,6 @@ class MLA(nn.Module):
                 ],
                 -1,
             )
-
-            # Debug: check after kv_b_proj
-            if self.layer_idx == 22:
-                torch.cuda.synchronize()
-                kv_has_nan = torch.isnan(chunked_kv).any().item()
-                v_has_nan = torch.isnan(chunked_v).any().item()
-                print(f"DEBUG chunked_prefill layer 22 loop {loop_idx}: after kv_b_proj - kv_has_nan={kv_has_nan}, v_has_nan={v_has_nan}")
 
             chunked_k_nope = chunked_k_nope.view(-1, self.num_heads,
                                                  self.qk_nope_head_dim)
@@ -1392,41 +1296,11 @@ class MLA(nn.Module):
                 output=temp_attn_output,
             )
 
-            # Debug: check temp_attn_output after mha.forward in loop
-            if self.layer_idx in [0, 22]:
-                torch.cuda.synchronize()
-                out_has_nan = torch.isnan(temp_attn_output).any().item()
-                temp_softmax_min = self.temp_softmax_stats_tensor.min().item()
-                temp_softmax_max = self.temp_softmax_stats_tensor.max().item()
-                loop_merge_op = attn_metadata.merge_op_tensor[loop_idx].item() if attn_metadata.merge_op_tensor[loop_idx].numel() == 1 else attn_metadata.merge_op_tensor[loop_idx].tolist()
-                print(f"DEBUG chunked_prefill layer {self.layer_idx} loop {loop_idx}: after mha.forward - "
-                      f"out_has_nan={out_has_nan}, temp_softmax min={temp_softmax_min:.6f} max={temp_softmax_max:.6f}, "
-                      f"merge_op={loop_merge_op}")
-
             # merge attn result
             temp_merge_op = attn_metadata.merge_op_tensor[loop_idx]
             trtllm_attention.merge_attention_for_mla(
                 attn_output, temp_attn_output, self.softmax_stats_tensor,
                 self.temp_softmax_stats_tensor, temp_merge_op, attn_metadata)
-
-            # Debug: check after merge in loop
-            if self.layer_idx in [0, 22]:
-                torch.cuda.synchronize()
-                softmax_min = self.softmax_stats_tensor.min().item()
-                softmax_max = self.softmax_stats_tensor.max().item()
-                print(f"DEBUG chunked_prefill layer {self.layer_idx} loop {loop_idx}: after merge - "
-                      f"softmax_stats min={softmax_min:.6f} max={softmax_max:.6f}")
-
-        # Debug: check state after chunked loop
-        if self.layer_idx in [0, 22]:
-            torch.cuda.synchronize()
-            attn_out_has_nan = torch.isnan(attn_output).any().item()
-            softmax_has_nan = torch.isnan(self.softmax_stats_tensor).any().item()
-            softmax_min = self.softmax_stats_tensor.min().item()
-            softmax_max = self.softmax_stats_tensor.max().item()
-            print(f"DEBUG chunked_prefill layer {self.layer_idx} AFTER LOOP: "
-                  f"attn_output_has_nan={attn_out_has_nan}, softmax_stats_has_nan={softmax_has_nan}, "
-                  f"softmax_stats min={softmax_min:.6f} max={softmax_max:.6f}")
 
         # deal with the uncached kv
         kv = self.kv_b_proj(compressed_kv)
@@ -1472,37 +1346,11 @@ class MLA(nn.Module):
             output=temp_attn_output,
         )
 
-        # Debug: check before final merge
-        if self.layer_idx in [0, 22]:
-            torch.cuda.synchronize()
-            temp_out_has_nan = torch.isnan(temp_attn_output).any().item()
-            attn_out_has_nan = torch.isnan(attn_output).any().item()
-            softmax_has_nan = torch.isnan(self.softmax_stats_tensor).any().item()
-            temp_softmax_has_nan = torch.isnan(self.temp_softmax_stats_tensor).any().item()
-            # Check actual values
-            softmax_min = self.softmax_stats_tensor.min().item()
-            softmax_max = self.softmax_stats_tensor.max().item()
-            temp_softmax_min = self.temp_softmax_stats_tensor.min().item()
-            temp_softmax_max = self.temp_softmax_stats_tensor.max().item()
-            merge_op = attn_metadata.merge_op_tensor[chunked_loop_num].item() if attn_metadata.merge_op_tensor[chunked_loop_num].numel() == 1 else attn_metadata.merge_op_tensor[chunked_loop_num].tolist()
-            print(f"DEBUG chunked_prefill layer {self.layer_idx} BEFORE FINAL MERGE: "
-                  f"temp_attn_output_has_nan={temp_out_has_nan}, attn_output_has_nan={attn_out_has_nan}, "
-                  f"softmax_stats_has_nan={softmax_has_nan}, temp_softmax_stats_has_nan={temp_softmax_has_nan}, "
-                  f"softmax_stats min={softmax_min:.6f} max={softmax_max:.6f}, "
-                  f"temp_softmax min={temp_softmax_min:.6f} max={temp_softmax_max:.6f}, "
-                  f"merge_op={merge_op}")
-
         temp_merge_op = attn_metadata.merge_op_tensor[chunked_loop_num]
         trtllm_attention.merge_attention_for_mla(attn_output, temp_attn_output,
                                                  self.softmax_stats_tensor,
                                                  self.temp_softmax_stats_tensor,
                                                  temp_merge_op, attn_metadata)
-
-        # Debug: check final attn_output after merge
-        if self.layer_idx in [0, 22]:
-            torch.cuda.synchronize()
-            final_has_nan = torch.isnan(attn_output).any().item()
-            print(f"DEBUG chunked_prefill layer {self.layer_idx} FINAL: after merge - attn_output_has_nan={final_has_nan}")
 
         # copy back kv_lens_runtime and kv_lens_cuda_runtime
         attn_metadata.kv_lens_runtime = origin_kv_lens_runtime
@@ -1525,17 +1373,11 @@ class MLA(nn.Module):
             trtllm_attention = cast(TrtllmAttention, self.mha)
             if trtllm_attention.is_chunked_prefill_for_mla_context(
                     attn_metadata):
-                if self.layer_idx == 0:
-                    print(f"DEBUG forward_context layer 0: using forward_context_with_chunked_prefill")
                 return self.forward_context_with_chunked_prefill(
                     q, compressed_kv, latent_cache, attn_metadata, output)
             elif trtllm_attention.has_cached_kv_for_mla_context(attn_metadata):
-                if self.layer_idx == 0:
-                    print(f"DEBUG forward_context layer 0: using forward_context_with_cached_kv (v_head_dim={self.v_head_dim})")
                 return self.forward_context_with_cached_kv(
                     q, latent_cache, attn_metadata, output)
-        if self.layer_idx == 0:
-            print(f"DEBUG forward_context layer 0: using forward_context_default")
         return self.forward_context_default(q, compressed_kv, k_pe,
                                             attn_metadata, output, latent_cache)
 
@@ -1551,12 +1393,6 @@ class MLA(nn.Module):
         num_tokens = q.shape[0]
         q_nope, q_pe = q.view([-1, self.num_heads, self.qk_head_dim]).split(
             [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
-
-        # Debug: check inputs for NaN
-        torch.cuda.synchronize()
-        q_has_nan = torch.isnan(q).any().item()
-        if q_has_nan and self.layer_idx == 22:
-            print(f"DEBUG forward_generation layer {self.layer_idx}: q has NaN!")
 
         # fused_q contains 1) the result of the following bmm with shape [num_tokens, num_heads, kv_lora_rank]
         # 2) rope(q_pe) with shape [num_tokens, num_heads, qk_rope_head_dim]. rope is applied inside AttentionOp
@@ -1603,12 +1439,6 @@ class MLA(nn.Module):
             self.num_heads * (self.kv_lora_rank + self.qk_rope_head_dim)
         ])
 
-        # Debug: check fused_q before mqa.forward
-        torch.cuda.synchronize()
-        fused_q_has_nan = torch.isnan(fused_q).any().item()
-        if fused_q_has_nan and self.layer_idx == 22:
-            print(f"DEBUG forward_generation layer {self.layer_idx}: fused_q has NaN BEFORE mqa.forward!")
-
         attn_out_latent = self.mqa.forward(
             fused_q,
             None,
@@ -1620,14 +1450,6 @@ class MLA(nn.Module):
             q_pe=q_pe,  # used by `invokeMLARopeGeneration`
         )
         fused_q = None
-
-        # Debug: check attn_out_latent for NaN after mqa.forward
-        torch.cuda.synchronize()
-        attn_out_has_nan = torch.isnan(attn_out_latent).any().item()
-        if attn_out_has_nan and self.layer_idx == 22:
-            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
-            print(f"DEBUG forward_generation layer {self.layer_idx}: attn_out_latent has NaN after mqa.forward! "
-                  f"shape={attn_out_latent.shape}, num_ctx_cached={num_cached}")
 
         assert (attn_out_latent.shape[0] == q.shape[0] and
                 attn_out_latent.shape[1] == self.num_heads * self.kv_lora_rank)
@@ -1666,12 +1488,6 @@ class MLA(nn.Module):
         all_reduce_params: Optional[AllReduceParams] = None,
     ) -> torch.Tensor:
 
-        # Debug: trace MLA forward (layer 0 only)
-        if self.layer_idx == 0:
-            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
-            print(f"DEBUG MLA.forward layer 0: register_to_config={self.register_to_config}, "
-                  f"num_ctx_cached={num_cached}")
-
         attn_output = self.create_output(hidden_states)
         if self.register_to_config:
             torch.ops.trtllm.mla_custom_op_inplace(hidden_states, position_ids,
@@ -1682,14 +1498,6 @@ class MLA(nn.Module):
                               hidden_states,
                               attn_metadata,
                               output=attn_output)
-
-        # Debug: check attn_output for NaN (all layers, with sync)
-        torch.cuda.synchronize()
-        out_has_nan = torch.isnan(attn_output).any().item()
-        if out_has_nan:
-            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
-            print(f"DEBUG MLA.forward layer {self.layer_idx}: attn_output has NaN! "
-                  f"num_ctx_cached={num_cached}")
 
         attn_output = self.o_proj(attn_output,
                                   all_reduce_params=all_reduce_params)

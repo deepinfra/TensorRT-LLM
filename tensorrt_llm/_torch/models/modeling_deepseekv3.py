@@ -1078,15 +1078,6 @@ class DeepseekV3DecoderLayer(DecoderLayer):
             residual = hidden_states
             hidden_states = self.input_layernorm(hidden_states)
 
-        # Debug: check hidden_states before attention (layer 0 only)
-        layer_idx = getattr(self.self_attn, 'layer_idx', -1)
-        if layer_idx == 0:
-            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
-            hs_has_nan = torch.isnan(hidden_states).any().item()
-            print(f"DEBUG DeepseekV3DecoderLayer layer 0 BEFORE attn: "
-                  f"hidden_states has_nan={hs_has_nan}, shape={hidden_states.shape}, "
-                  f"num_ctx_cached={num_cached}")
-
         # Self Attention
         hidden_states = self.self_attn(
             position_ids=position_ids,
@@ -1096,13 +1087,6 @@ class DeepseekV3DecoderLayer(DecoderLayer):
                 enable_allreduce=not (self.disable_attn_allreduce)),
             **kwargs,
         )
-
-        # Debug: check hidden_states after attention (layer 0 only)
-        if layer_idx == 0:
-            hs_has_nan_after = torch.isnan(hidden_states).any().item()
-            if hs_has_nan_after:
-                print(f"DEBUG DeepseekV3DecoderLayer layer 0 AFTER attn: "
-                      f"hidden_states has_nan=True!")
 
         if isinstance(self.mlp, Deepseekv3MoE):
             if spec_metadata is not None and spec_metadata.is_layer_capture(
