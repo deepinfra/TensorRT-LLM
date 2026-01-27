@@ -2577,14 +2577,16 @@ class PyTorchModelEngine(ModelEngine):
         )
 
         # Debug: check model output for NaN
+        print(f"DEBUG _forward_step: outputs type={type(outputs)}, keys={outputs.keys() if isinstance(outputs, dict) else 'N/A'}")
         if isinstance(outputs, dict) and 'logits' in outputs:
             logits_out = outputs['logits']
+            print(f"DEBUG _forward_step: logits_out shape={logits_out.shape if logits_out is not None else 'None'}, "
+                  f"numel={logits_out.numel() if logits_out is not None else 0}")
             if logits_out is not None and logits_out.numel() > 0:
                 has_nan = torch.isnan(logits_out).any().item()
-                if has_nan:
-                    print(f"DEBUG _forward_step: Model output logits contain NaN! "
-                          f"shape={logits_out.shape}, "
-                          f"num_ctx_cached_tokens={getattr(inputs.get('attn_metadata'), 'num_ctx_cached_tokens', 'N/A')}")
+                has_inf = torch.isinf(logits_out).any().item()
+                print(f"DEBUG _forward_step: logits has_nan={has_nan}, has_inf={has_inf}, "
+                      f"min={logits_out.min().item():.4f}, max={logits_out.max().item():.4f}")
 
         if self.without_logits:
             return outputs
