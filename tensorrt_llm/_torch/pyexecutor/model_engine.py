@@ -2576,15 +2576,13 @@ class PyTorchModelEngine(ModelEngine):
             or gather_context_logits,
         )
 
-        # Debug: check model output for NaN
+        # Debug: check model output for NaN (ALWAYS print)
         logits_out = outputs['logits'] if isinstance(outputs, dict) else outputs
         if logits_out is not None and isinstance(logits_out, torch.Tensor) and logits_out.numel() > 0:
             has_nan = torch.isnan(logits_out).any().item()
             has_inf = torch.isinf(logits_out).any().item()
-            if has_nan or has_inf:
-                print(f"DEBUG _forward_step: MODEL OUTPUT has NaN={has_nan}, Inf={has_inf}! "
-                      f"shape={logits_out.shape}, "
-                      f"num_ctx_cached_tokens={getattr(inputs.get('attn_metadata'), 'num_ctx_cached_tokens', 'N/A')}")
+            print(f"DEBUG _forward_step MODEL OUTPUT: has_nan={has_nan}, has_inf={has_inf}, "
+                  f"shape={logits_out.shape}, num_ctx_cached={getattr(inputs.get('attn_metadata'), 'num_ctx_cached_tokens', 'N/A')}")
 
         if self.without_logits:
             return outputs
