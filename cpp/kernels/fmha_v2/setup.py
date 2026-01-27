@@ -4846,36 +4846,40 @@ def enumerate_hmma_flash_kernels_base(specs,
 
     # Custom MLA 256x256 tiled kernels (GLM-4 style)
     # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+    # Generate both return_softmax_stats=True and False variants
+    # return_softmax_stats=True is needed for chunked prefill with softmax stats merging
     if input_layout == InputLayout.SEPARATE_Q_K_V and sm_mma == 80:
-        specs.append(
-            kernel_spec(
-                sm=sm,
-                sm_mma=sm_mma,
-                dtype=dtype,
-                flash_attention=True,
-                tiled=1,
-                seq_len=0,  # means any sequence here
-                kv_loop_step=64,
-                limit_qk_fragments=True,
-                limit_v_fragments=True,
-                head_size=256,
-                head_size_v=256,
-                warps_m=4,
-                warps_n=1,
-                version=2,
-                interleaved=False,
-                ldgsts_q=True,
-                ldgsts_k=False,
-                ldgsts_v=False,
-                share_smem_k_v=False,
-                loop_step=64,
-                has_noloop=1,
-                noloop_step=64,
-                unroll_threshold=1,
-                has_scale_max=False,
-                ctas_per_head=1,
-                input_layout=input_layout,
-                enable_attn_logit_softcapping=enable_attn_logit_softcapping))
+        for return_softmax_stats in [False, True]:
+            specs.append(
+                kernel_spec(
+                    sm=sm,
+                    sm_mma=sm_mma,
+                    dtype=dtype,
+                    flash_attention=True,
+                    tiled=1,
+                    seq_len=0,  # means any sequence here
+                    kv_loop_step=64,
+                    limit_qk_fragments=True,
+                    limit_v_fragments=True,
+                    head_size=256,
+                    head_size_v=256,
+                    warps_m=4,
+                    warps_n=1,
+                    version=2,
+                    interleaved=False,
+                    ldgsts_q=True,
+                    ldgsts_k=False,
+                    ldgsts_v=False,
+                    share_smem_k_v=False,
+                    loop_step=64,
+                    has_noloop=1,
+                    noloop_step=64,
+                    unroll_threshold=1,
+                    has_scale_max=False,
+                    ctas_per_head=1,
+                    input_layout=input_layout,
+                    enable_attn_logit_softcapping=enable_attn_logit_softcapping,
+                    return_softmax_stats=return_softmax_stats))
 
     for head_size in [
             16, 32, 40, 48, 64, 72, 80, 96, 104, 128, 160, 192, 256, 512
