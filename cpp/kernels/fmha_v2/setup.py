@@ -1836,10 +1836,11 @@ def encode_name(kernel_spec):
             # hopper warp-specialized kernels has specialized optimization for cases without alibi.
             if kernel_spec.alibi:
                 feature_tags += '_alibi'
-            if kernel_spec.return_softmax_stats:
-                feature_tags += '_softmax'
         else:
             warp_specialization_tag = ''
+        # Add _softmax tag for kernels with return_softmax_stats (both warp-specialized and tiled)
+        if kernel_spec.return_softmax_stats:
+            feature_tags += '_softmax'
     else:
         tma_or_ldgsts = ''
         warp_specialization_tag = ''
