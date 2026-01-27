@@ -1268,6 +1268,17 @@ class MLA(nn.Module):
         output: torch.Tensor,
     ) -> torch.Tensor:
         trtllm_attention = cast(TrtllmAttention, self.mha)
+
+        # Debug: entry check
+        if self.layer_idx == 22:
+            torch.cuda.synchronize()
+            q_has_nan = torch.isnan(q).any().item()
+            lc_has_nan = torch.isnan(latent_cache).any().item()
+            ckv_has_nan = torch.isnan(compressed_kv).any().item()
+            num_cached = getattr(attn_metadata, 'num_ctx_cached_tokens', 0)
+            print(f"DEBUG chunked_prefill layer 22 ENTRY: q_has_nan={q_has_nan}, latent_cache_has_nan={lc_has_nan}, "
+                  f"compressed_kv_has_nan={ckv_has_nan}, num_ctx_cached={num_cached}")
+
         # apply RoPE, append compressed_kv + k_pe to paged kv cache and assign q_pe to q
         trtllm_attention.mla_rope_append_paged_kv_assign_q(
             q, latent_cache, attn_metadata)
@@ -1314,6 +1325,16 @@ class MLA(nn.Module):
                 chunked_max_seq_len=chunked_max_seq_len,
                 out_dtype=q.dtype)
 
+            # Debug: check loaded chunked KV cache for NaN
+            if self.layer_idx in [0, 21, 22]:
+                torch.cuda.synchronize()
+                ckv_has_nan = torch.isnan(chunked_compressed_kv).any().item()
+                kpe_has_nan = torch.isnan(chunked_k_pe).any().item()
+                if ckv_has_nan or kpe_has_nan or self.layer_idx == 22:
+                    print(f"DEBUG chunked_prefill layer {self.layer_idx} loop {loop_idx}: loaded chunked KV - "
+                          f"ckv_has_nan={ckv_has_nan}, kpe_has_nan={kpe_has_nan}, "
+                          f"ckv_shape={chunked_compressed_kv.shape}, total_tokens={total_ctx_chunked_tokens}")
+
             # up proj to uncompressed kv
             # [tokens, 2, h, kv_dim], without rope_dim
             chunked_kv = self.kv_b_proj(chunked_compressed_kv)
@@ -1324,6 +1345,13 @@ class MLA(nn.Module):
                 ],
                 -1,
             )
+
+            # Debug: check after kv_b_proj
+            if self.layer_idx == 22:
+                torch.cuda.synchronize()
+                kv_has_nan = torch.isnan(chunked_kv).any().item()
+                v_has_nan = torch.isnan(chunked_v).any().item()
+                print(f"DEBUG chunked_prefill layer 22 loop {loop_idx}: after kv_b_proj - kv_has_nan={kv_has_nan}, v_has_nan={v_has_nan}")
 
             chunked_k_nope = chunked_k_nope.view(-1, self.num_heads,
                                                  self.qk_nope_head_dim)
@@ -1363,6 +1391,13 @@ class MLA(nn.Module):
                 runtime_features.chunked_prefill_buffer_batch_size,
                 output=temp_attn_output,
             )
+
+            # Debug: check temp_attn_output after mha.forward in loop
+            if self.layer_idx == 22:
+                torch.cuda.synchronize()
+                out_has_nan = torch.isnan(temp_attn_output).any().item()
+                print(f"DEBUG chunked_prefill layer 22 loop {loop_idx}: after mha.forward - out_has_nan={out_has_nan}")
+
             # merge attn result
             temp_merge_op = attn_metadata.merge_op_tensor[loop_idx]
             trtllm_attention.merge_attention_for_mla(
@@ -1417,6 +1452,13 @@ class MLA(nn.Module):
                                                  self.softmax_stats_tensor,
                                                  self.temp_softmax_stats_tensor,
                                                  temp_merge_op, attn_metadata)
+
+        # Debug: check final attn_output after merge
+        if self.layer_idx == 22:
+            torch.cuda.synchronize()
+            final_has_nan = torch.isnan(attn_output).any().item()
+            print(f"DEBUG chunked_prefill layer 22 FINAL: after merge - attn_output_has_nan={final_has_nan}")
+
         # copy back kv_lens_runtime and kv_lens_cuda_runtime
         attn_metadata.kv_lens_runtime = origin_kv_lens_runtime
         attn_metadata.kv_lens_cuda_runtime = origin_kv_lens_cuda_runtime
