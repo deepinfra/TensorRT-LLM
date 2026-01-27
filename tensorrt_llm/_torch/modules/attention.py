@@ -1523,15 +1523,19 @@ class MLA(nn.Module):
         if isinstance(self.mha, TrtllmAttention):
             assert isinstance(attn_metadata, TrtllmAttentionMetadata)
             trtllm_attention = cast(TrtllmAttention, self.mha)
+            # Check if this is DeepSeek-style MLA (v_head_dim == 128 for context)
+            # For non-DeepSeek MLA (e.g., GLM with v_head_dim=256), chunked prefill kernels
+            # don't support ReturnSoftmaxStats, so we must use forward_context_with_cached_kv
+            is_deepseek_mla = self.v_head_dim == 128
             if trtllm_attention.is_chunked_prefill_for_mla_context(
-                    attn_metadata):
+                    attn_metadata) and is_deepseek_mla:
                 if self.layer_idx == 0:
                     print(f"DEBUG forward_context layer 0: using forward_context_with_chunked_prefill")
                 return self.forward_context_with_chunked_prefill(
                     q, compressed_kv, latent_cache, attn_metadata, output)
             elif trtllm_attention.has_cached_kv_for_mla_context(attn_metadata):
                 if self.layer_idx == 0:
-                    print(f"DEBUG forward_context layer 0: using forward_context_with_cached_kv")
+                    print(f"DEBUG forward_context layer 0: using forward_context_with_cached_kv (v_head_dim={self.v_head_dim})")
                 return self.forward_context_with_cached_kv(
                     q, latent_cache, attn_metadata, output)
         if self.layer_idx == 0:
