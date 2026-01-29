@@ -538,6 +538,11 @@ class PyTorchModelEngine(ModelEngine):
                     logger.info(
                         f"Run warmup with {num_tokens} tokens, include {num_gen_tokens} generation tokens"
                     )
+                    # Sync any pending block transfers (e.g., onboarding from host to GPU)
+                    # before the forward pass. This is needed because add_dummy_requests
+                    # doesn't go through prepare_resources which normally calls refresh_blocks.
+                    kv_cache_manager.impl.refresh_blocks()
+
                     self.forward(batch,
                                  new_tensors_device=None,
                                  resource_manager=resource_manager)
@@ -564,6 +569,11 @@ class PyTorchModelEngine(ModelEngine):
             with self._release_batch_context(warmup_request,
                                              resource_manager) as batch:
                 if batch is not None:
+                    # Sync any pending block transfers (e.g., onboarding from host to GPU)
+                    # before the forward pass. This is needed because add_dummy_requests
+                    # doesn't go through prepare_resources which normally calls refresh_blocks.
+                    kv_cache_manager.impl.refresh_blocks()
+
                     self.forward(batch,
                                  new_tensors_device=None,
                                  resource_manager=resource_manager)
@@ -592,6 +602,8 @@ class PyTorchModelEngine(ModelEngine):
         logger.info(
             f"Creating CUDA graph instances for {len(self._cuda_graph_batch_sizes)} batch sizes."
         )
+        kv_cache_manager = resource_manager.get_resource_manager(
+            self.kv_cache_manager_key)
         spec_resource_manager = resource_manager.get_resource_manager(
             ResourceManagerType.SPEC_RESOURCE_MANAGER)
 
@@ -640,6 +652,11 @@ class PyTorchModelEngine(ModelEngine):
                     self._update_draft_inference_state_for_warmup(
                         batch, draft_len > 0, resource_manager)
 
+                    # Sync any pending block transfers (e.g., onboarding from host to GPU)
+                    # before the forward pass. This is needed because add_dummy_requests
+                    # doesn't go through prepare_resources which normally calls refresh_blocks.
+                    kv_cache_manager.impl.refresh_blocks()
+
                     self.forward(batch,
                                  new_tensors_device=None,
                                  resource_manager=resource_manager)
@@ -654,6 +671,8 @@ class PyTorchModelEngine(ModelEngine):
         logger.info("Running piecewise CUDA graph warmup...")
         piecewise_cuda_graph_num_tokens = sorted(
             self._piecewise_cuda_graph_num_tokens, reverse=True)
+        kv_cache_manager = resource_manager.get_resource_manager(
+            self.kv_cache_manager_key)
 
         with capture_piecewise_cuda_graph(True), self.no_cuda_graph():
             for num_tokens in piecewise_cuda_graph_num_tokens:
@@ -667,6 +686,12 @@ class PyTorchModelEngine(ModelEngine):
                     logger.info(
                         f"Run piecewise CUDA graph warmup for num tokens={num_tokens}"
                     )
+
+                    # Sync any pending block transfers (e.g., onboarding from host to GPU)
+                    # before the forward pass. This is needed because add_dummy_requests
+                    # doesn't go through prepare_resources which normally calls refresh_blocks.
+                    kv_cache_manager.impl.refresh_blocks()
+
                     # Run a few times to ensure capture
                     for _ in range(3):
                         self.forward(batch,

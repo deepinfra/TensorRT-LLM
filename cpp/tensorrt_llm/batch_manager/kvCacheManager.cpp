@@ -1013,7 +1013,8 @@ void WindowBlockManager::setOffsets(tk::KVCacheIndex* offsetsPtr, nvinfer1::Dims
             auto const offsetIndex = tensorrt_llm::common::flat_index(offsetsShape.d, poolIdx, beamIdx, xIdx, blockIdx);
             auto const fieldIdx = mCacheType == CacheType::kSELFKONLY ? 0 : xIdx;
             auto const blockIndex = tk::KVCacheIndex{
-                common::flat_index3(block->getMemoryPoolBlockIndex(), layerIdx, fieldIdx, pool.numLayers, mKVFactor)};
+                common::flat_index3(block->getMemoryPoolBlockIndex(), layerIdx, fieldIdx, pool.numLayers, mKVFactor),
+                !block->isPrimary()};
             offsetsPtr[offsetIndex] = blockIndex;
         }
     }
