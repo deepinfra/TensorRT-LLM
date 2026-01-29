@@ -700,6 +700,11 @@ public:
         return mAllBlocksById.at(blockId);
     }
 
+    //! \brief Get memory pool index for a block (for Flash MLA kernel)
+    //! \details Flash MLA uses indices directly as memory offsets. This function validates
+    //! the block is in primary pool and returns its memory pool index.
+    [[nodiscard]] SizeType32 getBlockPoolIndex(KVCacheBlock::IdType blockId) const;
+
     [[nodiscard]] SizeType32 getTokensPerBlock() const noexcept
     {
         return mTokensPerBlock;
@@ -1224,6 +1229,13 @@ public:
     {
         return mWindowBlockManagers.at(windowSize).getBlockById(blockId);
     }
+
+    //! \brief Convert block IDs to memory pool indices for Flash MLA
+    //! \details Flash MLA kernel uses indices directly as memory offsets, so we need the actual
+    //! memory pool indices rather than block IDs. This function also validates that all blocks
+    //! are in the primary (GPU) pool since Flash MLA does not support host memory.
+    [[nodiscard]] std::vector<std::vector<SizeType32>> getBlockPoolIndices(
+        std::vector<std::vector<SizeType32>> const& blockIds, SizeType32 windowSize) const;
 
     [[nodiscard]] std::shared_ptr<KVCacheBlock> findBlocksInReuseTreeByBlockKey(
         BlockKey const& blockKey, SizeType32 windowSize)
@@ -1853,6 +1865,16 @@ public:
 
     std::vector<std::vector<std::vector<SizeType32>>> getBatchCacheBlockIds(
         std::vector<LlmRequest::RequestIdType> const& requestIds, SizeType32 windowSize) const override;
+
+    //! \brief Get memory pool indices (not block IDs) for Flash MLA kernel
+    //! \details Flash MLA uses indices directly as memory offsets. This function converts
+    //! block IDs to actual memory pool indices and validates all blocks are in primary pool.
+    [[nodiscard]] std::vector<std::vector<SizeType32>> getCacheBlockPoolIndices(
+        LlmRequest::RequestIdType requestId, SizeType32 windowSize) const;
+
+    //! \brief Get batch memory pool indices for Flash MLA kernel
+    [[nodiscard]] std::vector<std::vector<std::vector<SizeType32>>> getBatchCacheBlockPoolIndices(
+        std::vector<LlmRequest::RequestIdType> const& requestIds, SizeType32 windowSize) const;
 
     runtime::ITensor::SharedPtr getUniquePrimaryPool() const override;
     runtime::ITensor::SharedPtr getPrimaryPool(SizeType32 layer_idx) const override;

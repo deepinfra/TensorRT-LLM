@@ -852,15 +852,19 @@ class TrtllmAttentionMetadata(AttentionMetadata):
                                                                   num_seqs]
 
     def prepare_flash_mla(self) -> None:
-        block_ids_per_seq = self.kv_cache_manager.get_block_ids_per_seq(
+        # Use pool indices instead of block IDs for Flash MLA.
+        # Flash MLA kernel uses these indices directly as memory offsets.
+        # Block IDs and memory pool indices differ when blocks are swapped
+        # between primary (GPU) and secondary (host) pools.
+        block_pool_indices_per_seq = self.kv_cache_manager.get_block_pool_indices_per_seq(
             self.request_ids).pin_memory()
-        num_blocks = block_ids_per_seq.shape[1]
+        num_blocks = block_pool_indices_per_seq.shape[1]
         self.kv_block_ids_per_seq.fill_(0)
         self.kv_block_ids_per_seq[:self.num_seqs, :num_blocks].copy_(
-            block_ids_per_seq, non_blocking=True)
+            block_pool_indices_per_seq, non_blocking=True)
         self.block_ids_per_seq.fill_(0)
         self.block_ids_per_seq[:self.num_generations, :num_blocks].copy_(
-            block_ids_per_seq[self.num_contexts:], non_blocking=True)
+            block_pool_indices_per_seq[self.num_contexts:], non_blocking=True)
 
         self.kv_lens_cuda_runtime = self.kv_lens_cuda[:self.num_seqs]
         self.kv_lens_runtime = self.kv_lens[:self.num_seqs]

@@ -502,7 +502,11 @@ void tb::kv_cache_manager::KVCacheManagerBindings::initBindings(py::module_& m)
             py::arg_v("cache_type", tbk::CacheType::kSELF, "bindings.internal.batch_manager.CacheType.SELF"),
             py::arg("secondary_offload_min_priority") = std::nullopt, py::arg("event_manager") = nullptr,
             py::arg("enable_partial_reuse") = true, py::arg("copy_on_partial_reuse") = true,
-            py::arg("kv_connector_manager") = nullptr, py::call_guard<py::gil_scoped_release>());
+            py::arg("kv_connector_manager") = nullptr, py::call_guard<py::gil_scoped_release>())
+        .def("get_cache_block_pool_indices", &tbk::KVCacheManager::getCacheBlockPoolIndices,
+            py::call_guard<py::gil_scoped_release>())
+        .def("get_batch_cache_block_pool_indices", &tbk::KVCacheManager::getBatchCacheBlockPoolIndices,
+            py::call_guard<py::gil_scoped_release>());
 }
 
 void tb::BasePeftCacheManagerBindings::initBindings(py::module_& m)

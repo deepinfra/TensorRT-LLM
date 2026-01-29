@@ -1026,6 +1026,33 @@ void BlockManager::setOffsets(tk::KVCacheIndex* offsetsPtr, nvinfer1::Dims const
     mWindowBlockManagers.at(windowSize).setOffsets(offsetsPtr, offsetsShape, beamIdx, blockIdx, blockId);
 }
 
+SizeType32 WindowBlockManager::getBlockPoolIndex(KVCacheBlock::IdType blockId) const
+{
+    auto const& block = mAllBlocksById[blockId];
+    // Return the memory pool index (without secondary flag) - Flash MLA only supports primary pool
+    TLLM_CHECK_WITH_INFO(block->isPrimary(),
+        "Flash MLA does not support secondary (host) memory pool. Block %d is in secondary pool.", blockId);
+    return static_cast<SizeType32>(block->getMemoryPoolBlockIndex());
+}
+
+std::vector<std::vector<SizeType32>> BlockManager::getBlockPoolIndices(
+    std::vector<std::vector<SizeType32>> const& blockIds, SizeType32 windowSize) const
+{
+    std::vector<std::vector<SizeType32>> result;
+    result.reserve(blockIds.size());
+    for (auto const& beamBlockIds : blockIds)
+    {
+        std::vector<SizeType32> beamPoolIndices;
+        beamPoolIndices.reserve(beamBlockIds.size());
+        for (auto const blockId : beamBlockIds)
+        {
+            beamPoolIndices.push_back(mWindowBlockManagers.at(windowSize).getBlockPoolIndex(blockId));
+        }
+        result.push_back(std::move(beamPoolIndices));
+    }
+    return result;
+}
+
 void BlockManager::onboardBlock(GenerationRequest& sequence, BlockPtr const& offloadBlock, SizeType32 windowSize,
     executor::KvCacheTransferMode mode, std::string const& directory)
 {
@@ -2816,6 +2843,25 @@ std::vector<std::vector<std::vector<SizeType32>>> KVCacheManager::getBatchCacheB
     {
         auto const& sequence = getSequence(requestId);
         result.emplace_back(sequence.getCacheBlockIds(windowSize));
+    }
+    return result;
+}
+
+std::vector<std::vector<SizeType32>> KVCacheManager::getCacheBlockPoolIndices(
+    RequestIdType requestId, SizeType32 windowSize) const
+{
+    auto const& blockIds = getSequence(requestId).getCacheBlockIds(windowSize);
+    return mBlockManager.getBlockPoolIndices(blockIds, windowSize);
+}
+
+std::vector<std::vector<std::vector<SizeType32>>> KVCacheManager::getBatchCacheBlockPoolIndices(
+    std::vector<LlmRequest::RequestIdType> const& requestIds, SizeType32 windowSize) const
+{
+    std::vector<std::vector<std::vector<SizeType32>>> result{};
+    result.reserve(requestIds.size());
+    for (auto const& requestId : requestIds)
+    {
+        result.emplace_back(getCacheBlockPoolIndices(requestId, windowSize));
     }
     return result;
 }

@@ -509,6 +509,10 @@ void tb::kv_cache_manager::KVCacheManagerBindings::initBindings(nb::module_& m)
             nb::arg("cache_type") = tbk::CacheType::kSELF, nb::arg("secondary_offload_min_priority") = std::nullopt,
             nb::arg("event_manager") = nullptr, nb::arg("enable_partial_reuse") = true,
             nb::arg("copy_on_partial_reuse") = true, nb::arg("kv_connector_manager") = nullptr,
+            nb::call_guard<nb::gil_scoped_release>())
+        .def("get_cache_block_pool_indices", &tbk::KVCacheManager::getCacheBlockPoolIndices,
+            nb::call_guard<nb::gil_scoped_release>())
+        .def("get_batch_cache_block_pool_indices", &tbk::KVCacheManager::getBatchCacheBlockPoolIndices,
             nb::call_guard<nb::gil_scoped_release>());
 }
 

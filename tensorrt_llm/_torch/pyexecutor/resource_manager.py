@@ -713,6 +713,29 @@ class KVCacheManager(BaseResourceManager):
             result[i] = result[i][0]
         return result
 
+    def get_batch_cache_pool_indices(
+        self,
+        request_ids: List[int],
+        window_size: Optional[int] = None,
+    ) -> List[List[int]]:
+        """Get memory pool indices (not block IDs) for Flash MLA kernel.
+
+        Flash MLA uses these indices directly as memory offsets into the primary
+        pool. This function validates that all blocks are in the primary (GPU) pool
+        since Flash MLA does not support host memory offloading.
+        """
+        if window_size is None:
+            if len(self.max_attention_window_vec) > 1:
+                raise ValueError("window_size must be provided for VSWA")
+            window_size = self.max_attention_window_vec[0]
+
+        result = self.impl.get_batch_cache_block_pool_indices(request_ids,
+                                                              window_size)
+        for i in range(len(result)):
+            assert (len(result[i])) == 1
+            result[i] = result[i][0]
+        return result
+
     def get_num_free_blocks(self) -> int:
         if self.is_vswa:
             logger.info(
@@ -752,6 +775,23 @@ class KVCacheManager(BaseResourceManager):
         ]
         padded_tensor = torch.nn.utils.rnn.pad_sequence(
             block_ids_per_seq_tensors, batch_first=True, padding_value=0)
+        return padded_tensor
+
+    def get_block_pool_indices_per_seq(self,
+                                       request_ids: List[int]) -> torch.Tensor:
+        """Get memory pool indices (not block IDs) for Flash MLA kernel.
+
+        Flash MLA uses indices directly as memory offsets. This function converts
+        block IDs to actual memory pool indices and validates all blocks are in
+        the primary (GPU) pool. Raises an error if any block is in secondary pool.
+        """
+        pool_indices_per_seq = self.get_batch_cache_pool_indices(request_ids)
+        pool_indices_per_seq_tensors = [
+            torch.tensor(sublist, dtype=torch.int)
+            for sublist in pool_indices_per_seq
+        ]
+        padded_tensor = torch.nn.utils.rnn.pad_sequence(
+            pool_indices_per_seq_tensors, batch_first=True, padding_value=0)
         return padded_tensor
 
     def flush_iteration_events(self):
