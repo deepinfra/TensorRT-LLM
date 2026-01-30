@@ -288,9 +288,12 @@ class DeepseekV3WeightLoader:
                     name = '.'.join(names)
                 if names[-1] == "kv_b_proj":
                     # TODO: remove weight_dequant after enabling fp8_bmm
-                    dequant_kv_b_proj = self.model_config.quant_config.is_module_excluded_from_quantization(
-                        names[-1])
-                    if dequant_kv_b_proj:
+                    # Check if weight is FP4/FP8 packed by comparing actual vs expected element count
+                    expected_elements = num_heads * (qk_nope_head_dim + v_head_dim) * kv_lora_rank
+                    actual_elements = weights[f"{name}.weight"][:].numel()
+                    is_packed = (actual_elements * 2 == expected_elements)
+                    # Use dequant loader for packed weights (FP4/FP8), raw loader for full precision
+                    if is_packed and f"{name}.weight_scale_inv" in weights:
                         kv_b_proj, k_b_proj_trans = load_kv_b_proj_and_k_b_proj_trans_dequant(
                             name)
                     else:
@@ -309,8 +312,10 @@ class DeepseekV3WeightLoader:
                         k_b_proj_trans.reshape(
                             attn_module.k_b_proj_trans.shape))
 
+                    # Only load scales separately when using raw loader (non-dequant path)
+                    use_dequant_loader = is_packed and f"{name}.weight_scale_inv" in weights
                     if getattr(module, "weight_scale",
-                               None) is not None and not dequant_kv_b_proj:
+                               None) is not None and not use_dequant_loader:
                         kv_b_proj_scale, k_b_proj_trans_scale = load_kv_b_proj_and_k_b_proj_trans(
                             name, is_scale=True)
                         module.weight_scale.copy_(
