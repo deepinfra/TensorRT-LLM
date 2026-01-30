@@ -2808,10 +2808,12 @@ int AttentionOp::initialize() noexcept
                         "Deepseek should be supported by fmha in generation part.");
                 }
             }
-            if (!mIsGenerationMLA)
+            // Note: Removed assertion that required FMHA support for context MLA.
+            // This allows unfused MHA fallback for custom MLA configurations with
+            // non-standard head dimensions (e.g., v_head_dim != 128).
+            if (!mIsGenerationMLA && !mFmhaDispatcher->isSupported())
             {
-                TLLM_CHECK_WITH_INFO(
-                    mFmhaDispatcher->isSupported(), "Deepseek should be supported by fmha in context part.");
+                TLLM_LOG_WARNING("FMHA not supported for MLA context, falling back to unfused MHA.");
             }
         }
 
