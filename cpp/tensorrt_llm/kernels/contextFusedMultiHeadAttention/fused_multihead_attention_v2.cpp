@@ -55,13 +55,20 @@ TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::TFusedMultiHeadAt
 template <typename TKernelMeta, typename TKernelParam>
 void TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::loadXMMAKernels()
 {
+    printf("[DEBUG] loadXMMAKernels CALLED: mFunctions.size()=%zu, mSM=%d, mInputDataType=%d, mOutputDataType=%d\n",
+           mFunctions.size(), mSM, mInputDataType, mOutputDataType);
+    fflush(stdout);
+
     if (!mFunctions.empty())
     {
+        printf("[DEBUG] loadXMMAKernels: early return, already loaded\n");
+        fflush(stdout);
         return;
     }
 
     printf("[DEBUG] loadXMMAKernels: looking for inputType=%d, outputType=%d, sm=%d, total kernels=%d\n",
         mInputDataType, mOutputDataType, mSM, mKernelMetaCount);
+    fflush(stdout);
 
     for (unsigned int i = 0; i < mKernelMetaCount; ++i)
     {
@@ -71,6 +78,7 @@ void TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::loadXMMAKern
         {
             printf("[DEBUG] Loading kernel: sm=%d, D=%d, DV=%d, funcName=%s\n",
                 kernelMeta.mSM, kernelMeta.mD, kernelMeta.mDV, kernelMeta.mFuncName);
+            fflush(stdout);
             CUmodule hmod{0};
             auto findModuleIter = mModules.find(kernelMeta.mCubin);
             if (findModuleIter != mModules.end())
@@ -390,6 +398,12 @@ bool FusedMultiHeadAttentionXMMAKernelV2::checkIfKernelExist(MHARunnerFixedParam
         static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout), false,
         params.attnLogitSoftcappingScale != 0.f, params.sageBlockSizeQ, params.sageBlockSizeK, params.sageBlockSizeV,
         false);
+
+    printf("[DEBUG] checkIfKernelExist: query_hash=0x%llx, mFunctions.size()=%zu, D=%d, DV=%d, maskType=%d, layout=%d\n",
+           (unsigned long long)id, mFunctions.size(), params.headSize, params.headSizeV,
+           static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout));
+    fflush(stdout);
+
     auto const findIter = std::find_if(mFunctions.begin(), mFunctions.end(), KernelExistPredicate(id));
     bool found = findIter != mFunctions.end();
     if (!found)
