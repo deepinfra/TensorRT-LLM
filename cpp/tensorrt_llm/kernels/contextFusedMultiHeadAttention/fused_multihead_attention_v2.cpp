@@ -60,15 +60,17 @@ void TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::loadXMMAKern
         return;
     }
 
+    printf("[DEBUG] loadXMMAKernels: looking for inputType=%d, outputType=%d, sm=%d, total kernels=%d\n",
+        mInputDataType, mOutputDataType, mSM, mKernelMetaCount);
+
     for (unsigned int i = 0; i < mKernelMetaCount; ++i)
     {
         auto const& kernelMeta = mKernelMeta[i];
         if (kernelMeta.mSM == mSM && kernelMeta.mDataTypeOut == mOutputDataType
             && kernelMeta.mDataTypeIn == mInputDataType)
         {
-            // printf("Loading kernel for inputType=%d, outputType=%d, sm=%d, cubin=%s, funcName=%s\n",
-            // kernelMeta.mDataTypeIn, kernelMeta.mDataTypeOut, kernelMeta.mSM, kernelMeta.mCubin,
-            // kernelMeta.mFuncName);
+            printf("[DEBUG] Loading kernel: sm=%d, D=%d, DV=%d, funcName=%s\n",
+                kernelMeta.mSM, kernelMeta.mD, kernelMeta.mDV, kernelMeta.mFuncName);
             CUmodule hmod{0};
             auto findModuleIter = mModules.find(kernelMeta.mCubin);
             if (findModuleIter != mModules.end())
