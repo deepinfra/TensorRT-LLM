@@ -102,19 +102,9 @@ void run_fmha_v2_flash_attention_fp16_64_64_S_qkv_256_tma_ws_sm90(Params_v2 &par
 void run_fmha_v2_flash_attention_fp16_64_128_S_qkv_128_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_qkv_256_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_64_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_paged_kv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_paged_kv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_paged_kv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -131,19 +121,9 @@ void run_fmha_v2_flash_attention_fp16_64_128_S_q_paged_kv_128_softcapping_tma_ws
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_paged_kv_256_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_64_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softmax_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_softmax_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_qkv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_qkv_40_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -157,18 +137,6 @@ void run_fmha_v2_flash_attention_fp16_64_128_S_qkv_128_alibi_tma_ws_sm90(Params_
 void run_fmha_v2_flash_attention_fp16_64_64_S_qkv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_qkv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_qkv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_64_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_paged_kv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_paged_kv_40_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_256_S_q_paged_kv_48_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -181,18 +149,6 @@ void run_fmha_v2_flash_attention_fp16_64_128_S_q_paged_kv_128_alibi_tma_ws_sm90(
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_paged_kv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_paged_kv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_paged_kv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_64_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_qkv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_qkv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_qkv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -208,19 +164,9 @@ void run_fmha_v2_flash_attention_bf16_64_64_S_qkv_256_tma_ws_sm90(Params_v2 &par
 void run_fmha_v2_flash_attention_bf16_64_128_S_qkv_128_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_qkv_256_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_64_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_paged_kv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_paged_kv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_paged_kv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -238,19 +184,9 @@ void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_256_softcapping_tma_ws_
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_64_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softmax_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_softmax_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_qkv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -265,18 +201,6 @@ void run_fmha_v2_flash_attention_bf16_64_128_S_qkv_128_alibi_tma_ws_sm90(Params_
 void run_fmha_v2_flash_attention_bf16_64_64_S_qkv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_qkv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_qkv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_64_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_paged_kv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_paged_kv_40_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_256_S_q_paged_kv_48_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -289,18 +213,6 @@ void run_fmha_v2_flash_attention_bf16_64_128_S_q_paged_kv_128_alibi_tma_ws_sm90(
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_64_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_alibi_softmax_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_qkv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_qkv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_qkv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -315,18 +227,8 @@ void run_fmha_v2_flash_attention_e4m3_64_128_S_qkv_256_tma_ws_sm90(Params_v2 &pa
 void run_fmha_v2_flash_attention_e4m3_64_256_S_qkv_128_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_128_S_qkv_256_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_64_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_80_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_96_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_104_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_128_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_160_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_192_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_256_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_128_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_256_softcapping_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_paged_kv_32_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_paged_kv_40_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_paged_kv_48_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -353,17 +255,6 @@ void run_fmha_v2_flash_attention_e4m3_64_256_S_qkv_128_alibi_tma_ws_sm90(Params_
 void run_fmha_v2_flash_attention_e4m3_64_128_S_qkv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_128_S_qkv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_128_S_qkv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_40_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_48_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_64_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_80_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_96_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_104_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_128_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_160_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_192_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_256_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_paged_kv_32_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_paged_kv_40_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_e4m3_64_256_S_q_paged_kv_48_alibi_tma_ws_sm90(Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
@@ -467,96 +358,30 @@ void run_fmha_v2_flash_attention_fp16_64_32_S_qkv_128_softcapping_sm89_get_max_h
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm89_get_max_heads_per_wave(int*);
@@ -737,96 +562,30 @@ void run_fmha_v2_flash_attention_bf16_64_32_S_qkv_128_softcapping_sm89_get_max_h
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm89_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm89_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm89_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm89(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm89_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm89_get_max_heads_per_wave(int*);
@@ -1007,96 +766,30 @@ void run_fmha_v2_flash_attention_fp16_64_32_S_qkv_128_softcapping_sm80_get_max_h
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm80_get_max_heads_per_wave(int*);
@@ -1277,96 +970,30 @@ void run_fmha_v2_flash_attention_bf16_64_32_S_qkv_128_softcapping_sm80_get_max_h
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm80_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm80_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm80_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm80(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm80_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm80_get_max_heads_per_wave(int*);
@@ -1547,96 +1174,30 @@ void run_fmha_v2_flash_attention_fp16_64_32_S_qkv_128_softcapping_sm86_get_max_h
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_64_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_64_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_fp16_128_128_S_q_paged_kv_16_sm86_get_max_heads_per_wave(int*);
@@ -1817,96 +1378,30 @@ void run_fmha_v2_flash_attention_bf16_64_32_S_qkv_128_softcapping_sm86_get_max_h
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_64_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_64_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm86_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm86_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm86_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm86(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm86_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_128_128_S_q_paged_kv_16_sm86_get_max_heads_per_wave(int*);
@@ -2213,21 +1708,66 @@ void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softcapping_sm90_get
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm90(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm90_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm90_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm90(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm90_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm90_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm90(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm90_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm90_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softcapping_sm90(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softcapping_sm90_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softcapping_sm90_get_max_heads_per_wave(int*);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
-void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_128_S_qkv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_128_S_qkv_80_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_128_S_qkv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_32_S_qkv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_32_S_qkv_80_sm100_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_32_S_qkv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_128_S_q_paged_kv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_128_S_q_paged_kv_80_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_128_S_q_paged_kv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_32_S_q_paged_kv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_32_S_q_paged_kv_80_sm100_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_32_S_q_paged_kv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_128_S_qkv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_qkv_80_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_qkv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_32_S_qkv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_32_S_qkv_80_sm100_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_32_S_qkv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_paged_kv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_paged_kv_80_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_paged_kv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_32_S_q_paged_kv_80_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_32_S_q_paged_kv_80_sm100_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_32_S_q_paged_kv_80_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_576x512_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_576x512_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_576x512_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_128_S_q_k_v_256x256_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_128_S_q_k_v_256x256_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_128_S_q_k_v_256x256_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_softmax_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_softmax_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_softmax_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_fp16_64_16_S_q_k_v_256x256_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_16_S_q_k_v_256x256_sm100_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_fp16_64_16_S_q_k_v_256x256_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_256x256_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_256x256_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_256x256_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100_get_max_heads_per_wave(int*);
+void run_fmha_v2_flash_attention_bf16_64_16_S_q_k_v_256x256_sm100(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_16_S_q_k_v_256x256_sm100_nl(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
+void run_fmha_v2_flash_attention_bf16_64_16_S_q_k_v_256x256_sm100_get_max_heads_per_wave(int*);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_576x512_sm90(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_576x512_sm90_nl_tiled(const Params_v2 &params, const Launch_params &launch_params, cudaStream_t stream);
 void run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_576x512_sm90_get_max_heads_per_wave(int*);
@@ -2538,16 +2078,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
@@ -2558,50 +2088,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_softcapping_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 90
     && use_flash_attention && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -2683,16 +2173,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_softmax_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_softmax_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
@@ -2703,50 +2183,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_softmax_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_softmax_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softmax_softcapping_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_softmax_softcapping_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 90
     && use_flash_attention && attention_input_layout == 3 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -2814,66 +2254,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
     run_fmha_v2_flash_attention_fp16_64_64_S_qkv_256_alibi_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_64_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 72 && dv == 72 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 90
     && use_flash_attention && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_256_S_q_paged_kv_32_alibi_tma_ws_sm90(params, launch_params, stream);
@@ -2932,66 +2312,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
     && use_flash_attention && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_64_S_q_paged_kv_256_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_32_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_40_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_48_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_256_S_q_kv_64_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 72 && dv == 72 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_160_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_192_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && !force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_256_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 90
     && use_flash_attention && attention_input_layout == 0 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -3068,16 +2388,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
@@ -3088,50 +2398,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_softcapping_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 90
     && use_flash_attention && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -3218,16 +2488,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_softmax_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_softmax_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
@@ -3238,50 +2498,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_softmax_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_softmax_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 90
     && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softmax_softcapping_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_softmax_softcapping_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 128 && sm == 90
     && use_flash_attention && attention_input_layout == 3 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -3354,66 +2574,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
     run_fmha_v2_flash_attention_bf16_64_64_S_qkv_256_alibi_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_64_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 72 && dv == 72 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 90
     && use_flash_attention && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_256_S_q_paged_kv_32_alibi_tma_ws_sm90(params, launch_params, stream);
@@ -3472,66 +2632,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
     && use_flash_attention && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_256_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_32_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_40_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_48_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_256_S_q_kv_64_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 72 && dv == 72 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_160_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_192_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr != nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_256_alibi_softmax_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 32 && dv == 32 && sm == 90
     && attention_input_layout == 0 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -3603,65 +2703,15 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_32_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 40 && dv == 40 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_40_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 48 && dv == 48 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_48_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 64 && dv == 64 && sm == 90
     && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_64_tma_ws_sm90(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 80 && dv == 80 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_80_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 96 && dv == 96 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_96_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 104 && dv == 104 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_104_tma_ws_sm90(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 128 && dv == 128 && sm == 90
     && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_128_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 160 && dv == 160 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_160_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 192 && dv == 192 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_192_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 256 && dv == 256 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_256_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 128 && dv == 128 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_128_softcapping_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 256 && dv == 256 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_256_softcapping_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 32 && dv == 32 && sm == 90
     && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && force_fp32_acc && !params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -3792,61 +2842,6 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
     && attention_input_layout == 0 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_e4m3_64_128_S_qkv_256_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 32 && dv == 32 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_32_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 40 && dv == 40 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_40_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 48 && dv == 48 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_48_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 64 && dv == 64 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_64_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 80 && dv == 80 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_80_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 96 && dv == 96 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_96_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 104 && dv == 104 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_104_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 128 && dv == 128 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_256_S_q_kv_128_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 160 && dv == 160 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_160_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 192 && dv == 192 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_192_alibi_tma_ws_sm90(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 256 && dv == 256 && sm == 90
-    && attention_input_layout == 1 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_e4m3_64_128_S_q_kv_256_alibi_tma_ws_sm90(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_E4M3 && output_data_type == DATA_TYPE_E4M3 && d == 32 && dv == 32 && sm == 90
     && attention_input_layout == 2 && !interleaved && use_tma && warp_specialization && force_fp32_acc && params.has_alibi && params.softmax_stats_ptr == nullptr && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -4063,25 +3058,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm89_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm89_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 89
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm89_nl_tiled(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 89
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -4093,60 +3073,15 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm89_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm89_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 89
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm89_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm89_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 89
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm89_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 89
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -4158,60 +3093,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm89_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm89_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 89
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm89_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 89
     && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -4513,25 +3398,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm89_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm89_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 89
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm89_nl_tiled(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 89
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -4543,60 +3413,15 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm89_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm89_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 89
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm89_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm89_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 89
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm89_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 89
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -4608,60 +3433,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm89_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm89_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 89
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 89
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm89_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm89_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 89
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm89_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 89
     && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -4963,25 +3738,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm80_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm80_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 80
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm80_nl_tiled(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 80
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -4993,60 +3753,15 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm80_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm80_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 80
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm80_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm80_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 80
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm80_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 80
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -5058,60 +3773,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm80_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm80_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 80
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm80_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 80
     && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -5413,25 +4078,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm80_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm80_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 80
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm80_nl_tiled(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 80
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -5443,60 +4093,15 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm80_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm80_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 80
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm80_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm80_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 80
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm80_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 80
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -5508,60 +4113,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm80_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm80_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 80
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 80
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm80_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm80_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 80
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm80_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 80
     && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -5863,25 +4418,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_16_S_qkv_256_softcapping_sm86_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_16_sm86_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 86
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_32_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_40_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_128_128_S_q_kv_48_sm86_nl_tiled(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 86
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -5893,60 +4433,15 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_72_sm86_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_80_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_96_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_104_sm86_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 86
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_sm86_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_160_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_192_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_16_sm86_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 32 && dv == 32 && sm == 86
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_64_S_q_kv_32_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 40 && dv == 40 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_40_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 48 && dv == 48 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_48_sm86_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 64 && dv == 64 && sm == 86
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -5958,60 +4453,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_72_sm86_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_80_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 96 && dv == 96 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_96_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 104 && dv == 104 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_104_sm86_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 86
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 160 && dv == 160 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_160_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 192 && dv == 192 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_192_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_128_softcapping_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_fp16_64_128_S_q_kv_256_softcapping_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 128 && dv == 128 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_32_S_q_kv_128_softcapping_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_fp16_64_16_S_q_kv_256_softcapping_sm86_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 16 && dv == 16 && sm == 86
     && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -6313,25 +4758,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_16_S_qkv_256_softcapping_sm86_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_16_sm86_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 86
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_32_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_40_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_128_128_S_q_kv_48_sm86_nl_tiled(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 86
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -6343,60 +4773,15 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_72_sm86_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_80_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_96_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_104_sm86_nl_tiled(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 86
     && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
     run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_sm86_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_160_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_192_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_16_sm86_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 32 && dv == 32 && sm == 86
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_64_S_q_kv_32_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 40 && dv == 40 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_40_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 48 && dv == 48 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_48_sm86_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 64 && dv == 64 && sm == 86
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
@@ -6408,60 +4793,10 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_72_sm86_nl(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_80_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 96 && dv == 96 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_96_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 104 && dv == 104 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_104_sm86_nl(params, launch_params, stream);
-
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 86
     && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
 
     run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 160 && dv == 160 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_160_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 192 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_192_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_128_softcapping_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 86
-    && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
-
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_kv_256_softcapping_sm86_nl_tiled(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 128 && dv == 128 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_32_S_q_kv_128_softcapping_sm86_nl(params, launch_params, stream);
-
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 86
-    && !use_tiled && use_flash_attention && attention_input_layout == 1 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
-
-    run_fmha_v2_flash_attention_bf16_64_16_S_q_kv_256_softcapping_sm86_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 16 && dv == 16 && sm == 86
     && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -6973,30 +5308,105 @@ if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && s == 64
 
     run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 128 && sm == 90
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 100
+    && use_flash_attention && attention_input_layout == 0 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_fp16_64_128_S_qkv_80_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 100
+    && !use_tiled && use_flash_attention && attention_input_layout == 0 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
+
+    run_fmha_v2_flash_attention_fp16_64_32_S_qkv_80_sm100_nl(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 100
+    && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_fp16_64_128_S_q_paged_kv_80_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 80 && dv == 80 && sm == 100
+    && !use_tiled && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
+
+    run_fmha_v2_flash_attention_fp16_64_32_S_q_paged_kv_80_sm100_nl(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 100
+    && use_flash_attention && attention_input_layout == 0 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_bf16_64_128_S_qkv_80_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 100
+    && !use_tiled && use_flash_attention && attention_input_layout == 0 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
+
+    run_fmha_v2_flash_attention_bf16_64_32_S_qkv_80_sm100_nl(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 100
+    && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_bf16_64_128_S_q_paged_kv_80_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 80 && dv == 80 && sm == 100
+    && !use_tiled && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
+
+    run_fmha_v2_flash_attention_bf16_64_32_S_q_paged_kv_80_sm100_nl(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 192 && dv == 128 && sm == 100
     && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
-    run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm90_nl_tiled(params, launch_params, stream);
+    run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_192x128_sm100_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 100
     && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm90_nl_tiled(params, launch_params, stream);
+    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 100
     && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm90_nl_tiled(params, launch_params, stream);
+    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 576 && dv == 512 && sm == 100
+    && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softcapping_sm90_nl_tiled(params, launch_params, stream);
+    run_fmha_v2_flash_attention_bf16_64_64_S_q_paged_kv_576x512_sm100_nl_tiled(params, launch_params, stream);
 
-} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 90
-    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 100
+    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
 
-    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_softcapping_sm90_nl_tiled(params, launch_params, stream);
+    run_fmha_v2_flash_attention_fp16_64_128_S_q_k_v_256x256_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 100
+    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 100
+    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_fp16_64_64_S_q_k_v_256x256_softmax_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_FP16 && output_data_type == DATA_TYPE_FP16 && d == 256 && dv == 256 && sm == 100
+    && !use_tiled && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && !force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
+
+    run_fmha_v2_flash_attention_fp16_64_16_S_q_k_v_256x256_sm100_nl(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 100
+    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_bf16_64_128_S_q_k_v_256x256_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 100
+    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 100
+    && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
+
+    run_fmha_v2_flash_attention_bf16_64_64_S_q_k_v_256x256_softmax_sm100_nl_tiled(params, launch_params, stream);
+
+} else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 256 && dv == 256 && sm == 100
+    && !use_tiled && use_flash_attention && attention_input_layout == 3 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max ) {
+
+    run_fmha_v2_flash_attention_bf16_64_16_S_q_k_v_256x256_sm100_nl(params, launch_params, stream);
 
 } else if( data_type == DATA_TYPE_BF16 && output_data_type == DATA_TYPE_BF16 && d == 576 && dv == 512 && sm == 90
     && use_flash_attention && attention_input_layout == 2 && !interleaved && !warp_specialization && !use_tma && force_fp32_acc && !enable_attn_logit_softcapping && sage_block_size_q == 0 && sage_block_size_k == 0 && sage_block_size_v == 0 && !params.use_int8_scale_max  && use_tiled) {
@@ -7292,14 +5702,6 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
@@ -7308,39 +5710,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -7408,14 +5778,6 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
@@ -7424,135 +5786,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 72 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 72 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -7716,14 +5950,6 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
@@ -7732,39 +5958,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -7836,14 +6030,6 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
@@ -7852,135 +6038,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 72 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 64 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 72 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 90 && use_flash_attention && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8144,51 +6202,11 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 40 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 48 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_E4M3 && d == 64 && sm == 90 && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 80 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 96 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 104 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_E4M3 && d == 128 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 160 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 192 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 256 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 128 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 256 && sm == 90 && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8249,50 +6267,6 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     warps_m = 4;
     warps_n = 1;
 } else if( data_type == DATA_TYPE_E4M3 && d == 192 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 32 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 40 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 48 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 64 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 80 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 96 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 104 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 128 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 160 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 192 && sm == 90 && use_tma && warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_E4M3 && d == 256 && sm == 90 && use_tma && warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8512,19 +6486,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 16 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8536,47 +6498,11 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 16 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8588,47 +6514,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8872,19 +6758,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 16 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8896,47 +6770,11 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 16 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -8948,47 +6786,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 89 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9232,19 +7030,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 16 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9256,47 +7042,11 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 16 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9308,47 +7058,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9592,19 +7302,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 16 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9616,47 +7314,11 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 16 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9668,47 +7330,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 80 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9952,19 +7574,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 16 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -9976,47 +7586,11 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 16 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 32 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 40 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 48 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -10028,47 +7602,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 96 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 104 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 160 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 192 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -10312,19 +7846,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 16 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -10336,47 +7858,11 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 16 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 32 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 40 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 48 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -10388,47 +7874,7 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 96 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 104 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
 } else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 160 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 128 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
-    && version == 2 ) {
-    warps_m = 4;
-    warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 86 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
@@ -10840,23 +8286,83 @@ if( data_type == DATA_TYPE_FP16 && s == 64 && d == 32 && sm == 90 && !use_flash_
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 90 && use_flash_attention && !use_tma && !warp_specialization 
+} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && !use_tma && !warp_specialization 
+} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && !use_tma && !warp_specialization 
+} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && !use_tma && !warp_specialization 
+} else if( data_type == DATA_TYPE_FP16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
-} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 90 && use_flash_attention && !use_tma && !warp_specialization 
+} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 80 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 192 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 576 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_FP16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
+    && version == 2 ) {
+    warps_m = 4;
+    warps_n = 1;
+} else if( data_type == DATA_TYPE_BF16 && d == 256 && sm == 100 && use_flash_attention && !use_tma && !warp_specialization 
     && version == 2 ) {
     warps_m = 4;
     warps_n = 1;
