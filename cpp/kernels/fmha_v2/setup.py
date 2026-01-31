@@ -6354,6 +6354,10 @@ def enumerate_kernels():
                                      sm=100,
                                      dtype='bf16',
                                      head_size_v=512)
+        # SM 100 MLA 256x256 HMMA flash kernels (for GLM-4 style models)
+        # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+        enumerate_hmma_flash_kernels(specs, sm=100, dtype='fp16', head_size_v=256)
+        enumerate_hmma_flash_kernels(specs, sm=100, dtype='bf16', head_size_v=256)
 
     if 'ENABLE_SM120' in os.environ:
         # SM 120
@@ -6521,6 +6525,17 @@ def enumerate_kernels():
                   and kspec.flash_attention == True
                   and kspec.warp_specialization == False
                   and kspec.tiled == True)
+                  # Custom MLA 256/256 HMMA flash kernels for SM100 (GLM-4 style models)
+                  or (kspec.sm            == 100
+                  and kspec.dtype         in ['bf16', 'fp16']
+                  and kspec.head_size     == 256
+                  and kspec.head_size_v   == 256
+                  and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
+                  and kspec.sage_block_sizes is None
+                  and kspec.version       == 2
+                  and kspec.cross_mha     == False
+                  and kspec.flash_attention == True
+                  and kspec.enable_attn_logit_softcapping == False)
                   # SageAttention (warp_spec, head_size in (80, 128), packed QKV, padding mask)
                   or (kspec.sm            == 90
                   and kspec.head_size     in [80, 128]
