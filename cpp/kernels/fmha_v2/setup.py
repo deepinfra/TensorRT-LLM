@@ -1977,6 +1977,11 @@ def selected_mask_types(kspec):
             # MLA context phase only needs causal mask and padding mask (for chunked prefill) now
             sliding_or_chunked_causal_mask = '0'
             custom_mask = '0'
+        elif (kspec.head_size, kspec.head_size_v) == (256, 256):
+            # MLA context phase for GLM-4 style models (D=256, DV=256)
+            # Only needs causal mask and padding mask (for chunked prefill)
+            sliding_or_chunked_causal_mask = '0'
+            custom_mask = '0'
         elif (kspec.head_size, kspec.head_size_v) == (576, 512):
             # MLA generation phase only needs padding mask (MtpMask) now
             causal_mask = '0'
