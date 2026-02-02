@@ -55,20 +55,17 @@ TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::TFusedMultiHeadAt
 template <typename TKernelMeta, typename TKernelParam>
 void TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::loadXMMAKernels()
 {
-    printf("[DEBUG] loadXMMAKernels CALLED: mFunctions.size()=%zu, mSM=%d, mInputDataType=%d, mOutputDataType=%d\n",
+    TLLM_LOG_WARNING("[DEBUG] loadXMMAKernels CALLED: mFunctions.size()=%zu, mSM=%d, mInputDataType=%d, mOutputDataType=%d",
            mFunctions.size(), mSM, mInputDataType, mOutputDataType);
-    fflush(stdout);
 
     if (!mFunctions.empty())
     {
-        printf("[DEBUG] loadXMMAKernels: early return, already loaded\n");
-        fflush(stdout);
+        TLLM_LOG_WARNING("[DEBUG] loadXMMAKernels: early return, already loaded");
         return;
     }
 
-    printf("[DEBUG] loadXMMAKernels: looking for inputType=%d, outputType=%d, sm=%d, total kernels=%d\n",
+    TLLM_LOG_WARNING("[DEBUG] loadXMMAKernels: looking for inputType=%d, outputType=%d, sm=%d, total kernels=%d",
         mInputDataType, mOutputDataType, mSM, mKernelMetaCount);
-    fflush(stdout);
 
     for (unsigned int i = 0; i < mKernelMetaCount; ++i)
     {
@@ -76,9 +73,8 @@ void TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::loadXMMAKern
         if (kernelMeta.mSM == mSM && kernelMeta.mDataTypeOut == mOutputDataType
             && kernelMeta.mDataTypeIn == mInputDataType)
         {
-            printf("[DEBUG] Loading kernel: sm=%d, D=%d, DV=%d, funcName=%s\n",
+            TLLM_LOG_WARNING("[DEBUG] Loading kernel: sm=%d, D=%d, DV=%d, funcName=%s",
                 kernelMeta.mSM, kernelMeta.mD, kernelMeta.mDV, kernelMeta.mFuncName);
-            fflush(stdout);
             CUmodule hmod{0};
             auto findModuleIter = mModules.find(kernelMeta.mCubin);
             if (findModuleIter != mModules.end())
@@ -399,10 +395,9 @@ bool FusedMultiHeadAttentionXMMAKernelV2::checkIfKernelExist(MHARunnerFixedParam
         params.attnLogitSoftcappingScale != 0.f, params.sageBlockSizeQ, params.sageBlockSizeK, params.sageBlockSizeV,
         false);
 
-    printf("[DEBUG] checkIfKernelExist: query_hash=0x%llx, mFunctions.size()=%zu, D=%d, DV=%d, maskType=%d, layout=%d\n",
+    TLLM_LOG_WARNING("[DEBUG] checkIfKernelExist: query_hash=0x%llx, mFunctions.size()=%zu, D=%d, DV=%d, maskType=%d, layout=%d",
            (unsigned long long)id, mFunctions.size(), params.headSize, params.headSizeV,
            static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout));
-    fflush(stdout);
 
     auto const findIter = std::find_if(mFunctions.begin(), mFunctions.end(), KernelExistPredicate(id));
     bool found = findIter != mFunctions.end();
