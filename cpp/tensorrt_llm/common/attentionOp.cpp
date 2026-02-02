@@ -2733,6 +2733,9 @@ int AttentionOp::initialize() noexcept
         if (mIsMLAEnabled)
         {
             mEnableXQA = (mSM == kSM_120) && mIsGenerationMLA;
+            // TRTLLM-GEN only supports DeepSeek MLA dimensions (kv_lora_rank=128).
+            // GLM-4 style MLA (kv_lora_rank=256) needs mDecoderFMHARunner as fallback.
+            bool const needDecoderFMHAFallback = mUseTllmGen && (mMLAParams.kv_lora_rank != 128);
             if (mUseTllmGen)
             {
                 Data_type qDataType = DATA_TYPE_FP32;
@@ -2765,7 +2768,10 @@ int AttentionOp::initialize() noexcept
                 // Instantiate the mTllmGenFMHARunner used for MLA
                 mTllmGenFMHARunner.reset(new TllmGenFmhaRunner(qDataType, kvDataType, outputDataType));
             }
-            else if (mIsGenerationMLA && !mUseGenFlashMLA)
+            // Initialize mDecoderFMHARunner for:
+            // 1. Non-TRTLLM-GEN path (mUseTllmGen=false) with generation MLA
+            // 2. TRTLLM-GEN path with GLM-4 style MLA (kv_lora_rank != 128) as fallback
+            if ((mIsGenerationMLA && !mUseGenFlashMLA && !mUseTllmGen) || needDecoderFMHAFallback)
             {
                 // Construct the fmha runner for generation.
                 if (mFP8GenerationMLA)
@@ -2805,11 +2811,20 @@ int AttentionOp::initialize() noexcept
                 fmhaParams.tpRank = mTpRank;
                 mDecoderFMHARunner.reset(new FusedMHARunnerV2(fmhaParams));
 
-                // Only deepseek must using fmha in the generation phase when flash mla is not enabled.
-                if (!mUseGenFlashMLA)
+                // Only deepseek (kv_lora_rank=128) must use fmha in the generation phase when flash mla is not enabled.
+                // For other MLA configs like GLM-4, we check if FMHA is supported but don't assert.
+                if (!mUseGenFlashMLA && !mDecoderFMHARunner->isFmhaSupported())
                 {
-                    TLLM_CHECK_WITH_INFO(mDecoderFMHARunner->isFmhaSupported(),
-                        "Deepseek should be supported by fmha in generation part.");
+                    if (mMLAParams.kv_lora_rank == 128)
+                    {
+                        TLLM_CHECK_WITH_INFO(false, "DeepSeek should be supported by fmha in generation part.");
+                    }
+                    else
+                    {
+                        TLLM_LOG_WARNING("FMHA not supported for MLA generation with kv_lora_rank=%d. "
+                                         "Generation may fall back to unfused MHA or fail.",
+                            mMLAParams.kv_lora_rank);
+                    }
                 }
             }
             // Note: Removed assertion that required FMHA support for context MLA.
