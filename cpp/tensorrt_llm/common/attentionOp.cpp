@@ -1028,7 +1028,11 @@ int AttentionOp::mlaGeneration(
         mMultiBlockMode = false;
     }
 
-    if (mUseTllmGen)
+    // TRTLLM-GEN MLA generation only supports DeepSeek's dimensions (kv_lora_rank=128).
+    // GLM-4 style MLA (kv_lora_rank=256) is not supported, skip to fallback.
+    bool const useTllmGenForMla = mUseTllmGen && (mMLAParams.kv_lora_rank == 128);
+
+    if (useTllmGenForMla)
     {
         TLLM_CHECK_WITH_INFO(mTllmGenFMHARunner.get(), "mTllmGenFMHARunner not initialized.");
         TllmGenFmhaRunnerParams tllmRunnerParams;
