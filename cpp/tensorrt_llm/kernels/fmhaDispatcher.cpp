@@ -49,7 +49,11 @@ FmhaDispatcher::FmhaDispatcher(MHARunnerFixedParams fixedParams)
     // TRTLLM-GEN only supports power of 2 head sizes.
     // The exception will fall back to fmha v2.
     // Please update fmha_v2/setup.py if you want to add more supported head sizes.
-    , mUseTllmGen(tensorrt_llm::common::isSM100Family() && fixedParams.headSize != 80)
+    // For MLA (SEPARATE_Q_K_V), TRTLLM-GEN only supports DeepSeek config (192/128).
+    // GLM-4 style MLA (256/256) should use FMHA v2.
+    , mUseTllmGen(tensorrt_llm::common::isSM100Family() && fixedParams.headSize != 80
+                  && !(fixedParams.attentionInputLayout == AttentionInputLayout::SEPARATE_Q_K_V
+                       && (fixedParams.headSize != 192 || fixedParams.headSizeV != 128)))
 {
     if (mUseTllmGen)
     {
@@ -57,7 +61,11 @@ FmhaDispatcher::FmhaDispatcher(MHARunnerFixedParams fixedParams)
             new TllmGenFmhaRunner(mFixedParams.dataType, mFixedParams.dataTypeKv, mFixedParams.dataTypeOut));
         if (!isSupported())
         {
-            TLLM_LOG_WARNING("TRTLLM-GEN does not support the requested kernels.");
+            TLLM_LOG_WARNING("TRTLLM-GEN does not support the requested kernels. Falling back to FMHA v2.");
+            // Fall back to FMHA v2
+            mUseTllmGen = false;
+            mTllmGenFMHARunner.reset();
+            mFMHARunner.reset(new FusedMHARunnerV2(fixedParams));
         }
     }
     else
