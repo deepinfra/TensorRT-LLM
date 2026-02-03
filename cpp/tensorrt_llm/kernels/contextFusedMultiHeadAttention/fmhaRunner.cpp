@@ -456,8 +456,13 @@ void FusedMHARunnerV2::setupLaunchParams(MHARunnerParams runnerParams)
         mLaunchParams.force_unroll = true;
         mLaunchParams.kernel_s = 0;
 
-        // Hopper-optimized kernels only exist for specific dimensions (DeepSeek)
-        bool isHopperContextMLA = isSm90 && mFixedParams.headSizeV == 128;
+        // Hopper-optimized warp-specialized kernels exist for:
+        // - DeepSeek context MLA: headSize=192, headSizeV=128
+        // - GLM-4 context MLA: headSize=256, headSizeV=256
+        // - DeepSeek FP8 generation MLA: headSizeV=512
+        bool isHopperContextMLA = isSm90
+            && (mFixedParams.headSizeV == 128
+                || (mFixedParams.headSize == 256 && mFixedParams.headSizeV == 256));
         bool isHopperFP8GenerationMLA
             = isSm90 && mFixedParams.dataType == DATA_TYPE_E4M3 && mFixedParams.headSizeV == 512;
 
@@ -495,9 +500,11 @@ void FusedMHARunnerV2::setupLaunchParams(MHARunnerParams runnerParams)
         else
         {
             // Hopper warp-specialized kernels have specific layout requirements
+            // Supports DeepSeek (headSizeV=128) and GLM-4 (headSize=256, headSizeV=256)
             bool isHopperContextMLA = isMLA && isSm90
                 && (mFixedParams.dataType == DATA_TYPE_BF16 || mFixedParams.dataType == DATA_TYPE_E4M3)
-                && mFixedParams.headSizeV == 128;
+                && (mFixedParams.headSizeV == 128
+                    || (mFixedParams.headSize == 256 && mFixedParams.headSizeV == 256));
             mLaunchParams.supportReturnSoftmaxStats = (runnerParams.softmaxStatsPtr != nullptr
                 && mLaunchParams.flash_attention
                 && ((!isHopperContextMLA && mLaunchParams.attention_input_layout == AttentionInputLayout::Q_CONTIGUOUS_KV)
