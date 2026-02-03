@@ -284,6 +284,16 @@ void FusedMultiHeadAttentionXMMAKernelV2::run(
     }
 
     auto const& kernelMeta = mKernelMeta[findIter->second.mMetaInfoIndex];
+    TLLM_LOG_WARNING("[DEBUG] FMHA run: D=%d, DV=%d, S=%d, warp_spec=%d, flash=%d, tiled=%d, SM=%d, "
+                     "forceUnroll=%d, metaIdx=%d, unrollStep=%d",
+                     params.d, params.dv, params.s,
+                     launch_params.warp_specialization ? 1 : 0,
+                     launch_params.flash_attention ? 1 : 0,
+                     launch_params.granular_tiling ? 1 : 0,
+                     mSM,
+                     forceUnroll ? 1 : 0,
+                     findIter->second.mMetaInfoIndex,
+                     kernelMeta.mUnrollStep);
     if (kernelMeta.launcher != nullptr)
     {
         kernelMeta.launcher(params, launch_params, stream);
