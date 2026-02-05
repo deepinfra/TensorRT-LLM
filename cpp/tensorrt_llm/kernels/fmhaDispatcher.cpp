@@ -136,7 +136,7 @@ bool FmhaDispatcher::isSupported()
         printf("[FmhaDispatcher] TRTLLM-GEN isSupported=%d, reason=%s\n", foundKernels, reason.c_str());
         printf("[FmhaDispatcher] Params: HeadDimQk=%d, HeadDimV=%d, layout=%d, maskType=%d\n",
                tllmRunnerParams.mHeadDimQk, tllmRunnerParams.mHeadDimV,
-               static_cast<int>(tllmRunnerParams.mQkvLayout), tllmRunnerParams.getAttentionMaskType());
+               static_cast<int>(tllmRunnerParams.mQkvLayout), static_cast<int>(mFixedParams.attentionMaskType));
         fflush(stdout);
     }
     else
