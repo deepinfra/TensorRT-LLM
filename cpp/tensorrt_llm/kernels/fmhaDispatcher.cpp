@@ -55,6 +55,11 @@ FmhaDispatcher::FmhaDispatcher(MHARunnerFixedParams fixedParams)
                   && !(fixedParams.attentionInputLayout == AttentionInputLayout::SEPARATE_Q_K_V
                        && (fixedParams.headSize != 192 || fixedParams.headSizeV != 128)))
 {
+    printf("[FmhaDispatcher] SM=%d, headSize=%d, headSizeV=%d, layout=%d, mUseTllmGen=%d\n",
+           tensorrt_llm::common::getSMVersion(), fixedParams.headSize, fixedParams.headSizeV,
+           static_cast<int>(fixedParams.attentionInputLayout), mUseTllmGen);
+    fflush(stdout);
+
     if (mUseTllmGen)
     {
         mTllmGenFMHARunner.reset(
@@ -126,11 +131,19 @@ bool FmhaDispatcher::isSupported()
         tllmRunnerParams.mChunkedAttentionSize = INT_MAX;
         tllmRunnerParams.mAttentionWindowSize = INT_MAX;
 
-        foundKernels = mTllmGenFMHARunner->isSupported(tllmRunnerParams);
+        auto [supported, reason] = mTllmGenFMHARunner->isSupportedWithInfo(tllmRunnerParams);
+        foundKernels = supported;
+        printf("[FmhaDispatcher] TRTLLM-GEN isSupported=%d, reason=%s\n", foundKernels, reason.c_str());
+        printf("[FmhaDispatcher] Params: HeadDimQk=%d, HeadDimV=%d, layout=%d, maskType=%d\n",
+               tllmRunnerParams.mHeadDimQk, tllmRunnerParams.mHeadDimV,
+               static_cast<int>(tllmRunnerParams.mQkvLayout), tllmRunnerParams.getAttentionMaskType());
+        fflush(stdout);
     }
     else
     {
         foundKernels = mFMHARunner->isFmhaSupported();
+        printf("[FmhaDispatcher] FusedMHARunnerV2 isSupported=%d\n", foundKernels);
+        fflush(stdout);
     }
     if (!foundKernels)
     {
