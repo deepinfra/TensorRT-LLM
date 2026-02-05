@@ -527,7 +527,7 @@ class KVCacheManager(BaseResourceManager):
     def update_resources(self, scheduled_batch: ScheduledRequests):
         # rewind kv cache
         for request in scheduled_batch.generation_requests:
-            if request.state != LlmRequestState.GENERATION_COMPLETE:
+            if request.state != LlmRequestState.GENERATION_COMPLETE and not request.is_finished:
                 if request.py_rewind_len > 0:
                     self.rewind_kv_cache(request, request.py_rewind_len)
 
