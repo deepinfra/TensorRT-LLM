@@ -55,9 +55,9 @@ FmhaDispatcher::FmhaDispatcher(MHARunnerFixedParams fixedParams)
                   && !(fixedParams.attentionInputLayout == AttentionInputLayout::SEPARATE_Q_K_V
                        && (fixedParams.headSize != 192 || fixedParams.headSizeV != 128)))
 {
-    printf("[FmhaDispatcher] SM=%d, headSize=%d, headSizeV=%d, layout=%d, mUseTllmGen=%d\n",
+    printf("[FmhaDispatcher] SM=%d, headSize=%d, headSizeV=%d, layout=%d, mUseTllmGen=%d, tokensPerBlock=%d\n",
            tensorrt_llm::common::getSMVersion(), fixedParams.headSize, fixedParams.headSizeV,
-           static_cast<int>(fixedParams.attentionInputLayout), mUseTllmGen);
+           static_cast<int>(fixedParams.attentionInputLayout), mUseTllmGen, fixedParams.numTokensPerBlock);
     fflush(stdout);
 
     if (mUseTllmGen)
