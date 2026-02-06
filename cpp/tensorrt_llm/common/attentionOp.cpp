@@ -16,6 +16,7 @@
  */
 #include "attentionOp.h"
 #include "tensorrt_llm/common/assert.h"
+#include "tensorrt_llm/common/cudaUtils.h"
 #include "tensorrt_llm/common/envUtils.h"
 #include "tensorrt_llm/common/logger.h"
 #include "tensorrt_llm/common/memoryUtils.h"
@@ -1301,8 +1302,21 @@ int AttentionOp::mlaGeneration(
         fmhaParams.stream = stream;
         fmhaParams.forceFp32Acc = mFMHAForceFP32Acc;
 
-        // Run the fmha kernel
-        mDecoderFMHARunner->run(fmhaParams);
+        // Run the fmha kernel if supported
+        if (mDecoderFMHARunner && mDecoderFMHARunner->isFmhaSupported())
+        {
+            mDecoderFMHARunner->run(fmhaParams);
+        }
+        else
+        {
+            TLLM_CHECK_WITH_INFO(false,
+                "No FMHA kernels available for MLA generation with kv_lora_rank=%d on SM%d. "
+                "flash_mla Dense Decoding only supports SM90. "
+                "TRTLLM-GEN only supports kv_lora_rank=128. "
+                "FusedMHARunnerV2 has no 576x512 kernels. "
+                "Please use SM90 (H100) or request NVIDIA add SM100 support.",
+                mMLAParams.kv_lora_rank, tensorrt_llm::common::getSMVersion());
+        }
     }
 
     sync_check_cuda_error(stream);
@@ -2837,9 +2851,21 @@ int AttentionOp::initialize() noexcept
         }
 
         // Fall back to unfused MHA kernels if not supported.
-        // Generation MLA reuses the context FMHA code path so set mEnableContextFMHA to true.
-        // However, do not check mFmhaDispatcher which is not used for generation MLA.
-        mEnableContextFMHA = mIsGenerationMLA || mFmhaDispatcher->isSupported();
+        // For generation MLA, check if any FMHA path is actually supported.
+        // If not, allow unfused MHA fallback by setting mEnableContextFMHA = false.
+        bool mlaGenerationFmhaSupported = false;
+        if (mIsGenerationMLA)
+        {
+            // Check if any generation MLA FMHA path is available
+            mlaGenerationFmhaSupported = mUseGenFlashMLA
+                || (mUseTllmGen && mMLAParams.kv_lora_rank == 128)
+                || (mDecoderFMHARunner && mDecoderFMHARunner->isFmhaSupported());
+            if (!mlaGenerationFmhaSupported)
+            {
+                TLLM_LOG_WARNING("No FMHA kernels available for MLA generation. Falling back to unfused MHA.");
+            }
+        }
+        mEnableContextFMHA = (mIsGenerationMLA && mlaGenerationFmhaSupported) || mFmhaDispatcher->isSupported();
 
         // Only FMHA supports custom mask currently.
         TLLM_CHECK_WITH_INFO(

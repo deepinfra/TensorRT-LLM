@@ -400,14 +400,18 @@ void FusedMultiHeadAttentionXMMAKernelV2::run(
 
 bool FusedMultiHeadAttentionXMMAKernelV2::checkIfKernelExist(MHARunnerFixedParams params) const
 {
-    uint64_t id = hashID(0, params.headSize, params.headSizeV, 0, 0, params.forceFp32Acc, false, false, false,
+    // Try multiple hash combinations to find any matching kernel
+    // The kernel flags (flash_attention, alibi, unroll, return_softmax) vary by kernel compilation
+
+    // First try: flash_attention=true, alibi=true, unroll=true, return_softmax=true (MLA generation kernels)
+    uint64_t id = hashID(0, params.headSize, params.headSizeV, false, true, params.forceFp32Acc, true, false, true,
         static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout), false,
         params.attnLogitSoftcappingScale != 0.f, params.sageBlockSizeQ, params.sageBlockSizeK, params.sageBlockSizeV,
-        false);
+        true);
 
-    TLLM_LOG_WARNING("[DEBUG] checkIfKernelExist: query_hash=0x%llx, mFunctions.size()=%zu, D=%d, DV=%d, maskType=%d, layout=%d",
+    TLLM_LOG_WARNING("[DEBUG] checkIfKernelExist: query_hash=0x%llx, mFunctions.size()=%zu, D=%d, DV=%d, maskType=%d, layout=%d, forceFp32Acc=%d",
            (unsigned long long)id, mFunctions.size(), params.headSize, params.headSizeV,
-           static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout));
+           static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout), params.forceFp32Acc);
 
     auto const findIter = std::find_if(mFunctions.begin(), mFunctions.end(), KernelExistPredicate(id));
     bool found = findIter != mFunctions.end();
