@@ -2815,6 +2815,9 @@ int AttentionOp::initialize() noexcept
                 fmhaParams.numKvHeads = 1;
                 fmhaParams.headSize = mMLAParams.kv_lora_rank + mMLAParams.qk_rope_head_dim;
                 fmhaParams.headSizeV = mMLAParams.kv_lora_rank;
+                // Set headSizeQkNope to enable MLA mode in setupLaunchParams,
+                // which sets granular_tiling=true for non-Hopper SM100 kernels.
+                fmhaParams.headSizeQkNope = mMLAParams.qk_nope_head_dim;
                 fmhaParams.qScaling = mQScaling
                     * sqrt((float) (mMLAParams.qk_nope_head_dim + mMLAParams.qk_rope_head_dim))
                     / sqrtf((float) (mMLAParams.kv_lora_rank + mMLAParams.qk_rope_head_dim));
