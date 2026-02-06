@@ -403,9 +403,9 @@ bool FusedMultiHeadAttentionXMMAKernelV2::checkIfKernelExist(MHARunnerFixedParam
     // Try multiple hash combinations to find any matching kernel
     // The kernel flags (flash_attention, alibi, unroll, return_softmax) vary by kernel compilation
 
-    // First try: flash_attention=true, alibi=true, unroll=true, return_softmax=true (MLA generation kernels)
+    // First try: flash_attention=true, alibi=true, unroll=true, tiled=true, return_softmax=true (MLA generation kernels)
     uint64_t id = hashID(0, params.headSize, params.headSizeV, false, true, params.forceFp32Acc, true, false, true,
-        static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout), false,
+        static_cast<int>(params.attentionMaskType), static_cast<int>(params.attentionInputLayout), true,
         params.attnLogitSoftcappingScale != 0.f, params.sageBlockSizeQ, params.sageBlockSizeK, params.sageBlockSizeV,
         true);
 
@@ -419,20 +419,12 @@ bool FusedMultiHeadAttentionXMMAKernelV2::checkIfKernelExist(MHARunnerFixedParam
     {
         std::stringstream ss;
         ss << "FMHA kernels are not found with these parameters:\n"
-           << "  S                     : 0\n" // Will not be checked
-           << "  D                     : " << params.headSize << "\n"
-           << "  DV                    : " << params.headSizeV << "\n"
-           << "  AttentionMaskType     : " << static_cast<int>(params.attentionMaskType) << "\n"
-           << "  AttentionInputLayout  : " << static_cast<int>(params.attentionInputLayout) << "\n"
-           << "  AttnLogitSoftcapping  : " << (params.attnLogitSoftcappingScale != 0.f ? 1 : 0) << "\n"
-           << "  AlibiSupported        : 0\n" // Will not be checked
-           << "  WarpSpecialization    : 0\n" // Will not be checked
-           << "  Tiled                 : 0\n" // Will not be checked
-           << "  FP32Accumulation      : " << (params.forceFp32Acc ? 1 : 0) << "\n"
-           << "  FlashAttention        : 0\n" // Will not be checked
-           << "  Interleaved           : 0\n" // Will not be checked
-           << "  Unroll                : 0\n" // Will not be checked
-           << "  Hash                  : 0x" << std::hex << std::setfill('0') << std::setw(16) << id << std::dec
+           << "  D: " << params.headSize << ", DV: " << params.headSizeV
+           << ", AttentionMaskType: " << static_cast<int>(params.attentionMaskType)
+           << ", AttentionInputLayout: " << static_cast<int>(params.attentionInputLayout) << "\n"
+           << "  AlibiSupported: 1, FP32Accumulation: " << (params.forceFp32Acc ? 1 : 0)
+           << ", FlashAttention: 1, ReturnSoftmaxStats: 1, Unroll: 1\n"
+           << "  Hash: 0x" << std::hex << std::setfill('0') << std::setw(16) << id << std::dec
            << "\n\n"
            << "Available kernel functions:\n";
 
