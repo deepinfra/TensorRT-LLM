@@ -529,7 +529,10 @@ class KVCacheManager(BaseResourceManager):
         for request in scheduled_batch.generation_requests:
             if request.state != LlmRequestState.GENERATION_COMPLETE and not request.is_finished:
                 if request.py_rewind_len > 0:
-                    self.rewind_kv_cache(request, request.py_rewind_len)
+                    try:
+                        self.rewind_kv_cache(request, request.py_rewind_len)
+                    except IndexError:
+                        pass
 
         # For context requests, we store the blocks for reuse.
         for request in scheduled_batch.context_requests:
