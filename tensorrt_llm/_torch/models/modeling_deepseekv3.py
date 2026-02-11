@@ -290,6 +290,11 @@ class DeepseekV3WeightLoader:
                     # TODO: remove weight_dequant after enabling fp8_bmm
                     dequant_kv_b_proj = self.model_config.quant_config.is_module_excluded_from_quantization(
                         names[-1])
+                    # Force dequant when per-head dims aren't 128-aligned
+                    # (FP8 block scale can't be split per-head)
+                    if not dequant_kv_b_proj and (qk_nope_head_dim + v_head_dim) % 128 != 0:
+                        dequant_kv_b_proj = True
+
                     if dequant_kv_b_proj:
                         kv_b_proj, k_b_proj_trans = load_kv_b_proj_and_k_b_proj_trans_dequant(
                             name)
