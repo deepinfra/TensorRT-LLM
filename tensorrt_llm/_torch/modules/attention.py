@@ -797,16 +797,6 @@ class MLA(nn.Module):
         self.kv_a_layernorm = RMSNorm(hidden_size=kv_lora_rank,
                                       dtype=dtype,
                                       eps=rms_norm_eps)
-        # When per-head MLA dimensions aren't divisible by 128, FP8 block
-        # scales can't be cleanly split per-head. Fall back to bf16 for
-        # kv_b_proj and related weights (same approach as TRTLLM backend).
-        kv_b_proj_quant_config = quant_config
-        if (quant_config is not None
-                and quant_config.quant_mode.has_fp8_block_scales()
-                and (self.qk_nope_head_dim % 128 != 0
-                     or self.v_head_dim % 128 != 0)):
-            kv_b_proj_quant_config = None
-
         self.kv_b_proj = Linear(
             self.kv_lora_rank,
             tp_size * self.num_heads *
@@ -815,7 +805,7 @@ class MLA(nn.Module):
             dtype=dtype,
             mapping=mapping,
             tensor_parallel_mode=TensorParallelMode.COLUMN,
-            quant_config=kv_b_proj_quant_config,
+            quant_config=quant_config,
             skip_create_weights_in_init=config.skip_create_weights_in_init,
             allreduce_strategy=config.allreduce_strategy,
             force_dynamic_quantization=config.force_dynamic_quantization)
@@ -923,7 +913,15 @@ class MLA(nn.Module):
             self.kv_b_proj.quant_config
             and self.kv_b_proj.quant_config.quant_mode.has_fp8_block_scales())
 
-        mla_weight_dtype = torch.float8_e4m3fn if has_fp8_block_scales else self.dtype
+        # Generation weights (k_b_proj_trans, v_b_proj) require 128-aligned
+        # per-head dims for FP8 block scaling BMM. When not aligned, store
+        # in BF16 while kv_b_proj stays FP8 for fast context GEMM.
+        gen_fp8_block_scales = (
+            has_fp8_block_scales
+            and self.qk_nope_head_dim % 128 == 0
+            and self.v_head_dim % 128 == 0)
+
+        mla_weight_dtype = torch.float8_e4m3fn if gen_fp8_block_scales else self.dtype
         self.k_b_proj_trans = nn.Parameter(
             torch.empty(
                 (self.num_heads, self.kv_lora_rank, self.qk_nope_head_dim),
@@ -934,7 +932,7 @@ class MLA(nn.Module):
 
         self.k_b_proj_trans_dequant = None
         self.v_b_proj_dequant = None
-        if has_fp8_block_scales:
+        if gen_fp8_block_scales:
             self.k_b_proj_trans_scale = nn.Parameter(
                 torch.empty(
                     (

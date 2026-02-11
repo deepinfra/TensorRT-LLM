@@ -2240,7 +2240,13 @@ class PyExecutor:
         #       Currently, self.inflight_req_ids is not.
         max_input_len = self.max_input_len
         for req in requests_to_pause:
-            req.pause(max_input_len)
+            try:
+                req.pause(max_input_len)
+            except (ValueError, IndexError):
+                # The request's underlying resources may have been freed
+                # (e.g., due to preemption by the capacity scheduler during
+                # overlap execution).
+                pass
             self._terminate_request(req)
 
     def _add_inflight_ids(self, scheduled_requests):

@@ -290,10 +290,13 @@ class DeepseekV3WeightLoader:
                     # TODO: remove weight_dequant after enabling fp8_bmm
                     dequant_kv_b_proj = self.model_config.quant_config.is_module_excluded_from_quantization(
                         names[-1])
-                    # Force dequant when per-head dims aren't 128-aligned
-                    # (FP8 block scale can't be split per-head)
-                    if not dequant_kv_b_proj and (qk_nope_head_dim + v_head_dim) % 128 != 0:
-                        dequant_kv_b_proj = True
+                    # When per-head dims aren't 128-aligned, kv_b_proj stays
+                    # FP8 for fast context GEMM, but generation weights
+                    # (k_b_proj_trans, v_b_proj) are dequantized to BF16.
+                    needs_gen_dequant = (
+                        not dequant_kv_b_proj
+                        and (qk_nope_head_dim % 128 != 0
+                             or v_head_dim % 128 != 0))
 
                     if dequant_kv_b_proj:
                         kv_b_proj, k_b_proj_trans = load_kv_b_proj_and_k_b_proj_trans_dequant(
@@ -305,14 +308,26 @@ class DeepseekV3WeightLoader:
                         kv_b_proj.reshape(module.weight.shape))
 
                     attn_module = all_named_modules[parent_module_name]
-                    _, v_b_proj = split_kv_b_proj(module.weight.data,
-                                                  is_scale=False)
-                    attn_module.v_b_proj = nn.Parameter(v_b_proj,
-                                                        requires_grad=False)
 
-                    attn_module.k_b_proj_trans.data.copy_(
-                        k_b_proj_trans.reshape(
-                            attn_module.k_b_proj_trans.shape))
+                    if needs_gen_dequant:
+                        # kv_b_proj stays FP8; dequant generation weights
+                        kv_b_proj_bf16, k_b_proj_trans_bf16 = load_kv_b_proj_and_k_b_proj_trans_dequant(
+                            name)
+                        _, v_b_proj = split_kv_b_proj(kv_b_proj_bf16,
+                                                      is_scale=False)
+                        attn_module.v_b_proj = nn.Parameter(
+                            v_b_proj, requires_grad=False)
+                        attn_module.k_b_proj_trans.data.copy_(
+                            k_b_proj_trans_bf16.reshape(
+                                attn_module.k_b_proj_trans.shape))
+                    else:
+                        _, v_b_proj = split_kv_b_proj(module.weight.data,
+                                                      is_scale=False)
+                        attn_module.v_b_proj = nn.Parameter(
+                            v_b_proj, requires_grad=False)
+                        attn_module.k_b_proj_trans.data.copy_(
+                            k_b_proj_trans.reshape(
+                                attn_module.k_b_proj_trans.shape))
 
                     if getattr(module, "weight_scale",
                                None) is not None and not dequant_kv_b_proj:
@@ -320,35 +335,44 @@ class DeepseekV3WeightLoader:
                             name, is_scale=True)
                         module.weight_scale.copy_(
                             kv_b_proj_scale.reshape(module.weight_scale.shape))
-                        attn_module.k_b_proj_trans_scale.copy_(
-                            k_b_proj_trans_scale.reshape(
-                                attn_module.k_b_proj_trans_scale.shape))
 
-                        _, v_b_proj_scale = split_kv_b_proj(
-                            module.weight_scale.data, is_scale=True)
-                        attn_module.v_b_proj_scale = nn.Parameter(
-                            v_b_proj_scale, requires_grad=False)
+                        if not needs_gen_dequant:
+                            attn_module.k_b_proj_trans_scale.copy_(
+                                k_b_proj_trans_scale.reshape(
+                                    attn_module.k_b_proj_trans_scale.shape))
 
-                        if attn_module.k_b_proj_trans_dequant is not None:
-                            attn_module.k_b_proj_trans_dequant.data.copy_(
-                                weight_dequant(
-                                    k_b_proj_trans.view(
-                                        -1, k_b_proj_trans.shape[-1]).cuda(),
-                                    k_b_proj_trans_scale.view(
-                                        -1,
-                                        k_b_proj_trans_scale.shape[-1]).cuda(),
-                                ).view(
-                                    *attn_module.k_b_proj_trans_dequant.shape).
-                                to(attn_module.k_b_proj_trans_dequant.dtype))
-                        if attn_module.v_b_proj_dequant is not None:
-                            attn_module.v_b_proj_dequant.data.copy_(
-                                weight_dequant(
-                                    v_b_proj.view(-1,
-                                                  v_b_proj.shape[-1]).cuda(),
-                                    v_b_proj_scale.view(
-                                        -1, v_b_proj_scale.shape[-1]).cuda(),
-                                ).view(*attn_module.v_b_proj_dequant.shape).to(
-                                    attn_module.v_b_proj_dequant.dtype))
+                            _, v_b_proj_scale = split_kv_b_proj(
+                                module.weight_scale.data, is_scale=True)
+                            attn_module.v_b_proj_scale = nn.Parameter(
+                                v_b_proj_scale, requires_grad=False)
+
+                            if attn_module.k_b_proj_trans_dequant is not None:
+                                attn_module.k_b_proj_trans_dequant.data.copy_(
+                                    weight_dequant(
+                                        k_b_proj_trans.view(
+                                            -1,
+                                            k_b_proj_trans.shape[-1]).cuda(),
+                                        k_b_proj_trans_scale.view(
+                                            -1,
+                                            k_b_proj_trans_scale.shape[-1]
+                                        ).cuda(),
+                                    ).view(
+                                        *attn_module.k_b_proj_trans_dequant.
+                                        shape).to(
+                                            attn_module.k_b_proj_trans_dequant.
+                                            dtype))
+                            if attn_module.v_b_proj_dequant is not None:
+                                attn_module.v_b_proj_dequant.data.copy_(
+                                    weight_dequant(
+                                        v_b_proj.view(
+                                            -1,
+                                            v_b_proj.shape[-1]).cuda(),
+                                        v_b_proj_scale.view(
+                                            -1,
+                                            v_b_proj_scale.shape[-1]).cuda(),
+                                    ).view(
+                                        *attn_module.v_b_proj_dequant.shape).
+                                    to(attn_module.v_b_proj_dequant.dtype))
                 elif names[-1] == "kv_a_proj_with_mqa":
                     fused_a = weights[
                         f"{'.'.join(names[:-1])}.kv_a_proj_with_mqa.weight"][:]
