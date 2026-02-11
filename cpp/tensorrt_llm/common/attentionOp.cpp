@@ -1033,15 +1033,16 @@ int AttentionOp::mlaGeneration(
     // - kv_lora_rank=128 (DeepSeek V2/V3 standard, 192x128 kernels)
     // - kv_lora_rank=512 (DeepSeek V3 with larger latent, 576x512 kernels)
     // GLM-4 style MLA (kv_lora_rank=256) is not supported, skip to fallback.
-    bool const useTllmGenForMla = mUseTllmGen && (mMLAParams.kv_lora_rank == 128 || mMLAParams.kv_lora_rank == 512);
+    //
+    // Additionally, the fast SwapsMmaAb kernel requires mNumHeadsQPerKv (= mNumAttnHeads for MLA)
+    // to be either <= 8 or divisible by 16. Otherwise, fall back to FMHA v2 for better performance.
+    int const numHeadsQPerKv = mNumAttnHeads / num_kv_heads;
+    bool const headCountCompatible = (numHeadsQPerKv <= 8) || (numHeadsQPerKv % 16 == 0);
+    bool const useTllmGenForMla = mUseTllmGen && (mMLAParams.kv_lora_rank == 128 || mMLAParams.kv_lora_rank == 512)
+        && headCountCompatible;
 
     if (useTllmGenForMla)
     {
-        printf("[MLA Generation] Using TRTLLM-GEN, kv_lora_rank=%d, HeadDimQk=%d, HeadDimV=%d, "
-               "num_q_heads=%d, num_kv_heads=%d, mNumHeadsQPerKv=%d\n",
-               mMLAParams.kv_lora_rank, mMLAParams.kv_lora_rank + mMLAParams.qk_rope_head_dim, mMLAParams.kv_lora_rank,
-               mNumAttnHeads, num_kv_heads, mNumAttnHeads / num_kv_heads);
-        fflush(stdout);
         TLLM_CHECK_WITH_INFO(mTllmGenFMHARunner.get(), "mTllmGenFMHARunner not initialized.");
         TllmGenFmhaRunnerParams tllmRunnerParams;
         memset(&tllmRunnerParams, 0, sizeof(tllmRunnerParams));
@@ -1312,9 +1313,6 @@ int AttentionOp::mlaGeneration(
         // Run the fmha kernel if supported
         if (mDecoderFMHARunner && mDecoderFMHARunner->isFmhaSupported())
         {
-            printf("[MLA Generation] Using FMHA v2 fallback, kv_lora_rank=%d\n",
-                   mMLAParams.kv_lora_rank);
-            fflush(stdout);
             mDecoderFMHARunner->run(fmhaParams);
         }
         else
