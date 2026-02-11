@@ -492,10 +492,21 @@ private:
             {
                 // Otherwise, we use the high-throughput kernel.
                 kernelType = FmhaKernelType::KeepsMmaAbForGeneration;
-                // Always use the separate reduction kernel.
-                if (isMultiCtasKvEnabled(selectKernelParams.mMultiCtasKvMode))
+                // Use the separate reduction kernel only if mNumHeadsQ >= tileSizeQ (64).
+                // The reduction kernel requires numCtasForAllHeads = mNumHeadsQ / tileSizeQ >= 1.
+                int32_t constexpr tileSizeQ = 64;
+                if (isMultiCtasKvEnabled(selectKernelParams.mMultiCtasKvMode) && params.mNumHeadsQ >= tileSizeQ)
                 {
                     selectKernelParams.mMultiCtasKvMode = MultiCtasKvMode::GmemReductionWithSeparateKernel;
+                }
+                else if (isMultiCtasKvEnabled(selectKernelParams.mMultiCtasKvMode))
+                {
+                    // Disable multiCtasKvMode for small head counts to avoid division by zero in reduction.
+                    selectKernelParams.mMultiCtasKvMode = MultiCtasKvMode::Disabled;
+                    // Enable the persistent scheduler for better performance.
+                    selectKernelParams.mTileScheduler = TileScheduler::Persistent;
+                    // Need to select a different kernel.
+                    selectKernelParams.mSelectNewKernel = true;
                 }
                 // The 2CTA keepsMmaAbForGeneration kernel is used when the numHeadsQPerKv is 128.
                 if (params.mNumHeadsQPerKv == 128)
