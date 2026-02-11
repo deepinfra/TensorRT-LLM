@@ -950,17 +950,48 @@ void invokeMLAContextFp8Quantize(MlaParams<T>& params, int total_kv_len, cudaStr
         constexpr int threads_per_block = 384;
         dim3 grid(int(tensorrt_llm::common::divUp(total_kv_len, 48)), 1, params.head_num);
 
+        int const qk_nope = params.meta.qk_nope_head_dim;
+        int const qk_rope = params.meta.qk_rope_head_dim;
+        int const v_dim = params.meta.v_head_dim;
+
         TLLM_LOG_DEBUG(
             "Launching quantizeCopyInputToFp8Kernel with grid_size: (%d, %d, %d), threads_per_block: %d, "
-            "total_kv_len: %d, acc_q_len: %d",
-            grid.x, grid.y, grid.z, threads_per_block, total_kv_len, params.acc_q_len);
+            "total_kv_len: %d, acc_q_len: %d, qk_nope: %d, qk_rope: %d, v_dim: %d",
+            grid.x, grid.y, grid.z, threads_per_block, total_kv_len, params.acc_q_len, qk_nope, qk_rope, v_dim);
 
-        quantizeCopyInputToFp8Kernel<T, threads_per_block, 128, 64, 128>
-            <<<grid, threads_per_block, 0, stream>>>(params.q_buf, static_cast<__nv_fp8_e4m3*>(params.quant_q_buf),
-                params.k_buf, static_cast<__nv_fp8_e4m3*>(params.quant_k_buf), params.v_buf,
-                static_cast<__nv_fp8_e4m3*>(params.quant_v_buf), params.acc_q_len, total_kv_len, params.quant_scale_qkv,
-                params.bmm1_scale, params.bmm2_scale, params.quant_scale_o, params.dequant_scale_q,
-                params.dequant_scale_kv, params.host_bmm1_scale);
+        // Dispatch based on actual MLA dimensions.
+        // The template parameters (QK_NOPE_HEAD_DIM, QK_ROPE_HEAD_DIM, V_HEAD_DIM) control memory
+        // strides in the quantization kernel and must match the model's actual dimensions.
+        if (qk_nope == 128 && qk_rope == 64 && v_dim == 128)
+        {
+            // DeepSeek V2/V3: headSize=192, headSizeV=128
+            quantizeCopyInputToFp8Kernel<T, threads_per_block, 128, 64, 128>
+                <<<grid, threads_per_block, 0, stream>>>(params.q_buf,
+                    static_cast<__nv_fp8_e4m3*>(params.quant_q_buf), params.k_buf,
+                    static_cast<__nv_fp8_e4m3*>(params.quant_k_buf), params.v_buf,
+                    static_cast<__nv_fp8_e4m3*>(params.quant_v_buf), params.acc_q_len, total_kv_len,
+                    params.quant_scale_qkv, params.bmm1_scale, params.bmm2_scale, params.quant_scale_o,
+                    params.dequant_scale_q, params.dequant_scale_kv, params.host_bmm1_scale);
+        }
+        else if (qk_nope == 192 && qk_rope == 64 && v_dim == 256)
+        {
+            // GLM-4 style MLA: headSize=256, headSizeV=256
+            quantizeCopyInputToFp8Kernel<T, threads_per_block, 192, 64, 256>
+                <<<grid, threads_per_block, 0, stream>>>(params.q_buf,
+                    static_cast<__nv_fp8_e4m3*>(params.quant_q_buf), params.k_buf,
+                    static_cast<__nv_fp8_e4m3*>(params.quant_k_buf), params.v_buf,
+                    static_cast<__nv_fp8_e4m3*>(params.quant_v_buf), params.acc_q_len, total_kv_len,
+                    params.quant_scale_qkv, params.bmm1_scale, params.bmm2_scale, params.quant_scale_o,
+                    params.dequant_scale_q, params.dequant_scale_kv, params.host_bmm1_scale);
+        }
+        else
+        {
+            TLLM_CHECK_WITH_INFO(false,
+                "Unsupported MLA dimensions for FP8 context quantization: "
+                "qk_nope_head_dim=%d, qk_rope_head_dim=%d, v_head_dim=%d. "
+                "Supported configurations: (128,64,128) for DeepSeek, (192,64,256) for GLM-4.",
+                qk_nope, qk_rope, v_dim);
+        }
     }
     else
     {

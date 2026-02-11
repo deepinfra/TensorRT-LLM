@@ -532,6 +532,8 @@ class KVCacheManager(BaseResourceManager):
                     try:
                         self.rewind_kv_cache(request, request.py_rewind_len)
                     except IndexError:
+                        # The sequence may have been removed from the KV cache
+                        # (e.g., due to preemption by the capacity scheduler).
                         pass
 
         # For context requests, we store the blocks for reuse.
