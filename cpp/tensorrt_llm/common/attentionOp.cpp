@@ -1037,8 +1037,10 @@ int AttentionOp::mlaGeneration(
 
     if (useTllmGenForMla)
     {
-        printf("[MLA Generation] Using TRTLLM-GEN, kv_lora_rank=%d, HeadDimQk=%d, HeadDimV=%d\n",
-               mMLAParams.kv_lora_rank, mMLAParams.kv_lora_rank + mMLAParams.qk_rope_head_dim, mMLAParams.kv_lora_rank);
+        printf("[MLA Generation] Using TRTLLM-GEN, kv_lora_rank=%d, HeadDimQk=%d, HeadDimV=%d, "
+               "num_q_heads=%d, num_kv_heads=%d, mNumHeadsQPerKv=%d\n",
+               mMLAParams.kv_lora_rank, mMLAParams.kv_lora_rank + mMLAParams.qk_rope_head_dim, mMLAParams.kv_lora_rank,
+               mNumAttnHeads, num_kv_heads, mNumAttnHeads / num_kv_heads);
         fflush(stdout);
         TLLM_CHECK_WITH_INFO(mTllmGenFMHARunner.get(), "mTllmGenFMHARunner not initialized.");
         TllmGenFmhaRunnerParams tllmRunnerParams;

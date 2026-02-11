@@ -478,8 +478,13 @@ private:
             // 2. The seqLenPerCtaKv <= 1024 based on the benchmark results (this might be fine-tuned later) and
             //    the numCtas (after splitting the heads across multiple CTAs) <= params.mMultiProcessorCount.
 
+            // SwapsMmaAb kernel requires mNumHeadsQPerKv to be <= 8 or divisible by 16 (tile size).
+            // If not compatible, fall back to KeepsMmaAb which supports mNumHeadsQPerKv < 64.
+            bool const swapsMmaAbCompatible = (params.mNumHeadsQPerKv <= 8)
+                || (params.mNumHeadsQPerKv > 8 && params.mNumHeadsQPerKv % 16 == 0);
+
             // Check the conditions.
-            if (params.mNumHeadsQPerKv <= 32 || useSwapsMmaAbMlaGenKernel(params))
+            if (swapsMmaAbCompatible && (params.mNumHeadsQPerKv <= 32 || useSwapsMmaAbMlaGenKernel(params)))
             {
                 kernelType = FmhaKernelType::SwapsMmaAbForGeneration;
             }
