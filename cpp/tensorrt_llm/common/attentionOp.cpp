@@ -1310,8 +1310,8 @@ int AttentionOp::mlaGeneration(
         // Run the fmha kernel if supported
         if (mDecoderFMHARunner && mDecoderFMHARunner->isFmhaSupported())
         {
-            printf("[MLA Generation] Using FMHA v2 fallback, kv_lora_rank=%d, headSize=%d, headSizeV=%d\n",
-                   mMLAParams.kv_lora_rank, fmhaParams.headSize, fmhaParams.headSizeV);
+            printf("[MLA Generation] Using FMHA v2 fallback, kv_lora_rank=%d\n",
+                   mMLAParams.kv_lora_rank);
             fflush(stdout);
             mDecoderFMHARunner->run(fmhaParams);
         }
