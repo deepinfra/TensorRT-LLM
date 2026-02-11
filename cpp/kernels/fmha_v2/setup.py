@@ -3976,6 +3976,44 @@ def enumerate_qgmma_flash_warpspec_kernels(specs,
                     input_layout=input_layout,
                     sage_block_sizes=sage_block_sizes,
                     output_dtype=output_dtype))
+        # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
+        # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+        # smem size with kv_step=64: fits in Hopper's 228KB
+        if input_layout == InputLayout.SEPARATE_Q_K_V and not alibi and not enable_attn_logit_softcapping:
+            specs.append(
+                kernel_spec(
+                    sm=sm,
+                    sm_mma=90,
+                    dtype=dtype,
+                    seq_len=0,  # support any sequence length
+                    head_size=256,
+                    head_size_v=256,
+                    warps_m=4,  #4x1 warpgroups
+                    warps_n=1,
+                    version=2,
+                    interleaved=False,
+                    ldgsts_q=
+                    False,  # for Hopper kernels, ldgsts = False signals TMA usage.
+                    ldgsts_k=False,
+                    ldgsts_v=False,
+                    share_smem_k_v=False,
+                    loop_step=64,
+                    q_tile_buffers=1,  # only used by warp specialized kernels
+                    has_noloop=0,
+                    noloop_step=64,
+                    kv_loop_step=64,
+                    kv_tile_buffers=2,  # only used by warp specialized kernels
+                    unroll_threshold=1,
+                    has_scale_max=False,
+                    flash_attention=True,
+                    warp_specialization=True,
+                    alibi=False,
+                    enable_attn_logit_softcapping=False,
+                    return_softmax_stats=return_softmax,
+                    scheduling_mode=scheduling_mode,
+                    input_layout=InputLayout.SEPARATE_Q_K_V,
+                    sage_block_sizes=sage_block_sizes,
+                    output_dtype=output_dtype))
 
 
 def enumerate_igmma_kernels(specs, sm=90):
@@ -6498,7 +6536,7 @@ def enumerate_kernels():
                   and kspec.enable_attn_logit_softcapping == False)
                   # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
                   or (kspec.sm            == 90
-                  and kspec.dtype         in ['bf16', 'fp16']
+                  and kspec.dtype         in ['bf16', 'fp16', 'e4m3']
                   and kspec.head_size     == 256
                   and kspec.head_size_v   == 256
                   and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
