@@ -1029,12 +1029,17 @@ int AttentionOp::mlaGeneration(
         mMultiBlockMode = false;
     }
 
-    // TRTLLM-GEN MLA generation only supports DeepSeek's dimensions (kv_lora_rank=128).
+    // TRTLLM-GEN MLA generation supports:
+    // - kv_lora_rank=128 (DeepSeek V2/V3 standard, 192x128 kernels)
+    // - kv_lora_rank=512 (DeepSeek V3 with larger latent, 576x512 kernels)
     // GLM-4 style MLA (kv_lora_rank=256) is not supported, skip to fallback.
-    bool const useTllmGenForMla = mUseTllmGen && (mMLAParams.kv_lora_rank == 128);
+    bool const useTllmGenForMla = mUseTllmGen && (mMLAParams.kv_lora_rank == 128 || mMLAParams.kv_lora_rank == 512);
 
     if (useTllmGenForMla)
     {
+        printf("[MLA Generation] Using TRTLLM-GEN, kv_lora_rank=%d, HeadDimQk=%d, HeadDimV=%d\n",
+               mMLAParams.kv_lora_rank, mMLAParams.kv_lora_rank + mMLAParams.qk_rope_head_dim, mMLAParams.kv_lora_rank);
+        fflush(stdout);
         TLLM_CHECK_WITH_INFO(mTllmGenFMHARunner.get(), "mTllmGenFMHARunner not initialized.");
         TllmGenFmhaRunnerParams tllmRunnerParams;
         memset(&tllmRunnerParams, 0, sizeof(tllmRunnerParams));
@@ -1305,6 +1310,9 @@ int AttentionOp::mlaGeneration(
         // Run the fmha kernel if supported
         if (mDecoderFMHARunner && mDecoderFMHARunner->isFmhaSupported())
         {
+            printf("[MLA Generation] Using FMHA v2 fallback, kv_lora_rank=%d, headSize=%d, headSizeV=%d\n",
+                   mMLAParams.kv_lora_rank, fmhaParams.headSize, fmhaParams.headSizeV);
+            fflush(stdout);
             mDecoderFMHARunner->run(fmhaParams);
         }
         else
@@ -2747,9 +2755,12 @@ int AttentionOp::initialize() noexcept
         if (mIsMLAEnabled)
         {
             mEnableXQA = (mSM == kSM_120) && mIsGenerationMLA;
-            // TRTLLM-GEN only supports DeepSeek MLA dimensions (kv_lora_rank=128).
+            // TRTLLM-GEN supports MLA generation for:
+            // - kv_lora_rank=128 (DeepSeek V2/V3 standard)
+            // - kv_lora_rank=512 (DeepSeek V3 with larger latent, 576x512 kernels)
             // GLM-4 style MLA (kv_lora_rank=256) needs mDecoderFMHARunner as fallback.
-            bool const needDecoderFMHAFallback = mUseTllmGen && (mMLAParams.kv_lora_rank != 128);
+            bool const trtllmGenSupportsKvLoraRank = (mMLAParams.kv_lora_rank == 128 || mMLAParams.kv_lora_rank == 512);
+            bool const needDecoderFMHAFallback = mUseTllmGen && !trtllmGenSupportsKvLoraRank;
             if (mUseTllmGen)
             {
                 Data_type qDataType = DATA_TYPE_FP32;
