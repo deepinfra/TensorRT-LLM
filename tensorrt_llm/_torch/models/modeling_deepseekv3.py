@@ -331,10 +331,23 @@ class DeepseekV3WeightLoader:
 
                     if getattr(module, "weight_scale",
                                None) is not None and not dequant_kv_b_proj:
-                        kv_b_proj_scale, k_b_proj_trans_scale = load_kv_b_proj_and_k_b_proj_trans(
-                            name, is_scale=True)
-                        module.weight_scale.copy_(
-                            kv_b_proj_scale.reshape(module.weight_scale.shape))
+                        if needs_gen_dequant:
+                            # Scale blocks cross head boundaries when dims
+                            # aren't 128-aligned, so load raw scale with
+                            # TP split instead of per-head unflatten.
+                            raw_scale = weights[
+                                f"{name}.weight_scale_inv"][:]
+                            if not self.model_config.mapping.enable_attention_dp:
+                                raw_scale = split_matrix_tp(
+                                    raw_scale, tp_size, tp_rank, 0)
+                            module.weight_scale.copy_(
+                                raw_scale.reshape(module.weight_scale.shape))
+                        else:
+                            kv_b_proj_scale, k_b_proj_trans_scale = load_kv_b_proj_and_k_b_proj_trans(
+                                name, is_scale=True)
+                            module.weight_scale.copy_(
+                                kv_b_proj_scale.reshape(
+                                    module.weight_scale.shape))
 
                         if not needs_gen_dequant:
                             attn_module.k_b_proj_trans_scale.copy_(
