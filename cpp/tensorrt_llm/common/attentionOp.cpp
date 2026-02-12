@@ -1037,13 +1037,7 @@ int AttentionOp::mlaGeneration(
         mMultiBlockMode = false;
     }
 
-    // Check if head count is compatible with TRTLLM-GEN generation kernels.
-    // SwapsMmaAb requires numHeadsQPerKv <= 8 or divisible by 16.
-    // KeepsMmaAb requires numHeadsQ >= 64 for multiCtasKv to work efficiently.
-    int const numHeadsQPerKv = mNumAttnHeads / num_kv_heads;
-    bool const headCountCompatible = (numHeadsQPerKv <= 8) || (numHeadsQPerKv % 16 == 0);
-
-    if (mUseTllmGen && headCountCompatible)
+    if (mUseTllmGen)
     {
         TLLM_CHECK_WITH_INFO(mTllmGenFMHARunner.get(), "mTllmGenFMHARunner not initialized.");
         TllmGenFmhaRunnerParams tllmRunnerParams;
