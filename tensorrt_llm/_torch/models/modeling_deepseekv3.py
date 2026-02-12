@@ -311,14 +311,15 @@ class DeepseekV3WeightLoader:
 
                     if needs_gen_dequant:
                         # kv_b_proj stays FP8; dequant generation weights
-                        kv_b_proj_bf16, k_b_proj_trans_bf16 = load_kv_b_proj_and_k_b_proj_trans_dequant(
+                        kv_b_proj_dequant, k_b_proj_trans_dequant = load_kv_b_proj_and_k_b_proj_trans_dequant(
                             name)
-                        _, v_b_proj = split_kv_b_proj(kv_b_proj_bf16,
+                        _, v_b_proj = split_kv_b_proj(kv_b_proj_dequant,
                                                       is_scale=False)
                         attn_module.v_b_proj = nn.Parameter(
-                            v_b_proj, requires_grad=False)
+                            v_b_proj.to(attn_module.v_b_proj.dtype),
+                            requires_grad=False)
                         attn_module.k_b_proj_trans.data.copy_(
-                            k_b_proj_trans_bf16.reshape(
+                            k_b_proj_trans_dequant.reshape(
                                 attn_module.k_b_proj_trans.shape))
                     else:
                         _, v_b_proj = split_kv_b_proj(module.weight.data,
