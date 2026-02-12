@@ -479,7 +479,11 @@ private:
             //    the numCtas (after splitting the heads across multiple CTAs) <= params.mMultiProcessorCount.
 
             // Check the conditions.
-            if (params.mNumHeadsQPerKv <= 32 || useSwapsMmaAbMlaGenKernel(params))
+            // SwapsMmaAb kernel requires mNumHeadsQPerKv to be <= 8 or divisible by 16 (tile size).
+            bool const swapsMmaAbCompatible = (params.mNumHeadsQPerKv <= 8)
+                || (params.mNumHeadsQPerKv > 8 && params.mNumHeadsQPerKv % 16 == 0);
+
+            if (swapsMmaAbCompatible && (params.mNumHeadsQPerKv <= 32 || useSwapsMmaAbMlaGenKernel(params)))
             {
                 kernelType = FmhaKernelType::SwapsMmaAbForGeneration;
             }
@@ -487,10 +491,18 @@ private:
             {
                 // Otherwise, we use the high-throughput kernel.
                 kernelType = FmhaKernelType::KeepsMmaAbForGeneration;
-                // Always use the separate reduction kernel.
-                if (isMultiCtasKvEnabled(selectKernelParams.mMultiCtasKvMode))
+                // Use the separate reduction kernel only when numHeadsQ >= tileSizeQ (64),
+                // otherwise disable multiCtasKv to avoid divide-by-zero in the reduction kernel.
+                int32_t constexpr tileSizeQ = 64;
+                if (isMultiCtasKvEnabled(selectKernelParams.mMultiCtasKvMode) && params.mNumHeadsQ >= tileSizeQ)
                 {
                     selectKernelParams.mMultiCtasKvMode = MultiCtasKvMode::GmemReductionWithSeparateKernel;
+                }
+                else if (isMultiCtasKvEnabled(selectKernelParams.mMultiCtasKvMode))
+                {
+                    selectKernelParams.mMultiCtasKvMode = MultiCtasKvMode::Disabled;
+                    selectKernelParams.mTileScheduler = TileScheduler::Persistent;
+                    selectKernelParams.mSelectNewKernel = true;
                 }
                 // The 2CTA keepsMmaAbForGeneration kernel is used when the numHeadsQPerKv is 128.
                 if (params.mNumHeadsQPerKv == 128)
