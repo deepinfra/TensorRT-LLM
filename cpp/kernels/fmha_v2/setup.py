@@ -3978,7 +3978,7 @@ def enumerate_qgmma_flash_warpspec_kernels(specs,
                     output_dtype=output_dtype))
         # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
         # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
-        # smem size with kv_step=64: fits in Hopper's 228KB
+        # FP8 (1B ele): kv_step=128, kv_buffers=2 => ~160KB smem, fits in 228KB
         if input_layout == InputLayout.SEPARATE_Q_K_V and not alibi and not enable_attn_logit_softcapping:
             specs.append(
                 kernel_spec(
@@ -4001,7 +4001,7 @@ def enumerate_qgmma_flash_warpspec_kernels(specs,
                     q_tile_buffers=1,  # only used by warp specialized kernels
                     has_noloop=0,
                     noloop_step=64,
-                    kv_loop_step=64,
+                    kv_loop_step=128,
                     kv_tile_buffers=2,  # only used by warp specialized kernels
                     unroll_threshold=1,
                     has_scale_max=False,
