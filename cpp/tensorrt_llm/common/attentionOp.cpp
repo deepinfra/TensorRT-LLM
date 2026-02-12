@@ -2760,7 +2760,8 @@ int AttentionOp::initialize() noexcept
             // When headSize == headSizeV (symmetric MLA), use PACKED_QKV layout to enable
             // TRTLLM-GEN H{dim} context kernels (e.g., H256). Q, K, V will be packed at runtime.
             // When headSize != headSizeV (asymmetric, e.g., DeepSeek 192x128), use SEPARATE_Q_K_V layout.
-            if (fmhaParams.headSize == fmhaParams.headSizeV)
+            // FP8 context MLA also requires SEPARATE_Q_K_V for separate quantization buffers.
+            if (fmhaParams.headSize == fmhaParams.headSizeV && !mFP8ContextMLA)
             {
                 mMLAContextPackQKV = true;
                 fmhaParams.attentionInputLayout = AttentionInputLayout::PACKED_QKV;
