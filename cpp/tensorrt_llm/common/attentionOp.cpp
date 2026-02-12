@@ -780,13 +780,21 @@ size_t AttentionOp::getWorkspaceSizeForContext(nvinfer1::DataType type, int32_t 
     size_t const fmha_bmm1_scale_size = mFP8ContextFMHA ? sizeof(float) * 2 : 0;
     size_t const fmha_bmm2_scale_size = mFP8ContextFMHA ? sizeof(float) : 0;
 
+    // Packed QKV buffer for symmetric MLA context (headSize == headSizeV), enables TRTLLM-GEN H{dim} context kernels.
+    size_t mla_packed_qkv_size = 0;
+    if (mMLAContextPackQKV && mEnableContextFMHA)
+    {
+        mla_packed_qkv_size
+            = size * max_num_tokens * (total_q_dim_all_heads + total_k_dim_all_heads + total_v_dim_all_heads);
+    }
+
     // cp workspace size upper bound
     size_t const cpMaxPaddedSequenceLength = max_num_tokens + batch_size * (mCpSize - 1);
     size_t const cpWorkspaceSize = mCpSize == 1
         ? 0
         : (2 * size * cpMaxPaddedSequenceLength * getHeadSize() * (mNumHeads + 2 * mNumKVHeads) + cu_seqlens_size);
 
-    int const NUM_BUFFERS = 23;
+    int const NUM_BUFFERS = 24;
     size_t workspaces[NUM_BUFFERS];
     workspaces[0] = CUBLAS_WORKSPACE_SIZE;
     workspaces[1] = attention_mask_size;
@@ -811,6 +819,7 @@ size_t AttentionOp::getWorkspaceSizeForContext(nvinfer1::DataType type, int32_t 
     workspaces[20] = fmha_bmm1_scale_size;
     workspaces[21] = fmha_bmm2_scale_size;
     workspaces[22] = cpWorkspaceSize;
+    workspaces[23] = mla_packed_qkv_size;
     context_workspace_size = tc::calculateTotalWorkspaceSize(workspaces, NUM_BUFFERS);
 
     return context_workspace_size;
@@ -1439,6 +1448,14 @@ int AttentionOp::enqueueContext(EnqueueContextParams<T> const& params, cudaStrea
     size_t const fmha_bmm1_scale_size = (mFP8ContextFMHA || mFP8ContextMLA) ? sizeof(float) * 2 : 0;
     size_t const fmha_bmm2_scale_size = (mFP8ContextFMHA || mFP8ContextMLA) ? sizeof(float) : 0;
 
+    // Packed QKV buffer for symmetric MLA context (headSize == headSizeV).
+    size_t mla_packed_qkv_size = 0;
+    if (mMLAContextPackQKV && mEnableContextFMHA)
+    {
+        mla_packed_qkv_size = sizeof(T) * params.num_tokens
+            * (total_q_dim_all_heads + total_k_dim_all_heads + total_v_dim_all_heads);
+    }
+
     // cp workspace size upper bound
     size_t const cpMaxPadedSequenceLength = params.num_tokens + params.batch_size * (mCpSize - 1);
     size_t const cpWorkspaceSize
@@ -1488,6 +1505,9 @@ int AttentionOp::enqueueContext(EnqueueContextParams<T> const& params, cudaStrea
     T* gatherOutBuffer = gatherInBuffer + cpMaxPadedSequenceLength * getHeadSize() * (mNumHeads + 2 * mNumKVHeads);
     int* cu_cp_partial_seqlens = reinterpret_cast<int*>(
         gatherOutBuffer + cpMaxPadedSequenceLength * getHeadSize() * (mNumHeads + 2 * mNumKVHeads));
+
+    // Packed QKV buffer for symmetric MLA context (headSize == headSizeV).
+    T* mla_packed_qkv = reinterpret_cast<T*>(nextWorkspacePtr(workspace_byte_ptr, offset, mla_packed_qkv_size));
 
     // build attention_mask, cu_seqlens, and padding_offset tensors
     // Note: self attn and cross attn should use different params
@@ -1799,6 +1819,28 @@ int AttentionOp::enqueueContext(EnqueueContextParams<T> const& params, cudaStrea
                 fmhaParams.qPtr = reinterpret_cast<void const*>(fp8_q_buf);
                 fmhaParams.kPtr = reinterpret_cast<void const*>(fp8_k_buf);
                 fmhaParams.vPtr = reinterpret_cast<void const*>(fp8_v_buf);
+            }
+            else if (mMLAContextPackQKV)
+            {
+                // Pack Q, K, V into a single buffer for PackedQkv layout.
+                // Per-token layout: [Q_all_heads | K_all_heads | V_all_heads]
+                size_t const total_qkv_per_token
+                    = total_q_dim_all_heads + total_k_dim_all_heads + total_v_dim_all_heads;
+
+                // Pack Q
+                cudaMemcpy2DAsync(mla_packed_qkv, total_qkv_per_token * sizeof(T), attention_input,
+                    total_q_dim_all_heads * sizeof(T), total_q_dim_all_heads * sizeof(T), params.num_tokens,
+                    cudaMemcpyDeviceToDevice, stream);
+                // Pack K
+                cudaMemcpy2DAsync(mla_packed_qkv + total_q_dim_all_heads, total_qkv_per_token * sizeof(T),
+                    params.k_ptr, total_k_dim_all_heads * sizeof(T), total_k_dim_all_heads * sizeof(T),
+                    params.num_tokens, cudaMemcpyDeviceToDevice, stream);
+                // Pack V
+                cudaMemcpy2DAsync(mla_packed_qkv + total_q_dim_all_heads + total_k_dim_all_heads,
+                    total_qkv_per_token * sizeof(T), params.v_ptr, total_v_dim_all_heads * sizeof(T),
+                    total_v_dim_all_heads * sizeof(T), params.num_tokens, cudaMemcpyDeviceToDevice, stream);
+
+                fmhaParams.qkvPtr = reinterpret_cast<void const*>(mla_packed_qkv);
             }
             else
             {
@@ -2707,8 +2749,6 @@ int AttentionOp::initialize() noexcept
         // the wrong kernel, no matter mIsGenerationMLA is true or false
         if (mIsMLAEnabled)
         {
-            // Context MLA always use separate_q_k_v layout
-            fmhaParams.attentionInputLayout = AttentionInputLayout::SEPARATE_Q_K_V;
             // Context attention of MLA is different
             fmhaParams.numKvHeads = mNumHeads;
             fmhaParams.headSize = mMLAParams.qk_nope_head_dim + mMLAParams.qk_rope_head_dim;
@@ -2716,6 +2756,20 @@ int AttentionOp::initialize() noexcept
             // For other MLA models like GLM-4, they may differ (e.g., qk_nope_head_dim=192, v_head_dim=256).
             fmhaParams.headSizeV = mMLAParams.v_head_dim;
             fmhaParams.headSizeQkNope = mMLAParams.qk_nope_head_dim;
+
+            // When headSize == headSizeV (symmetric MLA), use PACKED_QKV layout to enable
+            // TRTLLM-GEN H{dim} context kernels (e.g., H256). Q, K, V will be packed at runtime.
+            // When headSize != headSizeV (asymmetric, e.g., DeepSeek 192x128), use SEPARATE_Q_K_V layout.
+            if (fmhaParams.headSize == fmhaParams.headSizeV)
+            {
+                mMLAContextPackQKV = true;
+                fmhaParams.attentionInputLayout = AttentionInputLayout::PACKED_QKV;
+            }
+            else
+            {
+                mMLAContextPackQKV = false;
+                fmhaParams.attentionInputLayout = AttentionInputLayout::SEPARATE_Q_K_V;
+            }
         }
         fmhaParams.qScaling = mQScaling;
         fmhaParams.attnLogitSoftcappingScale = mAttnLogitSoftcappingScale;

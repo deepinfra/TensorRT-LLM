@@ -444,6 +444,7 @@ public:
     bool mIsMLAEnabled = false;
     bool mIsGenerationMLA = false;
     bool mUseGenFlashMLA = false;
+    bool mMLAContextPackQKV = false;
     bool mUseSparseAttention = false;
     bool mUseTllmGenSparseAttention = false;
     tensorrt_llm::kernels::MlaMetaParams mMLAParams;
