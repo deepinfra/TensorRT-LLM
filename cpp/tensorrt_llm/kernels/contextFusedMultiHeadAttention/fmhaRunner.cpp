@@ -468,6 +468,9 @@ void FusedMHARunnerV2::setupLaunchParams(MHARunnerParams runnerParams)
             mLaunchParams.warp_specialization = true;
             mLaunchParams.use_tma = true;
             mLaunchParams.dynamic_scheduler = true;
+            // Warp-spec kernels are NOT tiled — clear granular_tiling which may have been
+            // set earlier for SM100 (line 417-421).
+            mLaunchParams.granular_tiling = false;
             if (!mFixedParams.hasAlibi)
             {
                 mLaunchParams.useKernelWithoutAlibi = true;
