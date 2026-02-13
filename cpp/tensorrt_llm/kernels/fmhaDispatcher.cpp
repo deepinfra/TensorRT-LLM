@@ -57,10 +57,13 @@ FmhaDispatcher::FmhaDispatcher(MHARunnerFixedParams fixedParams)
             new TllmGenFmhaRunner(mFixedParams.dataType, mFixedParams.dataTypeKv, mFixedParams.dataTypeOut));
         if (!isSupported())
         {
-            TLLM_LOG_WARNING("TRTLLM-GEN does not support the requested kernels.");
+            TLLM_LOG_WARNING("TRTLLM-GEN does not support the requested kernels. Falling back to FMHA V2.");
+            mUseTllmGen = false;
+            mTllmGenFMHARunner.reset();
         }
     }
-    else
+
+    if (!mUseTllmGen)
     {
         TLLM_CHECK_WITH_INFO(mFixedParams.dataType == mFixedParams.dataTypeKv,
             "KV cache data type %s is not the same as input data type %s.",

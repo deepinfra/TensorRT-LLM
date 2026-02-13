@@ -2649,6 +2649,22 @@ int AttentionOp::initialize() noexcept
             "MLA(Deepseek v2) only support fixed kv_lora_rank(512) and fixed qk_rope_head_dim(64) right now.");
     }
 
+    // Disable FP8 context MLA for non-DSV3 MLA models.
+    // The FP8 quantization kernel (quantizeCopyInputToFp8Kernel) has hardcoded DSV3 dimensions (128/64/128).
+    // For other MLA models (e.g., qk_nope=192, v_head_dim=256), disable FP8 context and use BF16 instead.
+    // FP8 KV cache for generation is independent (mFP8GenerationMLA) and still works.
+    if (mFP8ContextMLA && mIsMLAEnabled)
+    {
+        bool const isDSV3Dims = (mMLAParams.qk_nope_head_dim == 128 && mMLAParams.v_head_dim == 128);
+        if (!isDSV3Dims)
+        {
+            TLLM_LOG_INFO("Disabling FP8 context MLA for non-DSV3 dimensions (qk_nope=%d, v_head_dim=%d). "
+                          "Using BF16 context kernels instead. FP8 KV cache still used for generation.",
+                mMLAParams.qk_nope_head_dim, mMLAParams.v_head_dim);
+            mFP8ContextMLA = false;
+        }
+    }
+
     mDriver = CUDADriverWrapper::getInstance();
 
     auto cublasHandle = getCublasHandle();
@@ -2761,20 +2777,12 @@ int AttentionOp::initialize() noexcept
             fmhaParams.headSizeV = mMLAParams.v_head_dim;
             fmhaParams.headSizeQkNope = mMLAParams.qk_nope_head_dim;
 
-            // When headSize == headSizeV (symmetric MLA), use PACKED_QKV layout to enable
-            // TRTLLM-GEN H{dim} context kernels (e.g., H256). Q, K, V will be packed at runtime.
-            // When headSize != headSizeV (asymmetric, e.g., DeepSeek 192x128), use SEPARATE_Q_K_V layout.
-            // FP8 context MLA also requires SEPARATE_Q_K_V for separate quantization buffers.
-            if (fmhaParams.headSize == fmhaParams.headSizeV && !mFP8ContextMLA)
-            {
-                mMLAContextPackQKV = true;
-                fmhaParams.attentionInputLayout = AttentionInputLayout::PACKED_QKV;
-            }
-            else
-            {
-                mMLAContextPackQKV = false;
-                fmhaParams.attentionInputLayout = AttentionInputLayout::SEPARATE_Q_K_V;
-            }
+            // MLA context always uses SEPARATE_Q_K_V layout.
+            // This allows the dispatcher to handle Q != KV lengths (needed for block reuse/cache hits).
+            // On SM100, if TRTLLM-GEN lacks SeparateQkv kernels for this head size, the dispatcher
+            // automatically falls back to FMHA V2.
+            mMLAContextPackQKV = false;
+            fmhaParams.attentionInputLayout = AttentionInputLayout::SEPARATE_Q_K_V;
         }
         fmhaParams.qScaling = mQScaling;
         fmhaParams.attnLogitSoftcappingScale = mAttnLogitSoftcappingScale;
