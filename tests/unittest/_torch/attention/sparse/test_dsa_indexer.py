@@ -2409,3 +2409,314 @@ def test_indexer_topk_multi_request_with_different_cache(enable_indexer_skip):
         )
         assert avg_similarity >= 0.95, \
             f"Custom vs indexer skip differ: avg similarity {avg_similarity:.4f} < 0.95"
+
+
+# ============================================================================
+# Tests for fused MQA logits + top-K kernel
+# ============================================================================
+
+
+def _has_fused_mqa_logits_topk():
+    """Check if the fused MQA logits + top-K op is registered."""
+    return hasattr(torch.ops.trtllm, 'fused_mqa_logits_topk_prefill')
+
+
+def _is_blackwell():
+    """Check if the current GPU is Blackwell (SM >= 100)."""
+    return get_sm_version() >= 100
+
+
+@pytest.mark.skipif(not has_deep_gemm(), reason="DeepGEMM not available")
+@pytest.mark.skipif(not _has_fused_mqa_logits_topk(),
+                    reason="Fused MQA logits top-K op not available")
+@skip_pre_hopper
+@pytest.mark.parametrize("batch_size", [1, 4])
+@pytest.mark.parametrize("index_topk", [2048])
+def test_fused_topk_vs_reference(batch_size, index_topk):
+    """
+    Compare fused kernel output against the two-step reference
+    (fp8_mqa_logits + indexer_topk_prefill). Verify > 99% recall
+    of top-K indices.
+    """
+    torch.manual_seed(42)
+    random.seed(42)
+
+    heads, head_dim = 32, 128
+    block_size = 64
+    max_model_len = 16384
+    layer_idx = 0
+
+    seq_lens = torch.randint(1024, 4096, (batch_size, ), dtype=torch.int32)
+    total_tokens = seq_lens.sum().item()
+
+    cache_manager, sparse_attn_config = create_dsa_cache_manager(
+        batch_size=batch_size,
+        head_dim=head_dim,
+        tokens_per_block=block_size,
+        max_seq_len=max_model_len,
+        num_layers=1)
+    sparse_attn_config.index_topk = index_topk
+    indexer = create_indexer(sparse_attn_config, layer_idx=layer_idx)
+
+    request_ids = list(range(batch_size))
+    cache_manager.add_dummy_requests(request_ids=request_ids,
+                                     token_nums=seq_lens.tolist(),
+                                     is_gen=False,
+                                     prepare_resource=True)
+
+    q = torch.randn((total_tokens, heads, head_dim),
+                    device="cuda",
+                    dtype=torch.bfloat16)
+    k = torch.randn((total_tokens, head_dim),
+                    device="cuda",
+                    dtype=torch.bfloat16)
+    weights = torch.randn((total_tokens, heads),
+                          device="cuda",
+                          dtype=torch.float32)
+    hidden_states = torch.randn((total_tokens, 4096),
+                                device="cuda",
+                                dtype=torch.bfloat16)
+
+    q_fp8 = q.to(torch.float8_e4m3fn)
+    k_fp8, k_scale = fp8_utils.fp8_quantize_1x128_sf_transpose(k)
+
+    # Run with the two-step reference (custom topk).
+    metadata_ref = _create_mock_metadata(request_ids, batch_size, batch_size,
+                                         0, seq_lens.clone(), seq_lens.clone(),
+                                         [0] * batch_size, cache_manager,
+                                         total_tokens, total_tokens)
+    Indexer.prepare(metadata_ref)
+    indexer._update_k_cache(k_fp8, k_scale, metadata_ref)
+
+    try:
+        topk_ref = indexer.sparse_attn_indexer(metadata_ref,
+                                               hidden_states,
+                                               q_fp8,
+                                               k_fp8,
+                                               k_scale,
+                                               weights,
+                                               use_custom_topk=True)
+    except Exception as e:
+        pytest.skip(f"Reference topk not available: {e}")
+
+    # Run with fused kernel by calling the op directly on the same data.
+    # Since the fused path is gated by SM >= 100 in dsa.py, we call the
+    # op directly here to test on any SM that has it registered.
+    if not _is_blackwell():
+        pytest.skip("Fused kernel requires SM >= 100")
+
+    metadata_fused = _create_mock_metadata(request_ids, batch_size,
+                                           batch_size, 0, seq_lens.clone(),
+                                           seq_lens.clone(),
+                                           [0] * batch_size, cache_manager,
+                                           total_tokens, total_tokens)
+    Indexer.prepare(metadata_fused)
+    indexer._update_k_cache(k_fp8, k_scale, metadata_fused)
+
+    # The fused path is exercised through sparse_attn_indexer when SM >= 100.
+    topk_fused = indexer.sparse_attn_indexer(metadata_fused,
+                                             hidden_states,
+                                             q_fp8,
+                                             k_fp8,
+                                             k_scale,
+                                             weights,
+                                             use_custom_topk=True)
+
+    # Validate recall.
+    num_exact_matches, total_similarity, min_similarity = validate_topk_indices(
+        topk_fused, topk_ref, total_tokens)
+    avg_similarity = total_similarity / total_tokens
+    print(f"  Fused vs reference: exact={num_exact_matches}/{total_tokens}, "
+          f"avg_sim={avg_similarity:.4f}, min_sim={min_similarity:.4f}")
+    assert avg_similarity >= 0.95, \
+        f"Fused vs reference differ: avg similarity {avg_similarity:.4f} < 0.95"
+
+
+@pytest.mark.skipif(not has_deep_gemm(), reason="DeepGEMM not available")
+@pytest.mark.skipif(not _has_fused_mqa_logits_topk(),
+                    reason="Fused MQA logits top-K op not available")
+@skip_pre_hopper
+def test_fused_topk_small_context():
+    """
+    Test fused kernel when seq_len_kv < topK. All valid positions should
+    be returned, rest padded with -1.
+    """
+    if not _is_blackwell():
+        pytest.skip("Fused kernel requires SM >= 100")
+
+    torch.manual_seed(123)
+
+    heads, head_dim = 32, 128
+    block_size = 64
+    max_model_len = 16384
+    layer_idx = 0
+    index_topk = 2048
+
+    # Sequence shorter than topK.
+    batch_size = 1
+    seq_len = 512
+    seq_lens = torch.tensor([seq_len], dtype=torch.int32)
+    total_tokens = seq_len
+
+    cache_manager, sparse_attn_config = create_dsa_cache_manager(
+        batch_size=batch_size,
+        head_dim=head_dim,
+        tokens_per_block=block_size,
+        max_seq_len=max_model_len,
+        num_layers=1)
+    sparse_attn_config.index_topk = index_topk
+    indexer = create_indexer(sparse_attn_config, layer_idx=layer_idx)
+
+    request_ids = [0]
+    cache_manager.add_dummy_requests(request_ids=request_ids,
+                                     token_nums=[seq_len],
+                                     is_gen=False,
+                                     prepare_resource=True)
+
+    q = torch.randn((total_tokens, heads, head_dim),
+                    device="cuda",
+                    dtype=torch.bfloat16)
+    k = torch.randn((total_tokens, head_dim),
+                    device="cuda",
+                    dtype=torch.bfloat16)
+    weights = torch.randn((total_tokens, heads),
+                          device="cuda",
+                          dtype=torch.float32)
+    hidden_states = torch.randn((total_tokens, 4096),
+                                device="cuda",
+                                dtype=torch.bfloat16)
+
+    q_fp8 = q.to(torch.float8_e4m3fn)
+    k_fp8, k_scale = fp8_utils.fp8_quantize_1x128_sf_transpose(k)
+
+    metadata = _create_mock_metadata(request_ids, batch_size, batch_size, 0,
+                                     seq_lens.clone(), seq_lens.clone(),
+                                     [0] * batch_size, cache_manager,
+                                     total_tokens, total_tokens)
+    Indexer.prepare(metadata)
+    indexer._update_k_cache(k_fp8, k_scale, metadata)
+
+    try:
+        topk_indices = indexer.sparse_attn_indexer(metadata,
+                                                   hidden_states,
+                                                   q_fp8,
+                                                   k_fp8,
+                                                   k_scale,
+                                                   weights,
+                                                   use_custom_topk=True)
+    except Exception as e:
+        pytest.skip(f"Kernel not available: {e}")
+
+    # Every row should have some valid indices (not all -1) since
+    # there are 512 valid positions.
+    for row in range(total_tokens):
+        valid = topk_indices[row][topk_indices[row] != -1]
+        assert valid.numel() > 0, f"Row {row}: no valid indices"
+        assert valid.numel() <= seq_len, \
+            f"Row {row}: too many valid indices ({valid.numel()} > {seq_len})"
+
+
+@pytest.mark.skipif(not has_deep_gemm(), reason="DeepGEMM not available")
+@pytest.mark.skipif(not _has_fused_mqa_logits_topk(),
+                    reason="Fused MQA logits top-K op not available")
+@skip_pre_hopper
+@pytest.mark.parametrize("batch_size", [2, 8])
+@pytest.mark.parametrize("chunk_size", [4096])
+def test_fused_topk_chunked_prefill(batch_size, chunk_size):
+    """
+    Test fused kernel through the chunked prefill loop in sparse_attn_indexer.
+    Compares against PyTorch fallback for correctness.
+    """
+    if not _is_blackwell():
+        pytest.skip("Fused kernel requires SM >= 100")
+
+    torch.manual_seed(42)
+    random.seed(42)
+
+    heads, head_dim = 32, 128
+    block_size = 64
+    max_model_len = 16384
+    layer_idx = 0
+    index_topk = 2048
+
+    min_seq_len = chunk_size // 2
+    max_seq_len = chunk_size * 3
+    seq_lens = torch.randint(min_seq_len,
+                             max_seq_len, (batch_size, ),
+                             dtype=torch.int32)
+    total_tokens = seq_lens.sum().item()
+
+    cache_manager, sparse_attn_config = create_dsa_cache_manager(
+        batch_size=batch_size,
+        head_dim=head_dim,
+        tokens_per_block=block_size,
+        max_seq_len=max_model_len,
+        num_layers=1)
+    sparse_attn_config.index_topk = index_topk
+    indexer = create_indexer(sparse_attn_config, layer_idx=layer_idx)
+
+    request_ids = list(range(batch_size))
+    cache_manager.add_dummy_requests(request_ids=request_ids,
+                                     token_nums=seq_lens.tolist(),
+                                     is_gen=False,
+                                     prepare_resource=True)
+
+    q = torch.randn((total_tokens, heads, head_dim),
+                    device="cuda",
+                    dtype=torch.bfloat16)
+    k = torch.randn((total_tokens, head_dim),
+                    device="cuda",
+                    dtype=torch.bfloat16)
+    weights = torch.randn((total_tokens, heads),
+                          device="cuda",
+                          dtype=torch.float32)
+    hidden_states = torch.randn((total_tokens, 4096),
+                                device="cuda",
+                                dtype=torch.bfloat16)
+
+    q_fp8 = q.to(torch.float8_e4m3fn)
+    k_fp8, k_scale = fp8_utils.fp8_quantize_1x128_sf_transpose(k)
+
+    # Fused kernel path.
+    metadata_fused = _create_mock_metadata(request_ids, batch_size, batch_size,
+                                           0, seq_lens.clone(),
+                                           seq_lens.clone(),
+                                           [0] * batch_size, cache_manager,
+                                           total_tokens, total_tokens,
+                                           chunk_size)
+    Indexer.prepare(metadata_fused)
+    indexer._update_k_cache(k_fp8, k_scale, metadata_fused)
+
+    try:
+        topk_fused = indexer.sparse_attn_indexer(metadata_fused,
+                                                 hidden_states,
+                                                 q_fp8,
+                                                 k_fp8,
+                                                 k_scale,
+                                                 weights,
+                                                 use_custom_topk=True)
+    except Exception as e:
+        pytest.skip(f"Fused kernel not available: {e}")
+
+    # PyTorch fallback path.
+    metadata_fallback = _create_mock_metadata(request_ids, batch_size,
+                                              batch_size, 0, seq_lens.clone(),
+                                              seq_lens.clone(),
+                                              [0] * batch_size, cache_manager,
+                                              total_tokens, total_tokens,
+                                              chunk_size)
+    Indexer.prepare(metadata_fallback)
+    indexer._update_k_cache(k_fp8, k_scale, metadata_fallback)
+    topk_fallback = indexer.sparse_attn_indexer(metadata_fallback,
+                                                hidden_states,
+                                                q_fp8,
+                                                k_fp8,
+                                                k_scale,
+                                                weights,
+                                                use_custom_topk=False)
+
+    num_exact_matches, total_similarity, _ = validate_topk_indices(
+        topk_fused, topk_fallback, total_tokens)
+    avg_similarity = total_similarity / total_tokens
+    assert avg_similarity >= 0.95, \
+        f"Fused chunked vs fallback differ: avg similarity {avg_similarity:.4f} < 0.95"

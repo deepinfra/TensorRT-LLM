@@ -88,6 +88,7 @@ add_library(
   noAuxTcOp.cpp
   IndexerKCacheScatterOp.cpp
   IndexerTopKOp.cpp
+  FusedMqaLogitsTopKOp.cpp
   ncclCommunicatorOp.cpp
   parallelDecodeKVCacheUpdateOp.cpp
   redrafterCurandOp.cpp

@@ -1351,6 +1351,12 @@ class Indexer(nn.Module):
         if not use_custom_topk:
             topk_indices_buffer[:hidden_states.shape[0]] = -1
 
+        # Check if fused MQA logits + top-K kernel is available (SM >= 100).
+        _use_fused_indexer = (
+            use_custom_topk
+            and hasattr(torch.ops.trtllm, 'fused_mqa_logits_topk_prefill')
+            and get_sm_version() >= 100)
+
         if has_prefill and not metadata.skip_indexer_for_ctx_reqs:
             # Use chunked prefill to reduce memory footprint
             if metadata.indexer_prefill_chunks is not None:
@@ -1358,68 +1364,103 @@ class Indexer(nn.Module):
                     # Gather K from cache for this chunk (dual to _update_k_cache)
                     chunk_k_fp8, chunk_k_scale = self._gather_k_cache_for_chunk(
                         metadata, chunk)
-                    logits = fp8_mqa_logits(
-                        q_fp8[chunk.token_start:chunk.token_end, ...],
-                        (chunk_k_fp8, chunk_k_scale),
-                        weights[chunk.token_start:chunk.token_end, ...],
-                        chunk.cu_seqlen_ks,
-                        chunk.cu_seqlen_ke,
-                    )
-                    if use_custom_topk:
-                        torch.ops.trtllm.indexer_topk_prefill(
-                            logits, chunk.cu_seqlen_ks, chunk.cu_seqlen_ke,
+
+                    if _use_fused_indexer:
+                        # Fused path: single kernel, no intermediate logits tensor.
+                        torch.ops.trtllm.fused_mqa_logits_topk_prefill(
+                            q_fp8[chunk.token_start:chunk.token_end, ...],
+                            chunk_k_fp8,
+                            chunk_k_scale,
+                            weights[chunk.token_start:chunk.token_end,
+                                    ...],
+                            chunk.cu_seqlen_ks,
+                            chunk.cu_seqlen_ke,
                             topk_indices_buffer[
-                                chunk.token_start:chunk.token_end, :])
+                                chunk.token_start:chunk.token_end, :],
+                        )
                     else:
-                        topk_indices = logits.topk(min(self.index_topk,
-                                                       logits.shape[-1]),
-                                                   dim=-1)[1]
-                        topk_indices -= chunk.cu_seqlen_ks[:, None]
+                        # Original two-step path (fallback for SM90 or
+                        # non-custom topk).
+                        logits = fp8_mqa_logits(
+                            q_fp8[chunk.token_start:chunk.token_end, ...],
+                            (chunk_k_fp8, chunk_k_scale),
+                            weights[chunk.token_start:chunk.token_end,
+                                    ...],
+                            chunk.cu_seqlen_ks,
+                            chunk.cu_seqlen_ke,
+                        )
+                        if use_custom_topk:
+                            torch.ops.trtllm.indexer_topk_prefill(
+                                logits, chunk.cu_seqlen_ks,
+                                chunk.cu_seqlen_ke,
+                                topk_indices_buffer[
+                                    chunk.token_start:chunk.token_end, :])
+                        else:
+                            topk_indices = logits.topk(
+                                min(self.index_topk, logits.shape[-1]),
+                                dim=-1)[1]
+                            topk_indices -= chunk.cu_seqlen_ks[:, None]
 
-                        mask_lo = topk_indices >= 0
-                        mask_hi = topk_indices - (chunk.cu_seqlen_ke -
-                                                  chunk.cu_seqlen_ks)[:,
-                                                                      None] < 0
-                        mask = mask_lo & mask_hi
+                            mask_lo = topk_indices >= 0
+                            mask_hi = topk_indices - (
+                                chunk.cu_seqlen_ke -
+                                chunk.cu_seqlen_ks)[:, None] < 0
+                            mask = mask_lo & mask_hi
 
-                        # local indices per sequence
-                        topk_indices = topk_indices.masked_fill(~mask, -1)
+                            # local indices per sequence
+                            topk_indices = topk_indices.masked_fill(
+                                ~mask, -1)
 
-                        topk_indices_buffer[
-                            chunk.token_start:chunk.token_end, :topk_indices.
-                            shape[-1]] = topk_indices.to(dtype=torch.int32)
+                            topk_indices_buffer[
+                                chunk.token_start:chunk.
+                                token_end, :topk_indices.
+                                shape[-1]] = topk_indices.to(
+                                    dtype=torch.int32)
             else:
                 # Fallback: single-pass indexer prefill (TODO: remove this once chunked prefill is fully tested)
                 cu_seqlen_ks = metadata.cu_seqlen_ks[:num_ctx_tokens]
                 cu_seqlen_ke = metadata.cu_seqlen_ke[:num_ctx_tokens]
 
-                logits = fp8_mqa_logits(
-                    q_fp8[:num_ctx_tokens, ...],
-                    (k_fp8[:num_ctx_tokens, ...], k_scale[:num_ctx_tokens,
-                                                          ...]),
-                    weights[:num_ctx_tokens, ...],
-                    cu_seqlen_ks,
-                    cu_seqlen_ke,
-                )
-                if use_custom_topk:
-                    torch.ops.trtllm.indexer_topk_prefill(
-                        logits, cu_seqlen_ks, cu_seqlen_ke,
-                        topk_indices_buffer[:num_ctx_tokens, :])
+                if _use_fused_indexer:
+                    # Fused path: single kernel, no intermediate logits.
+                    torch.ops.trtllm.fused_mqa_logits_topk_prefill(
+                        q_fp8[:num_ctx_tokens, ...],
+                        k_fp8[:num_ctx_tokens, ...],
+                        k_scale[:num_ctx_tokens, ...],
+                        weights[:num_ctx_tokens, ...],
+                        cu_seqlen_ks,
+                        cu_seqlen_ke,
+                        topk_indices_buffer[:num_ctx_tokens, :],
+                    )
                 else:
-                    topk_indices = logits.topk(min(self.index_topk,
-                                                   logits.shape[-1]),
-                                               dim=-1)[1]
-                    topk_indices -= cu_seqlen_ks[:, None]
-                    mask_lo = topk_indices >= 0
-                    mask_hi = topk_indices - (cu_seqlen_ke -
-                                              cu_seqlen_ks)[:, None] < 0
-                    mask = mask_lo & mask_hi
+                    logits = fp8_mqa_logits(
+                        q_fp8[:num_ctx_tokens, ...],
+                        (k_fp8[:num_ctx_tokens, ...],
+                         k_scale[:num_ctx_tokens, ...]),
+                        weights[:num_ctx_tokens, ...],
+                        cu_seqlen_ks,
+                        cu_seqlen_ke,
+                    )
+                    if use_custom_topk:
+                        torch.ops.trtllm.indexer_topk_prefill(
+                            logits, cu_seqlen_ks, cu_seqlen_ke,
+                            topk_indices_buffer[:num_ctx_tokens, :])
+                    else:
+                        topk_indices = logits.topk(
+                            min(self.index_topk, logits.shape[-1]),
+                            dim=-1)[1]
+                        topk_indices -= cu_seqlen_ks[:, None]
+                        mask_lo = topk_indices >= 0
+                        mask_hi = topk_indices - (cu_seqlen_ke -
+                                                  cu_seqlen_ks)[:,
+                                                                None] < 0
+                        mask = mask_lo & mask_hi
 
-                    # local indices per sequence
-                    topk_indices = topk_indices.masked_fill(~mask, -1)
-                    topk_indices_buffer[:num_ctx_tokens, :topk_indices.
-                                        shape[-1]] = topk_indices.to(
-                                            dtype=torch.int32)
+                        # local indices per sequence
+                        topk_indices = topk_indices.masked_fill(~mask, -1)
+                        topk_indices_buffer[:num_ctx_tokens, :topk_indices.
+                                            shape[-1]] = topk_indices.to(
+                                                dtype=torch.int32)
         elif has_prefill and metadata.skip_indexer_for_ctx_reqs:
             # Fill topk_indices_buffer with pre-defined dense topk indices
             topk_indices_buffer[:num_ctx_tokens, :] = \
@@ -1467,53 +1508,84 @@ class Indexer(nn.Module):
             # [num_blocks, tokens_per_block, 1, head_dim + scale_size]
             k_cache = metadata.kv_cache_manager.get_indexer_k_cache_buffers(
                 self.layer_idx)
-            logits_decode = fp8_paged_mqa_logits(q_decode, k_cache,
-                                                 weights_decode, context_lens,
-                                                 block_table,
-                                                 scheduler_metadata_buffer,
-                                                 max_seq_len)
 
-            if use_custom_topk:
-                # Kernel expects kv_lens (total cache length), not seq_lens (new tokens)
-                # This is because rowEnd = seq_len - next_n + offset + 1
-                gen_kv_lens_cuda = metadata.kv_lens_cuda_runtime[
-                    num_contexts:num_contexts + num_generations]
-                torch.ops.trtllm.indexer_topk_decode(
-                    logits_decode, gen_kv_lens_cuda,
+            # Check if fused decode kernel is available.
+            _use_fused_decode = (
+                _use_fused_indexer
+                and hasattr(torch.ops.trtllm,
+                            'fused_mqa_logits_topk_decode'))
+
+            if _use_fused_decode:
+                # Fused path: single kernel, no intermediate logits tensor.
+                # Reshape q_decode to [num_gen_tokens, num_heads, head_dim]
+                # for the fused kernel (it handles its own iteration).
+                q_flat = q_fp8[num_ctx_tokens:num_ctx_tokens +
+                               num_gen_tokens, ...]
+                tokens_per_block = metadata.kv_cache_manager.tokens_per_block
+                torch.ops.trtllm.fused_mqa_logits_topk_decode(
+                    q_flat,
+                    k_cache,
+                    weights_decode,
+                    context_lens,
+                    block_table,
                     topk_indices_buffer[num_ctx_tokens:num_ctx_tokens +
-                                        num_gen_tokens, :], next_n)
+                                        num_gen_tokens, :],
+                    next_n,
+                    self.index_topk,
+                    tokens_per_block,
+                )
             else:
-                # padded
-                positions = torch.arange(
-                    max_seq_len, device=q_decode.device).unsqueeze(0).expand(
-                        num_gen_tokens, -1)
-                row_indices = torch.arange(num_gen_tokens,
-                                           device=q_decode.device) // next_n
-                next_n_offset = torch.arange(num_gen_tokens,
-                                             device=q_decode.device) % next_n
-                index_end_pos = (
-                    metadata.kv_lens_cuda_runtime[num_contexts + row_indices] -
-                    next_n + next_n_offset).unsqueeze(1)
-                # index_end_pos: [B * N, 1]
-                mask = positions <= index_end_pos
-                # mask: [B * N, L]
-                logits_decode = logits_decode.masked_fill(~mask, float('-inf'))
-                topk_indices_decode = logits_decode.topk(
-                    min(self.index_topk, logits_decode.shape[-1]),
-                    dim=-1)[1].to(torch.int32)  # [B * N, K]
-                # ensure we don't set indices for the top k
-                # that is out of range(masked already)
-                # this will happen if context length is shorter than K
-                mask_decode = topk_indices_decode <= index_end_pos
+                logits_decode = fp8_paged_mqa_logits(
+                    q_decode, k_cache, weights_decode, context_lens,
+                    block_table, scheduler_metadata_buffer, max_seq_len)
 
-                # local indices per sequence
-                topk_indices_decode = topk_indices_decode.masked_fill(
-                    ~mask_decode, -1)
-                # Store in buffer
-                topk_indices_buffer[num_ctx_tokens:num_ctx_tokens +
-                                    num_gen_tokens, :topk_indices_decode.
-                                    shape[-1]] = topk_indices_decode.to(
-                                        dtype=torch.int32)
+                if use_custom_topk:
+                    # Kernel expects kv_lens (total cache length), not seq_lens (new tokens)
+                    # This is because rowEnd = seq_len - next_n + offset + 1
+                    gen_kv_lens_cuda = metadata.kv_lens_cuda_runtime[
+                        num_contexts:num_contexts + num_generations]
+                    torch.ops.trtllm.indexer_topk_decode(
+                        logits_decode, gen_kv_lens_cuda,
+                        topk_indices_buffer[num_ctx_tokens:num_ctx_tokens +
+                                            num_gen_tokens, :], next_n)
+                else:
+                    # padded
+                    positions = torch.arange(
+                        max_seq_len,
+                        device=q_decode.device).unsqueeze(0).expand(
+                            num_gen_tokens, -1)
+                    row_indices = torch.arange(
+                        num_gen_tokens,
+                        device=q_decode.device) // next_n
+                    next_n_offset = torch.arange(
+                        num_gen_tokens,
+                        device=q_decode.device) % next_n
+                    index_end_pos = (
+                        metadata.kv_lens_cuda_runtime[num_contexts +
+                                                      row_indices] -
+                        next_n + next_n_offset).unsqueeze(1)
+                    # index_end_pos: [B * N, 1]
+                    mask = positions <= index_end_pos
+                    # mask: [B * N, L]
+                    logits_decode = logits_decode.masked_fill(
+                        ~mask, float('-inf'))
+                    topk_indices_decode = logits_decode.topk(
+                        min(self.index_topk, logits_decode.shape[-1]),
+                        dim=-1)[1].to(torch.int32)  # [B * N, K]
+                    # ensure we don't set indices for the top k
+                    # that is out of range(masked already)
+                    # this will happen if context length is shorter than K
+                    mask_decode = topk_indices_decode <= index_end_pos
+
+                    # local indices per sequence
+                    topk_indices_decode = topk_indices_decode.masked_fill(
+                        ~mask_decode, -1)
+                    # Store in buffer
+                    topk_indices_buffer[
+                        num_ctx_tokens:num_ctx_tokens +
+                        num_gen_tokens, :topk_indices_decode.
+                        shape[-1]] = topk_indices_decode.to(
+                            dtype=torch.int32)
         elif has_decode and metadata.skip_indexer_for_gen_reqs:
             # Fill topk_indices_buffer with pre-defined dense topk indices
             topk_indices_buffer[num_ctx_tokens:num_tokens, :] = \
