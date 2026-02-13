@@ -452,18 +452,30 @@ void FusedMHARunnerV2::setupLaunchParams(MHARunnerParams runnerParams)
         mLaunchParams.force_unroll = true;
         mLaunchParams.kernel_s = 0;
 
-        // Hopper-optimized warp-specialized kernels exist for:
+        // Warp-specialized kernels (HGMMA+TMA) exist for SM90 and SM100:
         // - DeepSeek context MLA: headSize=192, headSizeV=128
         // - GLM-4 context MLA: headSize=256, headSizeV=256
-        // - DeepSeek FP8 generation MLA: headSizeV=512
-        bool isHopperContextMLA = isSm90
+        // - DeepSeek FP8 generation MLA: headSizeV=512 (SM90 only)
+        bool isWarpSpecContextMLA = (isSm90 || isSm100f)
             && (mFixedParams.headSizeV == 128
                 || (mFixedParams.headSize == 256 && mFixedParams.headSizeV == 256));
         bool isHopperFP8GenerationMLA
             = isSm90 && mFixedParams.dataType == DATA_TYPE_E4M3 && mFixedParams.headSizeV == 512;
 
-        // For MLA configs without optimized Hopper kernels, use ampere-style
-        if (!isHopperContextMLA && !isHopperFP8GenerationMLA)
+        if (isWarpSpecContextMLA)
+        {
+            // Enable warp-specialized params for SM90 and SM100 MLA
+            mLaunchParams.warp_specialization = true;
+            mLaunchParams.use_tma = true;
+            mLaunchParams.dynamic_scheduler = true;
+            if (!mFixedParams.hasAlibi)
+            {
+                mLaunchParams.useKernelWithoutAlibi = true;
+                mLaunchParams.useBase2ExpTrick = !mLaunchParams.enableAttnLogitSoftcapping;
+            }
+        }
+        // For MLA configs without warp-specialized kernels, use ampere-style
+        else if (!isHopperFP8GenerationMLA)
         {
             mLaunchParams.granular_tiling = true;
             mLaunchParams.warp_specialization = false;

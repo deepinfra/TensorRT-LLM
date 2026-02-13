@@ -6363,6 +6363,10 @@ def enumerate_kernels():
         # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
         enumerate_hmma_flash_kernels(specs, sm=100, dtype='fp16', head_size_v=256)
         enumerate_hmma_flash_kernels(specs, sm=100, dtype='bf16', head_size_v=256)
+        # SM 100 warp-specialized kernels (HGMMA+TMA, compiled for SM100 with SM90 instructions)
+        # Provides MLA context kernels (192x128 for DeepSeek, 256x256 for GLM-4)
+        enumerate_hgmma_flash_warpspec_kernels(specs, sm=100, dtype='fp16')
+        enumerate_hgmma_flash_warpspec_kernels(specs, sm=100, dtype='bf16')
 
     if 'ENABLE_SM120' in os.environ:
         # SM 120
