@@ -512,7 +512,7 @@ void FusedMHARunnerV2::setupLaunchParams(MHARunnerParams runnerParams)
         {
             // Hopper warp-specialized kernels have specific layout requirements
             // Supports DeepSeek (headSizeV=128) and GLM-4 (headSize=256, headSizeV=256)
-            bool isHopperContextMLA = isMLA && isSm90
+            bool isHopperContextMLA = isMLA && (isSm90 || isSm100f)
                 && (mFixedParams.dataType == DATA_TYPE_BF16 || mFixedParams.dataType == DATA_TYPE_E4M3)
                 && (mFixedParams.headSizeV == 128
                     || (mFixedParams.headSize == 256 && mFixedParams.headSizeV == 256));
@@ -702,7 +702,7 @@ void FusedMHARunnerV2::run(MHARunnerParams runnerParams)
     // Set the kernel params.
     setupKernelParams(runnerParams);
     // Need to set tma descriptors additionally.
-    if (mSM == kSM_90 && mLaunchParams.use_tma)
+    if ((mSM == kSM_90 || mSM == kSM_100 || mSM == kSM_103) && mLaunchParams.use_tma)
     {
         setTmaDescriptors(runnerParams);
     }
