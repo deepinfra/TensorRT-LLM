@@ -60,15 +60,21 @@ void TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::loadXMMAKern
         return;
     }
 
+    printf("[loadXMMAKernels] Looking for SM=%u, inputType=%d, outputType=%d, metaCount=%u\n",
+           mSM, mInputDataType, mOutputDataType, mKernelMetaCount);
+    fflush(stdout);
+
+    unsigned int loadedCount = 0;
     for (unsigned int i = 0; i < mKernelMetaCount; ++i)
     {
         auto const& kernelMeta = mKernelMeta[i];
         if (kernelMeta.mSM == mSM && kernelMeta.mDataTypeOut == mOutputDataType
             && kernelMeta.mDataTypeIn == mInputDataType)
         {
-            // printf("Loading kernel for inputType=%d, outputType=%d, sm=%d, cubin=%s, funcName=%s\n",
-            // kernelMeta.mDataTypeIn, kernelMeta.mDataTypeOut, kernelMeta.mSM, kernelMeta.mCubin,
-            // kernelMeta.mFuncName);
+            printf("[loadXMMAKernels] Loading kernel[%u]: D=%u DV=%u layout=%d mask=%d func=%s\n",
+                   i, kernelMeta.mD, kernelMeta.mDV, kernelMeta.mAttentionInputLayout,
+                   kernelMeta.mAttentionMaskType, kernelMeta.mFuncName);
+            fflush(stdout);
             CUmodule hmod{0};
             auto findModuleIter = mModules.find(kernelMeta.mCubin);
             if (findModuleIter != mModules.end())
@@ -99,8 +105,11 @@ void TFusedMultiHeadAttentionXMMAKernel<TKernelMeta, TKernelParam>::loadXMMAKern
             int s = static_cast<int>(kernelMeta.mS);
             if (mValidSequences.find(s) == mValidSequences.end())
                 mValidSequences.insert(s);
+            ++loadedCount;
         }
     }
+    printf("[loadXMMAKernels] Loaded %u kernels total\n", loadedCount);
+    fflush(stdout);
 }
 
 template <typename TKernelMeta, typename TKernelParam>
@@ -555,6 +564,10 @@ FusedMultiHeadAttentionXMMAKernelV2 const* getXMMAKernelsV2(Data_type inputType,
     if (sm == kSM_121)
     {
         sm = kSM_120;
+    }
+    if (sm == kSM_103)
+    {
+        sm = kSM_100;
     }
     return FusedMHAKernelFactoryV2::Get().getXMMAKernels(sMhaKernelMetaInfosV2,
         sizeof(sMhaKernelMetaInfosV2) / sizeof(sMhaKernelMetaInfosV2[0]), inputType, outputType, sm);

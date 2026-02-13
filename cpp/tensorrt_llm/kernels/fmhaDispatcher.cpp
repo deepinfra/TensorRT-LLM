@@ -51,6 +51,17 @@ FmhaDispatcher::FmhaDispatcher(MHARunnerFixedParams fixedParams)
     // Please update fmha_v2/setup.py if you want to add more supported head sizes.
     , mUseTllmGen(tensorrt_llm::common::isSM100Family() && fixedParams.headSize != 80)
 {
+    printf("[FmhaDispatcher] SM=%d, headSize=%d, headSizeV=%d, layout=%d, dataType=%d, dataTypeOut=%d, mUseTllmGen=%d\n",
+           tensorrt_llm::common::getSMVersion(), fixedParams.headSize, fixedParams.headSizeV,
+           static_cast<int>(fixedParams.attentionInputLayout), static_cast<int>(fixedParams.dataType),
+           static_cast<int>(fixedParams.dataTypeOut), mUseTllmGen);
+#ifdef EXCLUDE_SM_100
+    printf("[FmhaDispatcher] WARNING: EXCLUDE_SM_100 is defined! SM100 FMHA V2 kernels are excluded.\n");
+#else
+    printf("[FmhaDispatcher] EXCLUDE_SM_100 is NOT defined. SM100 FMHA V2 kernels should be available.\n");
+#endif
+    fflush(stdout);
+
     if (mUseTllmGen)
     {
         mTllmGenFMHARunner.reset(
@@ -126,6 +137,8 @@ bool FmhaDispatcher::isSupported()
     else
     {
         foundKernels = mFMHARunner->isFmhaSupported();
+        printf("[FmhaDispatcher::isSupported] FMHA V2 isFmhaSupported=%d\n", foundKernels);
+        fflush(stdout);
     }
     if (!foundKernels)
     {
