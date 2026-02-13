@@ -1836,8 +1836,12 @@ int AttentionOp::enqueueContext(EnqueueContextParams<T> const& params, cudaStrea
                     params.k_ptr, total_k_dim_all_heads * sizeof(T), total_k_dim_all_heads * sizeof(T),
                     params.num_tokens, cudaMemcpyDeviceToDevice, stream);
                 // Pack V
+                // V is non-contiguous: it comes from kv_b_proj().split([nope_dims, v_dims], -1) in Python,
+                // so its stride per token is numHeads * (qk_nope_head_dim + v_head_dim), not numHeads * v_head_dim.
+                size_t const v_src_stride
+                    = mNumAttnHeads * (mMLAParams.qk_nope_head_dim + mMLAParams.v_head_dim) * sizeof(T);
                 cudaMemcpy2DAsync(mla_packed_qkv + total_q_dim_all_heads + total_k_dim_all_heads,
-                    total_qkv_per_token * sizeof(T), params.v_ptr, total_v_dim_all_heads * sizeof(T),
+                    total_qkv_per_token * sizeof(T), params.v_ptr, v_src_stride,
                     total_v_dim_all_heads * sizeof(T), params.num_tokens, cudaMemcpyDeviceToDevice, stream);
 
                 fmhaParams.qkvPtr = reinterpret_cast<void const*>(mla_packed_qkv);
