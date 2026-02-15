@@ -1053,25 +1053,54 @@ void invokeMLAContextFp8Quantize(MlaParams<T>& params, int total_kv_len, cudaStr
         }
         else
         {
-            // The Q or K tensor has layout of [num_tokens, head_num, 192] in the non-absorption mode.
-            // The V tensor has layout of [num_tokens, head_num, 128] in the non-absorption mode.
             // Convert Q, K, V to FP8 in non-absorption mode.
+            // The Q or K tensor has layout of [num_tokens, head_num, qk_nope + qk_rope].
+            // The V tensor has layout of [num_tokens, head_num, v_head_dim] (strided).
+            auto const qk_nope_head_dim = params.meta.qk_nope_head_dim;
+            auto const v_head_dim = params.meta.v_head_dim;
 
-            constexpr int threads_per_block = 384;
-            constexpr int num_tokens_per_block = threads_per_block * 16 / 192 * sizeof(T);
-            dim3 grid(int(tensorrt_llm::common::divUp(total_kv_len, num_tokens_per_block)), 1, params.head_num);
+            if (qk_nope_head_dim == 192 && v_head_dim == 256)
+            {
+                // GLM-4 MLA: qk_nope=192, qk_rope=64, v=256, qk_head=256
+                constexpr int threads_per_block = 384;
+                constexpr int num_tokens_per_block = threads_per_block * 16 / 256 * sizeof(T);
+                dim3 grid(int(tensorrt_llm::common::divUp(total_kv_len, num_tokens_per_block)), 1, params.head_num);
 
-            TLLM_LOG_DEBUG(
-                "Launching quantizeCopyInputToFp8Kernel with grid_size: (%d, %d, %d), threads_per_block: %d, "
-                "total_kv_len: %d, acc_q_len: %d, absorption_mode: %d",
-                grid.x, grid.y, grid.z, threads_per_block, total_kv_len, params.acc_q_len, params.absorption_mode);
+                TLLM_LOG_DEBUG(
+                    "Launching quantizeCopyInputToFp8Kernel with grid_size: (%d, %d, %d), threads_per_block: %d, "
+                    "total_kv_len: %d, acc_q_len: %d, absorption_mode: %d",
+                    grid.x, grid.y, grid.z, threads_per_block, total_kv_len, params.acc_q_len,
+                    params.absorption_mode);
 
-            quantizeCopyInputToFp8Kernel<T, threads_per_block, 128, 64, 128, false>
-                <<<grid, threads_per_block, 0, stream>>>(params.q_buf, static_cast<__nv_fp8_e4m3*>(params.quant_q_buf),
-                    params.k_buf, static_cast<__nv_fp8_e4m3*>(params.quant_k_buf), params.v_buf,
-                    static_cast<__nv_fp8_e4m3*>(params.quant_v_buf), params.acc_q_len, total_kv_len,
-                    params.quant_scale_qkv, params.bmm1_scale, params.bmm2_scale, params.quant_scale_o,
-                    params.dequant_scale_q, params.dequant_scale_kv, params.host_bmm1_scale);
+                quantizeCopyInputToFp8Kernel<T, threads_per_block, 192, 64, 256, false>
+                    <<<grid, threads_per_block, 0, stream>>>(params.q_buf,
+                        static_cast<__nv_fp8_e4m3*>(params.quant_q_buf), params.k_buf,
+                        static_cast<__nv_fp8_e4m3*>(params.quant_k_buf), params.v_buf,
+                        static_cast<__nv_fp8_e4m3*>(params.quant_v_buf), params.acc_q_len, total_kv_len,
+                        params.quant_scale_qkv, params.bmm1_scale, params.bmm2_scale, params.quant_scale_o,
+                        params.dequant_scale_q, params.dequant_scale_kv, params.host_bmm1_scale);
+            }
+            else
+            {
+                // DeepSeek V2 MLA: qk_nope=128, qk_rope=64, v=128, qk_head=192
+                constexpr int threads_per_block = 384;
+                constexpr int num_tokens_per_block = threads_per_block * 16 / 192 * sizeof(T);
+                dim3 grid(int(tensorrt_llm::common::divUp(total_kv_len, num_tokens_per_block)), 1, params.head_num);
+
+                TLLM_LOG_DEBUG(
+                    "Launching quantizeCopyInputToFp8Kernel with grid_size: (%d, %d, %d), threads_per_block: %d, "
+                    "total_kv_len: %d, acc_q_len: %d, absorption_mode: %d",
+                    grid.x, grid.y, grid.z, threads_per_block, total_kv_len, params.acc_q_len,
+                    params.absorption_mode);
+
+                quantizeCopyInputToFp8Kernel<T, threads_per_block, 128, 64, 128, false>
+                    <<<grid, threads_per_block, 0, stream>>>(params.q_buf,
+                        static_cast<__nv_fp8_e4m3*>(params.quant_q_buf), params.k_buf,
+                        static_cast<__nv_fp8_e4m3*>(params.quant_k_buf), params.v_buf,
+                        static_cast<__nv_fp8_e4m3*>(params.quant_v_buf), params.acc_q_len, total_kv_len,
+                        params.quant_scale_qkv, params.bmm1_scale, params.bmm2_scale, params.quant_scale_o,
+                        params.dequant_scale_q, params.dequant_scale_kv, params.host_bmm1_scale);
+            }
         }
     }
     else
