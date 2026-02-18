@@ -1319,6 +1319,10 @@ def _shard_parameter_node(
     )
 
     for weight_info in all_weight_infos.weights:
+        # Skip non-parameter tensors (e.g., quantization scale buffers). These are
+        # handled by the quantization callback when processing the actual weight parameter.
+        if not isinstance(weight_info.tensor, nn.Parameter):
+            continue
         _, weight_new_shape = shard_weight_tensor(
             gm=gm,
             weight_tensor=weight_info.tensor,
