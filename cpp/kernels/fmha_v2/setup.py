@@ -1833,13 +1833,15 @@ def encode_name(kernel_spec):
             # hopper warp-specialized kernels has specialized optimization for cases without alibi.
             if kernel_spec.alibi:
                 feature_tags += '_alibi'
-            if kernel_spec.return_softmax_stats:
-                feature_tags += '_softmax'
         else:
             warp_specialization_tag = ''
     else:
         tma_or_ldgsts = ''
         warp_specialization_tag = ''
+
+    # Add _softmax tag for kernels with return_softmax_stats (all SM versions)
+    if kernel_spec.return_softmax_stats:
+        feature_tags += '_softmax'
 
     if kernel_spec.enable_attn_logit_softcapping:
         feature_tags += '_softcapping'
@@ -3092,7 +3094,8 @@ def use_cubin_header(sm,
         return False
     if 'e4m3' in dtype and output_dtype in ['bf16', 'fp16']:
         return False
-    return (sm == 90 and head_size == 128) or (sm == 89 and 'e4m3' in dtype)
+    return False
+    #return (sm == 90 and head_size in [128, 256]) or (sm == 89 and 'e4m3' in dtype)
 
 
 def get_cubin_header(kernel_traits, specs_names):
@@ -4000,6 +4003,42 @@ def enumerate_hgmma_flash_warpspec_kernels(specs,
                     return_softmax_stats=return_softmax,
                     scheduling_mode=scheduling_mode,
                     input_layout=input_layout))
+        # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
+        # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+        # smem size with kv_step=64: fits in Hopper's 228KB
+        if input_layout == InputLayout.SEPARATE_Q_K_V and not alibi and not enable_attn_logit_softcapping:
+            specs.append(
+                kernel_spec(
+                    sm=sm,
+                    sm_mma=90,
+                    dtype=dtype,
+                    seq_len=0,  # support any sequence length
+                    head_size=256,
+                    head_size_v=256,
+                    warps_m=4,  #4x1 warpgroups
+                    warps_n=1,
+                    version=2,
+                    interleaved=False,
+                    ldgsts_q=
+                    False,  # for Hopper kernels, ldgsts = False signals TMA usage.
+                    ldgsts_k=False,
+                    ldgsts_v=False,
+                    share_smem_k_v=False,
+                    loop_step=64,
+                    q_tile_buffers=1,  # only used by warp specialized kernels
+                    has_noloop=0,
+                    noloop_step=64,
+                    kv_loop_step=64,
+                    kv_tile_buffers=2,  # only used by warp specialized kernels
+                    unroll_threshold=1,
+                    has_scale_max=False,
+                    flash_attention=True,
+                    warp_specialization=True,
+                    alibi=False,
+                    enable_attn_logit_softcapping=False,
+                    return_softmax_stats=return_softmax,
+                    scheduling_mode=scheduling_mode,
+                    input_layout=InputLayout.SEPARATE_Q_K_V))
 
 
 # Note this will be used in TRT-LLM.
@@ -4955,7 +4994,8 @@ def enumerate_hmma_flash_kernels(specs, sm=80, dtype='fp16', head_size_v=0):
         InputLayout.Q_PAGED_KV
     ]
     # Deepseek MLA (context 192/128 separate-q-k-v)
-    if head_size_v == 128:
+    # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
+    if head_size_v in [128, 256]:
         input_layouts.append(InputLayout.SEPARATE_Q_K_V)
     for (input_layout,
          enable_attn_logit_softcapping) in product(input_layouts,
@@ -5042,6 +5082,43 @@ def enumerate_hmma_flash_kernels_base(specs,
                     input_layout=input_layout,
                     enable_attn_logit_softcapping=enable_attn_logit_softcapping,
                     is_mtp=(head_size == 576 and head_size_v == 512)))
+
+    # Custom MLA 256x256 tiled kernels (GLM-4 style)
+    # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+    # Generate both return_softmax_stats=True and False variants
+    # return_softmax_stats=True is needed for chunked prefill with softmax stats merging
+    if input_layout == InputLayout.SEPARATE_Q_K_V and sm_mma == 80:
+        for return_softmax_stats in [False, True]:
+            specs.append(
+                kernel_spec(
+                    sm=sm,
+                    sm_mma=sm_mma,
+                    dtype=dtype,
+                    flash_attention=True,
+                    tiled=1,
+                    seq_len=0,  # means any sequence here
+                    kv_loop_step=64,
+                    limit_qk_fragments=True,
+                    limit_v_fragments=True,
+                    head_size=256,
+                    head_size_v=256,
+                    warps_m=4,
+                    warps_n=1,
+                    version=2,
+                    interleaved=False,
+                    ldgsts_q=True,
+                    ldgsts_k=False,
+                    ldgsts_v=False,
+                    share_smem_k_v=False,
+                    loop_step=64,
+                    has_noloop=1,
+                    noloop_step=64,
+                    unroll_threshold=1,
+                    has_scale_max=False,
+                    ctas_per_head=1,
+                    input_layout=input_layout,
+                    enable_attn_logit_softcapping=enable_attn_logit_softcapping,
+                    return_softmax_stats=return_softmax_stats))
 
     for head_size in [
             16, 32, 40, 48, 64, 72, 80, 96, 104, 128, 160, 192, 256, 512
@@ -6505,6 +6582,11 @@ def enumerate_kernels():
     enumerate_hmma_paged_kv_flash_kernels(specs, sm=90, dtype='fp16')
     enumerate_hmma_paged_kv_flash_kernels(specs, sm=90, dtype='bf16')
 
+    # SM 90 MLA 256x256 HMMA flash kernels (for GLM-4 style models)
+    # D=qk_nope_head_dim+qk_rope_head_dim=256, DV=v_head_dim=256
+    enumerate_hmma_flash_kernels(specs, sm=90, dtype='fp16', head_size_v=256)
+    enumerate_hmma_flash_kernels(specs, sm=90, dtype='bf16', head_size_v=256)
+
     if 'ENABLE_SM100' in os.environ:
         # SM 100
         enumerate_hmma_flash_kernels(specs, sm=100, dtype='fp16')
@@ -6669,6 +6751,31 @@ def enumerate_kernels():
                   and ((kspec.warp_specialization == True and kspec.alibi == False)   # sm90
                     or (kspec.warp_specialization == False and kspec.tiled == True))  # non-sm90
                   and kspec.enable_attn_logit_softcapping == False)
+                  # Custom MLA (context 256/256 separate-q-k-v) for GLM-4 style models
+                  or (kspec.sm            == 90
+                  and kspec.dtype         in ['bf16', 'fp16']
+                  and kspec.head_size     == 256
+                  and kspec.head_size_v   == 256
+                  and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
+                  and kspec.sage_block_sizes is None
+                  and kspec.version       == 2
+                  and kspec.cross_mha     == False
+                  and kspec.flash_attention == True
+                  and kspec.warp_specialization == True
+                  and kspec.alibi == False
+                  and kspec.enable_attn_logit_softcapping == False)
+                  # Custom MLA 256/256 HMMA tiled kernels (for GLM-4 style models)
+                  or (kspec.sm            == 90
+                  and kspec.dtype         in ['bf16', 'fp16']
+                  and kspec.head_size     == 256
+                  and kspec.head_size_v   == 256
+                  and kspec.input_layout == InputLayout.SEPARATE_Q_K_V
+                  and kspec.sage_block_sizes is None
+                  and kspec.version       == 2
+                  and kspec.cross_mha     == False
+                  and kspec.flash_attention == True
+                  and kspec.warp_specialization == False
+                  and kspec.tiled == True)
                   # SageAttention (warp_spec, head_size in (80, 128), packed QKV, padding mask)
                   or (kspec.sm            == 90
                   and kspec.head_size     in [80, 128]
