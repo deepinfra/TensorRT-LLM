@@ -897,6 +897,15 @@ class MLA(nn.Module):
         self.kv_a_layernorm = RMSNorm(hidden_size=kv_lora_rank,
                                       dtype=dtype,
                                       eps=rms_norm_eps)
+        # When per-head MLA dimensions aren't divisible by 128, FP8 block
+        # scales can't be cleanly split per-head. Fall back to bf16 for
+        # kv_b_proj and related weights.
+        kv_b_proj_quant_config = quant_config
+        if (quant_config is not None
+                and quant_config.quant_mode.has_fp8_block_scales()
+                and (self.qk_nope_head_dim % 128 != 0
+                     or self.v_head_dim % 128 != 0)):
+            kv_b_proj_quant_config = None
 
         self.kv_b_proj = Linear(
             self.kv_lora_rank,
@@ -905,7 +914,7 @@ class MLA(nn.Module):
             dtype=dtype,
             mapping=mapping,
             tensor_parallel_mode=TensorParallelMode.COLUMN,
-            quant_config=quant_config,
+            quant_config=kv_b_proj_quant_config,
             skip_create_weights_in_init=config.skip_create_weights_in_init,
             allreduce_strategy=config.allreduce_strategy,
             force_dynamic_quantization=config.force_dynamic_quantization)
