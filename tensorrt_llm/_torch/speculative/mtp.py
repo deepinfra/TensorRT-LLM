@@ -110,6 +110,9 @@ class MTPSpecMetadata(SpecMetadata):
     """
     # The number of MTP modules in the model
     mtp_num_modules: int = 1
+    # The effective number of MTP modules for this iteration (from draft_len_schedule).
+    # None means use mtp_num_modules (the static max).
+    effective_mtp_num_modules: Optional[int] = None
     # The hidden states manager for MTP
     mtp_hidden_states_manager: Optional[MTPHiddenStatesManager] = None
     # The slot ids for each request.
@@ -237,6 +240,9 @@ class MTPSampler(TorchSampler):
     def __init__(self, args: TorchSampler.Args, *, nextn: int):
         self.mapping = None
         self.draft_len = nextn
+        # Tracks the effective draft length for the current iteration
+        # (may be < draft_len when draft_len_schedule is active).
+        self._effective_draft_len = nextn
         self.max_seq_len = args.max_seq_len
 
         seq_slots = args.max_num_sequences
@@ -261,7 +267,8 @@ class MTPSampler(TorchSampler):
         assert not request.py_return_context_logits, "return_context_logits not implemented for MTPSampler"
         assert not request.py_return_generation_logits, "return_generation_logits not implemented for MTPSampler"
         assert request.py_seq_slot is not None
-        request.py_draft_tokens = next_draft_tokens[request.py_seq_slot]
+        request.py_draft_tokens = next_draft_tokens[
+            request.py_seq_slot][:self._effective_draft_len]
         request.py_decoding_iter += 1
 
     def update_requests(
@@ -314,7 +321,7 @@ class MTPSampler(TorchSampler):
                         beam_idx=beam_idx):
                     break
             req.py_num_accepted_draft_tokens = num_new_tokens - 1
-            req.py_rewind_len = self.draft_len - req.py_num_accepted_draft_tokens
+            req.py_rewind_len = self._effective_draft_len - req.py_num_accepted_draft_tokens
             self._request_common_handling(req, next_draft_tokens_list)
 
     def sample_async(
@@ -336,11 +343,26 @@ class MTPSampler(TorchSampler):
         o_next_new_tokens = outputs['next_new_tokens'][:len(requests)]
         o_log_probs = outputs['log_probs'][:len(requests)]
 
+        # Track effective draft length for this iteration
+        effective_mtp = o_next_draft_tokens.shape[1]
+        self._effective_draft_len = effective_mtp
+
         new_tokens = self.store.new_tokens
         next_new_tokens = self.store.next_new_tokens
         new_tokens_lens = self.store.new_tokens_lens
         next_draft_tokens = self.store.next_draft_tokens
         log_probs = self.store.log_probs
+
+        max_mtp = next_draft_tokens.shape[1]
+        if effective_mtp < max_mtp:
+            # Pad output tensors to match store width for index_copy_
+            token_pad = max_mtp - effective_mtp
+            o_new_tokens = torch.nn.functional.pad(o_new_tokens, (0, token_pad))
+            o_next_new_tokens = torch.nn.functional.pad(o_next_new_tokens,
+                                                        (0, token_pad))
+            o_next_draft_tokens = torch.nn.functional.pad(
+                o_next_draft_tokens, (0, token_pad))
+            o_log_probs = torch.nn.functional.pad(o_log_probs, (0, token_pad))
 
         new_tokens.squeeze(-1).T.index_copy_(0, slots, o_new_tokens)
         next_new_tokens.squeeze(-1).T.index_copy_(0, slots, o_next_new_tokens)
@@ -363,9 +385,9 @@ class MTPSampler(TorchSampler):
         sampler_event = torch.cuda.Event()
         sampler_event.record()
         # add dummy draft tokens to context requests to prepare kv cache in advance
-        # with the max draft token length
+        # with the effective draft token length
         for request in scheduled_requests.context_requests:
-            request.py_draft_tokens = [1] * self.draft_len
+            request.py_draft_tokens = [1] * effective_mtp
         return SampleStateMTP(scheduled_requests=scheduled_requests,
                               device=device,
                               host=host,
@@ -525,7 +547,8 @@ class MTPWorker(SpecWorkerBase):
 
         # update attn metadata
         if attn_metadata is not None:
-            self.change_attn_metadata(num_accepted_tokens, attn_metadata)
+            self.change_attn_metadata(num_accepted_tokens, attn_metadata,
+                                      spec_metadata)
             draft_inputs.update(attn_metadata=attn_metadata)
 
         # Run MTP layers to predict draft tokens
@@ -595,7 +618,10 @@ class MTPWorker(SpecWorkerBase):
         draft_model,
     ):
         batch_size = attn_metadata.num_seqs
-        mtp_num_modules = self.spec_config.num_nextn_predict_layers
+        mtp_num_modules = (spec_metadata.effective_mtp_num_modules
+                           if spec_metadata.effective_mtp_num_modules
+                           is not None else
+                           self.spec_config.num_nextn_predict_layers)
         accepted_tokens = torch.empty((batch_size, (mtp_num_modules + 1)),
                                       dtype=torch.int,
                                       device=logits.device)
@@ -854,7 +880,10 @@ class MTPWorker(SpecWorkerBase):
         batch_size = attn_metadata.num_seqs
         num_contexts = attn_metadata.num_contexts
         num_gens = batch_size - num_contexts
-        mtp_num_modules = self.spec_config.num_nextn_predict_layers
+        mtp_num_modules = (spec_metadata.effective_mtp_num_modules
+                           if spec_metadata.effective_mtp_num_modules
+                           is not None else
+                           self.spec_config.num_nextn_predict_layers)
 
         if logits.dim() == 1:
             logits = logits.unsqueeze(0)
@@ -960,10 +989,15 @@ class MTPWorker(SpecWorkerBase):
         return accepted_tokens, num_accepted_tokens, log_probs
 
     def change_attn_metadata(self, num_accepted_tokens: torch.Tensor,
-                             attn_metadata: AttentionMetadata):
+                             attn_metadata: AttentionMetadata,
+                             spec_metadata: MTPSpecMetadata = None):
         attn_metadata.prepare_for_spec_dec("_seq_lens", "_seq_lens_cuda")
         batch_size = attn_metadata.num_seqs
-        mtp_num_modules = self.spec_config.num_nextn_predict_layers
+        mtp_num_modules = (spec_metadata.effective_mtp_num_modules
+                           if spec_metadata is not None
+                           and spec_metadata.effective_mtp_num_modules
+                           is not None else
+                           self.spec_config.num_nextn_predict_layers)
 
         num_contexts = attn_metadata.num_contexts
         attn_metadata._seq_lens[num_contexts:batch_size] -= 1
@@ -1251,6 +1285,11 @@ class MTPEagleWorker(MTPWorker):
         num_contexts = attn_metadata.num_contexts
         num_gens = batch_size - num_contexts
 
+        # Effective MTP iteration count (from draft_len_schedule or static max)
+        effective_mtp = (spec_metadata.effective_mtp_num_modules
+                         if spec_metadata.effective_mtp_num_modules is not None
+                         else self.mtp_num_modules)
+
         raw_logits = logits
 
         if self.guided_decoder is not None:
@@ -1291,14 +1330,14 @@ class MTPEagleWorker(MTPWorker):
 
         # Predict draft tokens
         next_draft_tokens = []
-        for i in range(self.mtp_num_modules):
+        for i in range(effective_mtp):
             if i == 0:
                 hidden_states = draft_model.mtp_layers[0](
                     embed_tokens=draft_model.embed_tokens,
                     all_rank_num_tokens=spec_metadata.all_rank_num_tokens,
                     **inputs)
                 start_ids_gen = (spec_metadata.batch_indices_cuda[:num_gens] *
-                                 (self.mtp_num_modules + 1)).long()
+                                 (effective_mtp + 1)).long()
                 gather_ids_gen = (start_ids_gen +
                                   num_accepted_tokens[num_contexts:] - 1 +
                                   attn_metadata.num_ctx_tokens)
@@ -1375,7 +1414,7 @@ class MTPEagleWorker(MTPWorker):
                 # update kv_lens_cuda
                 if hasattr(attn_metadata, 'kv_lens_cuda'):
                     attn_metadata.kv_lens_cuda[num_contexts:batch_size] -= (
-                        self.mtp_num_modules -
+                        effective_mtp -
                         num_accepted_tokens[num_contexts:])
                     attn_metadata.kv_lens_cuda[:num_contexts] += 1
                 # update metadata for flash mla

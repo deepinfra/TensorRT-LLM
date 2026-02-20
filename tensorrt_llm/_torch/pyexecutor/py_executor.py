@@ -1461,6 +1461,16 @@ class PyExecutor:
             logger.debug(f"Use spec decode: {self.use_spec_decode}")
             self.model_engine.enable_spec_decode = self.use_spec_decode
 
+            # For one-engine modes with draft_len_schedule, propagate the
+            # effective draft length to the model engine so that
+            # runtime_draft_len and spec_metadata.effective_mtp_num_modules
+            # reflect the schedule-derived value.
+            if (self.drafter.draft_len_schedule is not None
+                    and self.model_engine.spec_config is not None
+                    and self.model_engine.spec_config.spec_dec_mode.
+                    use_one_engine()):
+                self.model_engine.max_total_draft_tokens = self.max_total_draft_tokens
+
             # Set up draft_tokens in active_requests, because they could be used in the scheduling stage.
             for request in self.active_requests:
                 if request.state not in (

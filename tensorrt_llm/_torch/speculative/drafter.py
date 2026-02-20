@@ -132,3 +132,43 @@ class Drafter(ABC):
         this method can be overridden to do that.
         Used in SaveHiddenStatesDrafter (to ensure correct input_ids)
         """
+
+
+class OneModelDrafter(Drafter):
+    """Lightweight drafter for one-model speculative decoding modes.
+
+    Does not manage a separate draft model engine. Provides draft_len_schedule
+    support to the py_executor for one-model MTP paths, where drafting is done
+    inline inside the target model's forward pass.
+    """
+
+    def __init__(self, spec_config):
+        if spec_config.draft_len_schedule is not None:
+            for bs, dl in spec_config.draft_len_schedule.items():
+                if dl <= 0:
+                    raise ValueError(
+                        f"draft_len_schedule values must be >= 1 for one-model "
+                        f"speculative decoding (got draft_len={dl} for "
+                        f"batch_size={bs}). Use max_concurrency to disable "
+                        f"speculation at high batch sizes.")
+                max_layers = getattr(spec_config, 'num_nextn_predict_layers',
+                                     None)
+                if max_layers is not None and dl > max_layers:
+                    raise ValueError(
+                        f"draft_len_schedule values must be <= "
+                        f"num_nextn_predict_layers ({max_layers}), got "
+                        f"draft_len={dl} for batch_size={bs}.")
+        super().__init__(
+            max_draft_len=spec_config.max_draft_len,
+            max_total_draft_tokens=spec_config.max_total_draft_tokens,
+            max_concurrency=spec_config.max_concurrency,
+            draft_len_schedule=spec_config.draft_len_schedule,
+        )
+
+    def prepare_draft_tokens(
+        self,
+        scheduled_requests: ScheduledRequests,
+        resource_manager: Optional[ResourceManager] = None,
+    ) -> None:
+        # No-op: one-model path generates draft tokens inside spec_worker.forward()
+        pass

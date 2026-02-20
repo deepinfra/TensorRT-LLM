@@ -680,6 +680,7 @@ class PyTorchModelEngine(ModelEngine):
 
         # Set the value back to the original value after all warmups are complete
         self.enable_spec_decode = self.is_spec_decode
+        self.max_total_draft_tokens = self.original_max_total_draft_tokens
 
     def _general_warmup(self,
                         resource_manager: ResourceManager,
@@ -811,7 +812,16 @@ class PyTorchModelEngine(ModelEngine):
             else:
                 draft_lengths.append(self.max_total_draft_tokens)
         else:
-            draft_lengths.append(self.max_total_draft_tokens)
+            # For one-engine modes with draft_len_schedule, capture a graph
+            # for each distinct draft_len in the schedule.
+            if (self.spec_config is not None
+                    and self.spec_config.spec_dec_mode.use_one_engine()
+                    and self.spec_config.draft_len_schedule is not None):
+                for dl in self.spec_config.draft_len_schedule.values():
+                    if dl > 0:
+                        draft_lengths.append(dl)
+            else:
+                draft_lengths.append(self.max_total_draft_tokens)
             # For non-draft model, we also capture the CUDA graph instance for draft length 0,
             # so that when we disable spec decode at runtime, we can still run the captured graph.
             # Note that for one engine mode, we are not able to turn off spec decode at runtime.
@@ -859,6 +869,10 @@ class PyTorchModelEngine(ModelEngine):
                         )
 
                         self.enable_spec_decode = draft_len > 0 or self.is_draft_model
+                        # Set runtime draft token count so
+                        # spec_metadata.effective_mtp_num_modules is correct
+                        # during CUDA graph capture.
+                        self.max_total_draft_tokens = draft_len
                         self._update_draft_inference_state_for_warmup(
                             batch, draft_len > 0, resource_manager)
 
@@ -3460,6 +3474,9 @@ class PyTorchModelEngine(ModelEngine):
             spec_metadata = self._set_up_spec_metadata(spec_resource_manager,
                                                        no_cache=kv_cache_manager
                                                        is None)
+            # Set effective MTP iteration count for draft_len_schedule support
+            if hasattr(spec_metadata, 'effective_mtp_num_modules'):
+                spec_metadata.effective_mtp_num_modules = self.max_total_draft_tokens
             # attn_metadata now depends on spec_metadata since it determines the shape/content of spec_dec parameter Tensors
             is_spec_dec_mode = spec_metadata.spec_dec_mode.attention_need_spec_dec_mode(
                 spec_resource_manager, self.is_draft_model, self.attn_backend,

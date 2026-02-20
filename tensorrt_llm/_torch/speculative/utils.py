@@ -207,6 +207,11 @@ def get_spec_drafter(model_engine,
     if spec_config.spec_dec_mode.is_save_hidden_states():
         return SaveHiddenStatesDrafter(spec_config, spec_resource_manager)
 
+    if spec_config.spec_dec_mode.use_one_engine(
+    ) and spec_config.draft_len_schedule is not None:
+        from .drafter import OneModelDrafter
+        return OneModelDrafter(spec_config)
+
     return None
 
 
