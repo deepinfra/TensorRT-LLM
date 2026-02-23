@@ -140,6 +140,15 @@ class Drafter(ABC):
         override this.  The default is a no-op.
         """
 
+    def should_forward_draft_model(
+            self, scheduled_batch: ScheduledRequests) -> bool:
+        """Whether to run drafting for this batch.
+
+        ModelDrafter overrides with two-model-specific checks.
+        Default returns True (one-model drafting is always inline).
+        """
+        return True
+
 
 class OneModelDrafter(Drafter):
     """Lightweight drafter for one-model speculative decoding modes.
