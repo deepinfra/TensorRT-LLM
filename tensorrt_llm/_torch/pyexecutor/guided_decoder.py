@@ -505,17 +505,20 @@ class CapturableGuidedDecoder(GuidedDecoder):
 
     def execute(self,
                 logits: torch.Tensor,
-                d2t: Optional[torch.Tensor] = None) -> List[Tuple[int, str]]:
+                d2t: Optional[torch.Tensor] = None,
+                num_bitmask_tokens: Optional[int] = None
+                ) -> List[Tuple[int, str]]:
         with torch.cuda.stream(self.stream):
             torch.cuda.current_stream().wait_event(self.token_event)
             self.fetch_batch()
             self.init_disagg_gen_requests()
             failed_requests = self.build()
-            self.copy_bitmask()
+            self.copy_bitmask(num_bitmask_tokens=num_bitmask_tokens)
             self.bitmask_event.record()
 
         torch.cuda.current_stream().wait_event(self.bitmask_event)
-        self.apply_bitmask(logits, d2t=d2t)
+        self.apply_bitmask(logits, d2t=d2t,
+                           num_bitmask_tokens=num_bitmask_tokens)
 
         return failed_requests
 
