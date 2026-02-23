@@ -149,6 +149,13 @@ class Drafter(ABC):
         """
         return True
 
+    def generate_draft_tokens_with_overlap(self, *args, **kwargs) -> None:
+        """Generate draft tokens in overlap scheduling mode.
+
+        ModelDrafter overrides with two-model draft loop.
+        Default is a no-op (one-model drafting is inline in target forward).
+        """
+
 
 class OneModelDrafter(Drafter):
     """Lightweight drafter for one-model speculative decoding modes.
