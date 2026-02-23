@@ -804,6 +804,12 @@ class PyTorchModelEngine(ModelEngine):
                                         reverse=True)
         # Create CUDA graphs for different draft lengths
         draft_lengths = []
+        # For one-engine modes with draft_len_schedule, the draft length
+        # depends on batch size.  We resolve it per-bs inside the loop.
+        _use_schedule = (not self.is_draft_model
+                         and self.spec_config is not None
+                         and self.spec_config.spec_dec_mode.use_one_engine()
+                         and self.spec_config.draft_len_schedule is not None)
         if self.is_draft_model:
             if self.model_is_wrapped and self.is_spec_decode and spec_resource_manager is not None and isinstance(
                     spec_resource_manager, Eagle3ResourceManager):
@@ -811,17 +817,8 @@ class PyTorchModelEngine(ModelEngine):
                 draft_lengths.append(self.original_max_total_draft_tokens)
             else:
                 draft_lengths.append(self.max_total_draft_tokens)
-        else:
-            # For one-engine modes with draft_len_schedule, capture a graph
-            # for each distinct draft_len in the schedule.
-            if (self.spec_config is not None
-                    and self.spec_config.spec_dec_mode.use_one_engine()
-                    and self.spec_config.draft_len_schedule is not None):
-                for dl in self.spec_config.draft_len_schedule.values():
-                    if dl > 0:
-                        draft_lengths.append(dl)
-            else:
-                draft_lengths.append(self.max_total_draft_tokens)
+        elif not _use_schedule:
+            draft_lengths.append(self.max_total_draft_tokens)
             # For non-draft model, we also capture the CUDA graph instance for draft length 0,
             # so that when we disable spec decode at runtime, we can still run the captured graph.
             # Note that for one engine mode, we are not able to turn off spec decode at runtime.
@@ -854,7 +851,19 @@ class PyTorchModelEngine(ModelEngine):
             if bs > self.batch_size:
                 continue
 
-            for draft_len in draft_lengths:
+            # When using draft_len_schedule, resolve the single draft_len
+            # for this batch size from the schedule (one graph per bs).
+            if _use_schedule:
+                from bisect import bisect_right
+                schedule = self.spec_config.draft_len_schedule
+                thresholds = list(schedule.keys())
+                idx = bisect_right(thresholds, bs)
+                dl = schedule[thresholds[idx - 1]] if idx > 0 else 0
+                draft_lengths_for_bs = [dl] if dl > 0 else []
+            else:
+                draft_lengths_for_bs = draft_lengths
+
+            for draft_len in draft_lengths_for_bs:
                 for max_seq_len in max_seq_len_list:
                     warmup_request = self._create_cuda_graph_warmup_request(
                         resource_manager, bs, draft_len, max_seq_len)
