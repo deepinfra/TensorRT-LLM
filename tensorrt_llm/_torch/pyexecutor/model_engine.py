@@ -1818,14 +1818,17 @@ class PyTorchModelEngine(ModelEngine):
         self.previous_kv_lens_offsets_cuda.mul_(0)
 
         # Prepare input_ids
+        # Slice to num_tokens_per_extend_request columns since store tensors
+        # are allocated at max width but effective width may differ.
         new_tokens = new_tokens_device.transpose(
-            0, 1)[previous_slots, :].flatten()
+            0, 1)[previous_slots, :num_tokens_per_extend_request].flatten()
         self.input_ids_cuda[:total_num_tokens].copy_(new_tokens,
                                                      non_blocking=True)
 
         # Prepare draft tokens
+        rdl = num_tokens_per_extend_request - 1
         self.draft_tokens_cuda[:previous_batch_draft_tokens].copy_(
-            next_draft_tokens_device[previous_slots, :].flatten(),
+            next_draft_tokens_device[previous_slots, :rdl].flatten(),
             non_blocking=True)
 
         # Compute kv_len_offsets and update offset tensors
@@ -2635,19 +2638,21 @@ class PyTorchModelEngine(ModelEngine):
             if previous_batch_len > 0:
                 previous_slots = previous_seq_slots_device()
                 # previous input ids
-                previous_batch_tokens = previous_batch_len * (
-                    1 + self.runtime_draft_len)
+                # Slice to runtime_draft_len+1 columns since store tensors
+                # are allocated at max width but effective width may differ.
+                rdl = self.runtime_draft_len
+                previous_batch_tokens = previous_batch_len * (1 + rdl)
                 new_tokens = new_tokens_device.transpose(
-                    0, 1)[previous_slots, :].flatten()
+                    0, 1)[previous_slots, :1 + rdl].flatten()
                 self.input_ids_cuda[num_tokens:num_tokens +
                                     previous_batch_tokens].copy_(
                                         new_tokens, non_blocking=True)
                 # previous draft tokens
-                previous_batch_draft_tokens = previous_batch_len * self.runtime_draft_len
+                previous_batch_draft_tokens = previous_batch_len * rdl
                 self.draft_tokens_cuda[num_draft_tokens:num_draft_tokens +
                                        previous_batch_draft_tokens].copy_(
                                            next_draft_tokens_device[
-                                               previous_slots, :].flatten(),
+                                               previous_slots, :rdl].flatten(),
                                            non_blocking=True)
                 # prepare data for the preprocess inputs
                 kv_len_offsets_device = new_tokens_lens_device - self.runtime_draft_len - 1
