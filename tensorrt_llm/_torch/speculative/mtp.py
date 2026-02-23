@@ -1293,7 +1293,11 @@ class MTPEagleWorker(MTPWorker):
         raw_logits = logits
 
         if self.guided_decoder is not None:
-            self.guided_decoder.execute(logits)
+            # When effective_mtp < max, logits has fewer rows than the
+            # bitmask prepared for the static max.  Pass the actual count.
+            num_bitmask_tokens = num_contexts + num_gens * (effective_mtp + 1)
+            self.guided_decoder.execute(
+                logits, num_bitmask_tokens=num_bitmask_tokens)
 
         # Sample and verify draft tokens
         accepted_tokens, num_accepted_tokens, log_probs = self.sample_and_accept_draft_tokens(

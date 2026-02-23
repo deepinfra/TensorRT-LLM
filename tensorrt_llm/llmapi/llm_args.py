@@ -1147,6 +1147,21 @@ class MTPDecodingConfig(DecodingBaseConfig):
             self.max_total_draft_tokens = kwargs[
                 'num_nextn_predict_layers']  # Current MTP only support linear tree
 
+        if self.draft_len_schedule is not None:
+            for bs, dl in self.draft_len_schedule.items():
+                if dl <= 0:
+                    raise ValueError(
+                        f"draft_len_schedule values must be >= 1 for MTP "
+                        f"(got draft_len={dl} for batch_size={bs}). "
+                        f"Use max_concurrency to disable speculation at "
+                        f"high batch sizes.")
+                if dl > self.num_nextn_predict_layers:
+                    raise ValueError(
+                        f"draft_len_schedule values must be <= "
+                        f"num_nextn_predict_layers "
+                        f"({self.num_nextn_predict_layers}), got "
+                        f"draft_len={dl} for batch_size={bs}.")
+
     @classmethod
     def from_dict(cls, data: dict):
         out = cls(**data)

@@ -133,6 +133,13 @@ class Drafter(ABC):
         Used in SaveHiddenStatesDrafter (to ensure correct input_ids)
         """
 
+    def cleanup_previous_draft_resources(self) -> None:
+        """Clean up resources from the previous draft batch (overlap scheduler).
+
+        Subclasses that manage draft-model resources (e.g. ModelDrafter) should
+        override this.  The default is a no-op.
+        """
+
 
 class OneModelDrafter(Drafter):
     """Lightweight drafter for one-model speculative decoding modes.

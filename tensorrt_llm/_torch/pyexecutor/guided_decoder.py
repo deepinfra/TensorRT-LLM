@@ -356,16 +356,19 @@ class GuidedDecoder:
 
     def execute(self,
                 logits: torch.Tensor,
-                d2t: Optional[torch.Tensor] = None) -> List[Tuple[int, str]]:
+                d2t: Optional[torch.Tensor] = None,
+                num_bitmask_tokens: Optional[int] = None
+                ) -> List[Tuple[int, str]]:
         failed_requests = self.build()
 
         with torch.cuda.stream(self.stream):
             torch.cuda.current_stream().wait_event(self.token_event)
-            self.copy_bitmask()
+            self.copy_bitmask(num_bitmask_tokens=num_bitmask_tokens)
             self.bitmask_event.record()
 
         torch.cuda.current_stream().wait_event(self.bitmask_event)
-        self.apply_bitmask(logits, d2t=d2t)
+        self.apply_bitmask(logits, d2t=d2t,
+                           num_bitmask_tokens=num_bitmask_tokens)
         self.token_event.record()
 
         return failed_requests
