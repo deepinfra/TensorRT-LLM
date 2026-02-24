@@ -281,7 +281,7 @@ public:
     std::vector<torch::Tensor> run(torch::Tensor const& input, torch::optional<torch::Tensor> const& residual,
         torch::optional<torch::Tensor> const& norm_weight, torch::optional<torch::Tensor> const& scale,
         torch::optional<torch::Tensor> const& bias, bool trigger_completion_at_end,
-        torch::optional<torch::Tensor> workspace) noexcept
+        torch::optional<torch::Tensor> workspace)
     {
         size_t size = input.numel();
         size_t seq_len = input.size(0);
@@ -564,7 +564,7 @@ private:
 
     std::vector<torch::Tensor> runLowPrecisionAllReduce(torch::Tensor const& input,
         torch::optional<torch::Tensor> const& residual, torch::optional<torch::Tensor> const& norm_weight,
-        torch::optional<torch::Tensor> const& scale, torch::optional<torch::Tensor> const& bias) noexcept
+        torch::optional<torch::Tensor> const& scale, torch::optional<torch::Tensor> const& bias)
     {
 #ifdef ENABLE_FP8
         auto stream = at::cuda::getCurrentCUDAStream(input.get_device());
@@ -633,7 +633,7 @@ private:
         torch::optional<torch::Tensor> const& residual, torch::optional<torch::Tensor> const& norm_weight,
         torch::optional<torch::Tensor> const& scale, torch::optional<torch::Tensor> const& bias,
         bool trigger_completion_at_end, torch::optional<torch::Tensor> workspace,
-        AllReduceStrategyType strategy) noexcept
+        AllReduceStrategyType strategy)
     {
         // Should handle only Lamport implementation
         auto stream = at::cuda::getCurrentCUDAStream(input.get_device());
