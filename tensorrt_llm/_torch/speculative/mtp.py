@@ -919,7 +919,7 @@ class MTPWorker(SpecWorkerBase):
 
         # Strict acceptance
         else:
-            if False:
+            if self.is_thop:
                 # Temporary buffer
                 target_tokens_cache = torch.zeros(batch_size *
                                                   (mtp_num_modules + 1),
