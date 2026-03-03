@@ -170,10 +170,15 @@ class GenerationExecutorWorker(RpcWorkerMixin, BaseWorker):
         # create iteration result queues
         self._create_iteration_result_queue(self.stats_queues)
         self._create_iteration_result_queue(self.kv_events_queues)
- 
+
          # start threads
         self.start_thread(self.await_response_thread)
-        self.start_thread(self.dispatch_kv_cache_events_thread)
+        # Only start the kv events dispatch thread for direct workers
+        # (_is_llm_executor=True). For proxy workers, kv events are fetched
+        # on-demand via RPC. Running the dispatch thread in that case would
+        # consume events from the engine before the RPC can fetch them.
+        if self._is_llm_executor:
+            self.start_thread(self.dispatch_kv_cache_events_thread)
         if mpi_rank() == 0:
             self.start_thread(self.dispatch_stats_thread)
 

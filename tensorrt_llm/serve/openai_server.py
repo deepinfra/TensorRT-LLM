@@ -627,7 +627,7 @@ class OpenAIServer:
             metrics_dict["perf_metrics"] = metrics_json
         return JSONResponse(content=list(perf_metrics))
 
-    async def get_kv_cache_events(self) -> JSONResponse:
+    async def get_kv_cache_events_json(self) -> JSONResponse:
         events = []
         try:
             async for event in self.llm.get_kv_cache_events_async(2):
@@ -680,58 +680,56 @@ class OpenAIServer:
             return hash_obj
 
     async def kv_event_processor(self):
-        logger.info("Starting kv_cache_generator")
-        events = None
+        logger.info("Starting kv_event_processor")
         while True:
             try:
-                await asyncio.sleep(1)
-                events = self.llm.get_kv_cache_events_async(None)
+                events = self.llm.get_kv_cache_events_async(0.05) # 50ms timeout to wait for events, adjust as needed
             except Exception:
-                pass
-                # WAR result is not initialized before the first request
-            if events:
-                break
-        async for event in events:
-            try:
-                data = event['data']
-                event_id = event['event_id']
-                parent_hash = data.get('parent_hash', 0)
-                type = data['type']
-                kv_events = []
-                if type == "stored":
-                    blocks = data['blocks']
-                    for block in blocks:
-                        block_hash = block['block_hash']
-                        cache_level = block['cache_level']
-                        kv_events.append(
-                            self.process_kv_event(event_id, block_hash, parent_hash, cache_level)
-                        )
-                        parent_hash = block_hash
-                elif type == "removed":
-                    block_hashes = data['block_hashes']
-                    for block_hash in block_hashes:
-                        kv_events.append(
-                            self.process_kv_event(event_id, block_hash, parent_hash, -1)
-                        )
-                elif type == "updated":
-                    # we don't care about updated events for now
-                    # this reduces the number of events sent to kv-cache-monitor
-                    pass
-                    # block_hash = data['block_hash']
-                    # cache_level = data['cache_level']['new_value']
-                    # kv_events.append(
-                    #     self.process_kv_event(event_id, block_hash, parent_hash, cache_level)
-                    # )
-                else:
+                # WAR: IterationResult is not initialized before the first request
+                await asyncio.sleep(1)
+                continue
+
+            # Reset done state so we can re-iterate after a timeout.
+            # Proxy executors reset this in aget_kv_events, but direct
+            # workers do not, so we always reset it here.
+            events.mark_undone()
+
+            async for event in events:
+                try:
+                    data = event['data']
+                    event_id = event['event_id']
+                    parent_hash = data.get('parent_hash', 0)
+                    type = data['type']
+                    kv_events = []
+                    if type == "stored":
+                        blocks = data['blocks']
+                        for block in blocks:
+                            block_hash = block['block_hash']
+                            cache_level = block['cache_level']
+                            kv_events.append(
+                                self.process_kv_event(event_id, block_hash, parent_hash, cache_level)
+                            )
+                            parent_hash = block_hash
+                    elif type == "removed":
+                        block_hashes = data['block_hashes']
+                        for block_hash in block_hashes:
+                            kv_events.append(
+                                self.process_kv_event(event_id, block_hash, parent_hash, -1)
+                            )
+                    elif type == "updated":
+                        # we don't care about updated events for now
+                        # this reduces the number of events sent to kv-cache-monitor
+                        pass
+                    else:
+                        logger.info(f'{event}')
+                        continue
+
+                    for listener in self.kv_listeners:
+                        listener.put_nowait(kv_events)
+
+                except Exception as e:
+                    logger.error(traceback.format_exc())
                     logger.info(f'{event}')
-                    continue
-
-                for listener in self.kv_listeners:
-                    listener.put_nowait(kv_events)
-
-            except Exception as e:
-                logger.error(traceback.format_exc())
-                logger.info(f'{event}')
 
     async def kv_cache_generator(self):
         def format_sse_event(kv_events: List[KVHash]) -> str:
@@ -793,7 +791,7 @@ class OpenAIServer:
 
     async def get_kv_cache_events(self) -> StreamingResponse:
         """
-        This endpoint is used to stream kv cache events.
+        This endpoint is used to stream kv cache events via SSE.
         """
         return StreamingResponse(self.kv_cache_generator(),
                                  media_type="text/event-stream")
