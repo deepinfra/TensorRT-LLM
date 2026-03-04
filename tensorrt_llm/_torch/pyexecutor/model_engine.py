@@ -2960,8 +2960,8 @@ class PyTorchModelEngine(ModelEngine):
             if isinstance(spec_metadata, Eagle3SpecMetadata):
                 spec_metadata.request_accepted_path = request_accepted_path
             # No-op for non 1-model
-            spec_metadata.populate_sampling_params_for_one_model(
-                scheduled_requests.all_requests())
+            # spec_metadata.populate_sampling_params_for_one_model(
+            # scheduled_requests.all_requests())
             spec_metadata.prepare()
             inputs['spec_metadata'] = spec_metadata
 
