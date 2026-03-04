@@ -391,6 +391,13 @@ class MTPWorker(SpecWorkerBase):
         self.spec_config = spec_config
         self.model_config = model_config
         self.is_thop = False
+        mtp_num_modules = spec_config.num_nextn_predict_layers
+        self._target_token_logprobs_cache = torch.zeros(256 * (mtp_num_modules + 1),
+                                                dtype=torch.int,
+                                                device="cuda")
+        self._target_tokens_cache = torch.zeros(256 * (mtp_num_modules + 1),
+                                                dtype=torch.int,
+                                                device="cuda")
 
     @property
     def max_draft_len(self) -> int:
@@ -967,14 +974,12 @@ class MTPWorker(SpecWorkerBase):
         else:
             if self.is_thop:
                 # Temporary buffer
-                target_tokens_cache = torch.zeros(batch_size *
-                                                  (mtp_num_modules + 1),
-                                                  dtype=torch.int,
-                                                  device=logits.device)
-                target_token_logprobs_cache = torch.zeros(batch_size *
-                                                  (mtp_num_modules + 1),
-                                                  dtype=torch.float32,
-                                                  device=logits.device)
+                target_tokens_cache = self._target_tokens_cache[:batch_size *
+                                                                (mtp_num_modules
+                                                                 + 1)]
+                target_token_logprobs_cache = self._target_token_logprobs_cache[:batch_size *
+                                                                (mtp_num_modules
+                                                                 + 1)]
                 accepted_tokens, num_accepted_tokens, log_probs = torch.ops.trtllm.mtp_sampling_and_accepted_draft_tokens_op(
                     logits, spec_metadata.draft_tokens, target_tokens_cache, target_token_logprobs_cache,
                     mtp_num_modules, batch_size, num_contexts, logits.shape[-1])
