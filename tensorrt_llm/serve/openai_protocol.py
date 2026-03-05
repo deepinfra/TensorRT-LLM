@@ -389,6 +389,7 @@ class CompletionRequest(OpenAIBaseModel):
                            vocab_size: int = 32000,
                            gather_generation_logits: bool = False,
                            backend: Optional[str] = None) -> SamplingParams:
+        self.logprobs=None
         sampling_params = SamplingParams(
             best_of=self.best_of,
             frequency_penalty=self.frequency_penalty,
@@ -749,6 +750,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
                            gather_generation_logits: bool = False,
                            reasoning_parser: Optional[str] = None,
                            backend: Optional[str] = None) -> SamplingParams:
+        self.logprobs=None
         sampling_params = SamplingParams(
             frequency_penalty=self.frequency_penalty,
             max_tokens=self.max_completion_tokens,
