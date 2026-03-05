@@ -972,7 +972,7 @@ class MTPWorker(SpecWorkerBase):
 
         # Strict acceptance
         else:
-            if self.is_thop:
+            if True:
                 # Temporary buffer
                 target_tokens_cache = self._target_tokens_cache[:batch_size *
                                                                 (mtp_num_modules
