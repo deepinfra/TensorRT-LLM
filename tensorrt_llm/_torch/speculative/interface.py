@@ -259,10 +259,6 @@ class SpecMetadata:
     temperatures: Optional[torch.Tensor] = None
     top_ks: Optional[torch.Tensor] = None
     top_ps: Optional[torch.Tensor] = None
-    # Per-request sampling parameters (deepinfra)
-    top_k: Optional[torch.Tensor] = None
-    top_p: Optional[torch.Tensor] = None
-    min_p: Optional[torch.Tensor] = None
 
     def __post_init__(self):
         pass
