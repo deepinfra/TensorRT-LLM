@@ -27,8 +27,8 @@ from ..modules.fused_moe.moe_load_balancer import (
     MoeLoadBalancer, maybe_create_moe_load_balancer)
 
 _KV_CACHE_MAP = {
-    "fp8": QuantAlgo.FP8.value,
-    "nvfp4": QuantAlgo.NVFP4.value,
+    "fp8": QuantAlgo.FP8,
+    "nvfp4": QuantAlgo.NVFP4,
     "auto": "auto"
 }
 _VALID_KV_CACHE_DTYPES = ("fp8", "nvfp4", "auto")
