@@ -128,10 +128,24 @@ class KvCacheCreator:
         elif self._should_create_separate_draft_kv_cache():
             # One-model draft with separate KV cache layout
             effective_draft_config = self._get_effective_draft_config()
-            kv_size_per_token += self._kv_cache_manager_cls.get_cache_size_per_token(
+            draft_kv_size = self._kv_cache_manager_cls.get_cache_size_per_token(
                 effective_draft_config,
                 mapping,
                 tokens_per_block=self._tokens_per_block)
+            # For MTP, _draft_config is None so effective_draft_config is the
+            # target model config.  get_cache_size_per_token computed the size
+            # for ALL target layers, but the draft KV cache only needs layers
+            # for the MTP heads.  Scale down to the actual draft layer count.
+            if self._draft_config is None:
+                num_target_attn_layers = max(
+                    len(
+                        mapping.pp_layers(
+                            effective_draft_config.
+                            get_num_attention_layers())), 1)
+                num_draft_layers = get_num_spec_layers(
+                    self._speculative_config)
+                draft_kv_size = draft_kv_size * num_draft_layers // num_target_attn_layers
+            kv_size_per_token += draft_kv_size
         logger.info(
             f"[DEBUG _get_kv_size_per_token] final kv_size_per_token={kv_size_per_token}"
         )
