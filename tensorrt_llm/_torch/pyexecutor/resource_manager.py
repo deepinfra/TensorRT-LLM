@@ -835,6 +835,13 @@ class KVCacheManager(BaseResourceManager):
         mem_per_token = kv_factor * num_attention_layers * head_dim
         # The data type bytes.
         quant_config = model_config.quant_config
+        logger.info(
+            f"[DEBUG get_cache_size_per_token] quant_config={quant_config}, "
+            f"kv_cache_quant_algo={quant_config.kv_cache_quant_algo if quant_config else None}, "
+            f"kv_cache_quant_algo type={type(quant_config.kv_cache_quant_algo) if quant_config else None}, "
+            f"quant_mode={quant_config.quant_mode if quant_config else None}, "
+            f"has_fp8_kv_cache={quant_config.quant_mode.has_fp8_kv_cache() if quant_config else None}"
+        )
         if quant_config is not None and quant_config.quant_mode.has_fp8_kv_cache(
         ):
             mem_per_token *= 1
@@ -2231,6 +2238,13 @@ class KVCacheManagerV2(BaseResourceManager):
         # get kv cache dtype bytes
         mem_per_token = 2
         quant_config = model_config.quant_config
+        logger.info(
+            f"[DEBUG V2 get_cache_size_per_token] quant_config={quant_config}, "
+            f"kv_cache_quant_algo={quant_config.kv_cache_quant_algo if quant_config else None}, "
+            f"kv_cache_quant_algo type={type(quant_config.kv_cache_quant_algo) if quant_config else None}, "
+            f"quant_mode={quant_config.quant_mode if quant_config else None}, "
+            f"has_fp8_kv_cache={quant_config.quant_mode.has_fp8_kv_cache() if quant_config else None}"
+        )
         if quant_config is not None and quant_config.quant_mode.has_fp8_kv_cache(
         ):
             mem_per_token = 1

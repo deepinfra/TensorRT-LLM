@@ -56,6 +56,10 @@ def validate_and_set_kv_cache_quant(model_config: ModelConfig,
     )
     # Quantization from hf_quant_config.json
     kv_cache_quant = model_config.quant_config.kv_cache_quant_algo
+    logger.info(
+        f'[DEBUG validate_and_set_kv_cache_quant] kv_cache_quant={kv_cache_quant!r}, '
+        f'type={type(kv_cache_quant)}, pyt_kv_cache_dtype={pyt_kv_cache_dtype!r}'
+    )
     # PyTorch configuration quantization
     valid_pyt_quant = bool(pyt_kv_cache_dtype in _VALID_KV_CACHE_DTYPES)
     mapped_pyt_quant = _KV_CACHE_MAP.get(pyt_kv_cache_dtype, None)
@@ -86,6 +90,11 @@ def validate_and_set_kv_cache_quant(model_config: ModelConfig,
 
     # We have an open ended KV cache in the checkpoint
     # and we have a specified override.
+    logger.info(
+        f'[DEBUG validate_and_set_kv_cache_quant] Setting kv_cache_quant_algo to {mapped_pyt_quant!r} '
+        f'(type={type(mapped_pyt_quant)}), '
+        f'quant_mode already cached={"quant_mode" in model_config.quant_config.__dict__}'
+    )
     model_config.quant_config.kv_cache_quant_algo = mapped_pyt_quant
 
 
