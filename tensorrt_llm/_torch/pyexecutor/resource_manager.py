@@ -532,8 +532,15 @@ class KVCacheManager(BaseResourceManager):
                             req):
                         manager_type = "draft" if self.is_draft else "main"
                         if req.py_request_id in self._active_sequences:
-                            logger.error(
-                                f"[add_sequence] DUPLICATE! {manager_type} kv_cache: "
+                            # The draft KV cache can see a spurious
+                            # is_first_context_chunk=True when
+                            # moveToNextContextChunk failed to advance the
+                            # draft position (shared mContextChunkSize was
+                            # clobbered to 0).  Skip the duplicate
+                            # add_sequence to avoid the C++ emplaceDone
+                            # assertion crash.
+                            logger.warning(
+                                f"[add_sequence] Skipping duplicate {manager_type} kv_cache: "
                                 f"req_id={req.py_request_id}, "
                                 f"prompt_len={req.prompt_len}, "
                                 f"ctx_pos={req.context_current_position}, "
@@ -541,14 +548,14 @@ class KVCacheManager(BaseResourceManager):
                                 f"use_draft={req.use_draft_model}, "
                                 f"state={req.state}, "
                                 f"is_dummy={req.is_dummy_request}")
-                        else:
-                            logger.debug(
-                                f"[add_sequence] {manager_type} kv_cache: "
-                                f"req_id={req.py_request_id}, "
-                                f"prompt_len={req.prompt_len}, "
-                                f"ctx_pos={req.context_current_position}, "
-                                f"prepop={req.prepopulated_prompt_len}, "
-                                f"use_draft={req.use_draft_model}")
+                            continue
+                        logger.debug(
+                            f"[add_sequence] {manager_type} kv_cache: "
+                            f"req_id={req.py_request_id}, "
+                            f"prompt_len={req.prompt_len}, "
+                            f"ctx_pos={req.context_current_position}, "
+                            f"prepop={req.prepopulated_prompt_len}, "
+                            f"use_draft={req.use_draft_model}")
                         self._active_sequences.add(req.py_request_id)
                         self.impl.add_sequence(req.py_request_id,
                                                req.prompt_len, req_beam_width,
