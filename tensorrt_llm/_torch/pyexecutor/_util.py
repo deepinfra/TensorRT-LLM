@@ -111,8 +111,14 @@ class KvCacheCreator:
     def _get_kv_size_per_token(self):
         model_config = self._model_engine.model.model_config
         mapping = self._mapping
+        logger.info(
+            f"[DEBUG _get_kv_size_per_token] kv_cache_manager_cls={self._kv_cache_manager_cls.__name__}"
+        )
         kv_size_per_token = self._kv_cache_manager_cls.get_cache_size_per_token(
             model_config, mapping, tokens_per_block=self._tokens_per_block)
+        logger.info(
+            f"[DEBUG _get_kv_size_per_token] main model kv_size_per_token={kv_size_per_token}"
+        )
         if self._draft_model_engine is not None:
             draft_model_config = self._draft_model_engine.model.model_config
             kv_size_per_token += self._kv_cache_manager_cls.get_cache_size_per_token(
@@ -126,6 +132,9 @@ class KvCacheCreator:
                 effective_draft_config,
                 mapping,
                 tokens_per_block=self._tokens_per_block)
+        logger.info(
+            f"[DEBUG _get_kv_size_per_token] final kv_size_per_token={kv_size_per_token}"
+        )
         return kv_size_per_token
 
     def _cal_max_memory(self, peak_memory, total_gpu_memory, fraction,
