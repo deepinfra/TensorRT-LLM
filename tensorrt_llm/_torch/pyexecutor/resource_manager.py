@@ -2518,9 +2518,32 @@ class ResourceManager:
 
     @nvtx_range("prepare_resources")
     def prepare_resources(self, scheduled_batch: ScheduledRequests):
-        for _, resource_manager in self.resource_managers.items():
+        # mContextChunkSize is a single shared field in the C++ LlmRequest.
+        # Both target and draft KV cache managers' addSequence ->
+        # setPrepopulatedPromptLen may modify it.  The draft call comes
+        # second and can clamp the value using the draft remaining length,
+        # which may be smaller than the target's.  Save after the target
+        # KV cache manager and restore after the draft so the forward pass
+        # sees the target's chunk size.
+        saved_chunk_sizes = None
+        has_draft_kv = ResourceManagerType.DRAFT_KV_CACHE_MANAGER in self.resource_managers
+        for rm_type, resource_manager in self.resource_managers.items():
             if hasattr(resource_manager, "prepare_resources"):
                 resource_manager.prepare_resources(scheduled_batch)
+
+                # Save chunk sizes right after the target KV cache manager
+                if has_draft_kv and rm_type == ResourceManagerType.KV_CACHE_MANAGER:
+                    saved_chunk_sizes = [
+                        req.context_chunk_size
+                        for req in scheduled_batch.context_requests
+                    ]
+
+                # Restore chunk sizes after the draft KV cache manager
+                if rm_type == ResourceManagerType.DRAFT_KV_CACHE_MANAGER and saved_chunk_sizes is not None:
+                    for req, saved_size in zip(
+                            scheduled_batch.context_requests,
+                            saved_chunk_sizes):
+                        req.context_chunk_size = saved_size
 
     @nvtx_range("update_resources")
     def update_resources(
