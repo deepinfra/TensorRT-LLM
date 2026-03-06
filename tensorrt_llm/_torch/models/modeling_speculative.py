@@ -981,9 +981,8 @@ class SpecDecOneEngineForCausalLM(DecoderModelForCausalLM[TModel, TConfig],
 
             if self.draft_config is not None and model_config.spec_config.eagle3_model_arch == "llama3":
                 for key, value in self.draft_config.extra_attrs.items():
-                    assert key in ('attn_layers', 'mla_layers')
-                    assert key in model_config.extra_attrs
-                    model_config.extra_attrs[key].update(value)
+                    if key in ('attn_layers', 'mla_layers') and key in model_config.extra_attrs:
+                        model_config.extra_attrs[key].update(value)
         self.layer_idx = -1
 
     def forward(
