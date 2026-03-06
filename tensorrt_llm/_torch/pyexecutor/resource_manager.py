@@ -458,6 +458,8 @@ class KVCacheManager(BaseResourceManager):
                     max_kv_event_entries=self.event_buffer_max_size)
 
         self.impl = KVCacheManagerCpp(**kwargs)
+        # Track active sequences for debugging emplaceDone crashes
+        self._active_sequences: set = set()
 
         self.impl.allocate_pools(False)
         self.kv_cache_pool_pointers = self.impl.get_block_pool_pointers()
@@ -528,6 +530,26 @@ class KVCacheManager(BaseResourceManager):
                 else:
                     if req.is_first_context_chunk and self._kv_connector_should_add_sequence(
                             req):
+                        manager_type = "draft" if self.is_draft else "main"
+                        if req.py_request_id in self._active_sequences:
+                            logger.error(
+                                f"[add_sequence] DUPLICATE! {manager_type} kv_cache: "
+                                f"req_id={req.py_request_id}, "
+                                f"prompt_len={req.prompt_len}, "
+                                f"ctx_pos={req.context_current_position}, "
+                                f"prepop={req.prepopulated_prompt_len}, "
+                                f"use_draft={req.use_draft_model}, "
+                                f"state={req.state}, "
+                                f"is_dummy={req.is_dummy_request}")
+                        else:
+                            logger.debug(
+                                f"[add_sequence] {manager_type} kv_cache: "
+                                f"req_id={req.py_request_id}, "
+                                f"prompt_len={req.prompt_len}, "
+                                f"ctx_pos={req.context_current_position}, "
+                                f"prepop={req.prepopulated_prompt_len}, "
+                                f"use_draft={req.use_draft_model}")
+                        self._active_sequences.add(req.py_request_id)
                         self.impl.add_sequence(req.py_request_id,
                                                req.prompt_len, req_beam_width,
                                                req)
@@ -625,6 +647,7 @@ class KVCacheManager(BaseResourceManager):
             req.is_dummy_request = True
             req.paged_kv_block_ids = []
             if prepare_resource:
+                self._active_sequences.add(req_id)
                 self.impl.add_sequence(req_id, token_num, beam_width, req)
                 for _ in range(self.num_extra_kv_tokens):
                     self.impl.add_token(req_id)
@@ -633,6 +656,7 @@ class KVCacheManager(BaseResourceManager):
                     self.impl.add_token(req_id)
 
                 if draft_kv_cache_manager is not None:
+                    draft_kv_cache_manager._active_sequences.add(req_id)
                     draft_kv_cache_manager.impl.add_sequence(
                         req_id, token_num, beam_width, req)
                     for _ in range(self.num_extra_kv_tokens):
@@ -785,6 +809,11 @@ class KVCacheManager(BaseResourceManager):
             )
 
     def free_resources(self, request: LlmRequest, pin_on_release: bool = False):
+        manager_type = "draft" if self.is_draft else "main"
+        logger.debug(
+            f"[remove_sequence] {manager_type} kv_cache: "
+            f"req_id={request.py_request_id}")
+        self._active_sequences.discard(request.py_request_id)
         return self.impl.remove_sequence(request.py_request_id, request,
                                          pin_on_release)
 
@@ -1931,7 +1960,18 @@ class KVCacheManagerV2(BaseResourceManager):
                                     req.context_current_position +
                                     req.context_chunk_size
                                 ) // self.tokens_per_block * self.tokens_per_block
-                                chunk_size = floored_end_position - req.context_current_position
+                                if floored_end_position > req.context_current_position:
+                                    chunk_size = floored_end_position - req.context_current_position
+                                else:
+                                    # Chunk too small to reach the next block
+                                    # boundary.  Extend to next boundary
+                                    # (capped at prompt end).
+                                    next_boundary = (
+                                        (req.context_current_position // self.tokens_per_block) + 1
+                                    ) * self.tokens_per_block
+                                    chunk_size = min(
+                                        next_boundary - req.context_current_position,
+                                        req.prompt_len - req.context_current_position)
 
                             req.context_chunk_size = min(
                                 chunk_size,
