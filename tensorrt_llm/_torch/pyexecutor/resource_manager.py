@@ -2529,7 +2529,32 @@ class ResourceManager:
         has_draft_kv = ResourceManagerType.DRAFT_KV_CACHE_MANAGER in self.resource_managers
         for rm_type, resource_manager in self.resource_managers.items():
             if hasattr(resource_manager, "prepare_resources"):
+                # Log chunk sizes before each resource manager
+                chunk_sizes_before = {
+                    req.py_request_id: (req.context_chunk_size,
+                                        req.context_current_position,
+                                        req.prepopulated_prompt_len)
+                    for req in scheduled_batch.context_requests
+                } if scheduled_batch.context_requests else {}
+
                 resource_manager.prepare_resources(scheduled_batch)
+
+                # Log chunk sizes after if any changed
+                for req in scheduled_batch.context_requests:
+                    rid = req.py_request_id
+                    if rid in chunk_sizes_before:
+                        old_cs, old_pos, old_prepop = chunk_sizes_before[rid]
+                        new_cs = req.context_chunk_size
+                        if old_cs != new_cs:
+                            logger.error(
+                                f"[prepare_resources] chunk_size changed by {rm_type}: "
+                                f"req_id={rid}, "
+                                f"chunk_size {old_cs} -> {new_cs}, "
+                                f"ctx_pos {old_pos} -> {req.context_current_position}, "
+                                f"prepop {old_prepop} -> {req.prepopulated_prompt_len}, "
+                                f"prompt_len={req.prompt_len}, "
+                                f"remaining={req.context_remaining_length}"
+                            )
 
                 # Save chunk sizes right after the target KV cache manager
                 if has_draft_kv and rm_type == ResourceManagerType.KV_CACHE_MANAGER:
