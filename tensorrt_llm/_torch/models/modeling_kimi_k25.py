@@ -218,9 +218,20 @@ class Rope2DPosEmbRepeated(nn.Module):
                 'freqs_cis', self._precompute_freqs_cis(device),
                 persistent=False)
         shapes = grid_thws.tolist()
-        return torch.cat(
+        shapes_key = tuple(tuple(s) for s in shapes)
+        if not hasattr(self, '_freqs_cache'):
+            self._freqs_cache = {}
+        cached = self._freqs_cache.get(shapes_key)
+        if cached is not None and cached.device == self.freqs_cis.device:
+            return cached
+        result = torch.cat(
             [self.freqs_cis[:h, :w].reshape(-1, self.dim // 2).repeat(t, 1)
              for t, h, w in shapes], dim=0)
+        # Keep cache bounded to avoid memory leak with many unique shapes
+        if len(self._freqs_cache) >= 64:
+            self._freqs_cache.clear()
+        self._freqs_cache[shapes_key] = result
+        return result
 
 
 class MLP2(nn.Module):
@@ -307,20 +318,43 @@ class MoonViT3dEncoder(nn.Module):
 
 
 def tpool_patch_merger(x, grid_thws, merge_kernel_size=(2, 2)):
+    """Merge patches by averaging over temporal dim and grouping spatial patches.
+
+    When all images share the same (t, h, w) grid shape, uses a single batched
+    tensor operation instead of a Python loop.
+    """
     d_model = x.size(-1)
+    kernel_height, kernel_width = merge_kernel_size
+    shapes = grid_thws.tolist()
+
+    # Fast path: all images have the same grid shape — fully batched
+    if len(shapes) > 1 and all(s == shapes[0] for s in shapes):
+        t, h, w = shapes[0]
+        n_images = len(shapes)
+        new_height, new_width = h // kernel_height, w // kernel_width
+        # [n_images, t*h*w, d_model] -> reshape -> temporal mean -> flatten
+        batched = x.view(n_images, t, new_height, kernel_height,
+                         new_width, kernel_width, d_model)
+        batched = batched.permute(
+            0, 1, 2, 4, 3, 5, 6).contiguous().mean(dim=1)
+        # [n_images, new_h*new_w, kh*kw, d_model]
+        batched = batched.view(
+            n_images, new_height * new_width, kernel_height * kernel_width,
+            d_model)
+        return torch.unbind(batched, dim=0)
+
+    # General path: different grid shapes — iterate but minimize overhead
     outputs = []
     pre_sum = 0
-    for t, h, w in grid_thws.tolist():
+    for t, h, w in shapes:
         seq = x[pre_sum:pre_sum + t * h * w]
-        kernel_height, kernel_width = merge_kernel_size
         new_height, new_width = h // kernel_height, w // kernel_width
         reshaped_seq = seq.view(
             t, new_height, kernel_height, new_width, kernel_width, d_model)
         reshaped_seq = reshaped_seq.permute(
             0, 1, 3, 2, 4, 5).contiguous().mean(dim=0)
-        padded_seq = reshaped_seq.view(
-            new_height * new_width, kernel_height * kernel_width, -1)
-        outputs.append(padded_seq)
+        outputs.append(reshaped_seq.view(
+            new_height * new_width, kernel_height * kernel_width, d_model))
         pre_sum += t * h * w
     return outputs
 
@@ -388,8 +422,17 @@ class PatchMergerMLP(nn.Module):
 
     def forward(self, x):
         if isinstance(x, (list, tuple)):
-            return [self.proj(self.pre_norm(item).view(item.shape[0], -1))
-                    for item in x]
+            if len(x) == 1:
+                item = x[0]
+                return (self.proj(
+                    self.pre_norm(item).view(item.shape[0], -1)),)
+            # Batch: concatenate all items, run LayerNorm + projection once,
+            # then split back by per-image patch counts
+            lengths = [item.shape[0] for item in x]
+            cat = torch.cat(x, dim=0)
+            normed = self.pre_norm(cat).view(cat.shape[0], -1)
+            projected = self.proj(normed)
+            return torch.split(projected, lengths, dim=0)
         else:
             B = x.shape[0]
             return self.proj(self.pre_norm(x).view(B, -1, self.hidden_size))
@@ -733,7 +776,7 @@ class KimiK25VisionEncoder(nn.Module):
         image_features = self.vision_tower(pixel_values, grid_thws)
         image_features = self.mm_projector(image_features)
 
-        if isinstance(image_features, list):
+        if isinstance(image_features, (list, tuple)):
             embeds = torch.cat(image_features, dim=0)
         else:
             embeds = image_features
