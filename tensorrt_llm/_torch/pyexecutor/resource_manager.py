@@ -2568,7 +2568,20 @@ class ResourceManager:
                     for req, saved_size in zip(
                             scheduled_batch.context_requests,
                             saved_chunk_sizes):
+                        cur_size = req.context_chunk_size
                         req.context_chunk_size = saved_size
+                        if cur_size != saved_size:
+                            logger.error(
+                                f"[prepare_resources] RESTORE chunk_size after draft KV: "
+                                f"req_id={req.py_request_id}, "
+                                f"draft_chunk_size={cur_size} -> restored={req.context_chunk_size}, "
+                                f"saved_target_size={saved_size}"
+                            )
+                elif rm_type == ResourceManagerType.DRAFT_KV_CACHE_MANAGER and saved_chunk_sizes is None:
+                    logger.error(
+                        f"[prepare_resources] DRAFT_KV_CACHE_MANAGER ran but no saved chunk sizes! "
+                        f"has_draft_kv={has_draft_kv}"
+                    )
 
     @nvtx_range("update_resources")
     def update_resources(
