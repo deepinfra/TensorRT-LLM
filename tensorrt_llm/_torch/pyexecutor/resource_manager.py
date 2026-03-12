@@ -2536,6 +2536,23 @@ class ResourceManager:
 
                 resource_manager.prepare_resources(scheduled_batch)
 
+                # Log draft KV cache free blocks after prepare
+                if rm_type == ResourceManagerType.DRAFT_KV_CACHE_MANAGER and resource_manager is not None:
+                    try:
+                        draft_free = resource_manager.get_num_free_blocks()
+                        draft_active = len(resource_manager._active_sequences)
+                        if not hasattr(self, '_draft_kv_log_counter'):
+                            self._draft_kv_log_counter = 0
+                            self._draft_kv_total_blocks = draft_free + draft_active  # approximate
+                        self._draft_kv_log_counter += 1
+                        if self._draft_kv_log_counter % 100 == 1 or draft_free < 100:
+                            logger.info(
+                                f"[draft_kv] iter={self._draft_kv_log_counter}, "
+                                f"free_blocks={draft_free}, "
+                                f"active_sequences={draft_active}")
+                    except Exception:
+                        pass
+
                 # Restore chunk sizes after the draft KV cache manager
                 if rm_type == ResourceManagerType.DRAFT_KV_CACHE_MANAGER and saved_chunk_sizes is not None:
                     for req, saved_size in zip(
