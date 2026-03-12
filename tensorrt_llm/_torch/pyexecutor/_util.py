@@ -584,7 +584,9 @@ class KvCacheCreator:
 
     def _create_one_model_draft_kv_cache_manager(
             self,
-            estimating_kv_cache: bool = False) -> Optional[KVCacheManager]:
+            estimating_kv_cache: bool = False,
+            target_kv_cache_manager: Optional[KVCacheManager] = None,
+    ) -> Optional[KVCacheManager]:
         """
         Create a KV cache manager for draft model layers in one-model mode
         when target and draft have different KV cache layouts.
@@ -611,11 +613,35 @@ class KvCacheCreator:
         draft_kv_cache_manager_cls = get_kv_cache_manager_cls(
             effective_draft_config)
 
+        # The scheduler only accounts for target KV cache capacity when
+        # scheduling, so the draft must have enough blocks for all sequences
+        # the scheduler admits.  When target uses MLA (compressed KV) but draft
+        # uses standard MHA (e.g., Eagle3 with Llama-style attention), the
+        # draft's per-token cost can be comparable to the target's despite
+        # having far fewer layers.  Relying on leftover GPU memory
+        # (free_gpu_memory_fraction of what remains after target allocation)
+        # can leave the draft undersized.  Use the target's block count to
+        # compute the minimum tokens the draft needs.
+        draft_kv_cache_config = self._kv_cache_config
+        if target_kv_cache_manager is not None:
+            target_blocks = target_kv_cache_manager.blocks_in_primary_pool
+            min_draft_tokens = target_blocks * self._tokens_per_block
+            current_max = self._kv_cache_config.max_tokens
+            if current_max is None or current_max < min_draft_tokens:
+                draft_kv_cache_config = self._kv_cache_config.model_copy(
+                    update={
+                        'max_tokens': min_draft_tokens,
+                        'free_gpu_memory_fraction': None,
+                    })
+                logger.info(
+                    f"Draft KV cache: setting max_tokens={min_draft_tokens} "
+                    f"to match target's {target_blocks} blocks")
+
         return _create_kv_cache_manager(
             model_engine=None,
             kv_cache_manager_cls=draft_kv_cache_manager_cls,
             mapping=self._mapping,
-            kv_cache_config=self._kv_cache_config,
+            kv_cache_config=draft_kv_cache_config,
             tokens_per_block=self._tokens_per_block,
             max_seq_len=self._max_seq_len,
             max_batch_size=self._max_batch_size,
@@ -654,7 +680,8 @@ class KvCacheCreator:
         # One-model speculative decoding with different KV layouts
         elif self._should_create_separate_draft_kv_cache():
             draft_kv_cache_manager = self._create_one_model_draft_kv_cache_manager(
-                estimating_kv_cache)
+                estimating_kv_cache,
+                target_kv_cache_manager=kv_cache_manager)
 
         resources[ResourceManagerType.KV_CACHE_MANAGER] = kv_cache_manager
         resources[
