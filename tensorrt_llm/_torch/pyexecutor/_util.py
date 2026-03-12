@@ -626,6 +626,17 @@ class KvCacheCreator:
         if target_kv_cache_manager is not None:
             target_blocks = target_kv_cache_manager.blocks_in_primary_pool
             min_draft_tokens = target_blocks * self._tokens_per_block
+
+            # Log what the draft would get from leftover GPU memory
+            free_mem, _ = torch.cuda.mem_get_info()
+            logger.info(
+                f"Draft KV cache sizing: "
+                f"gpu_free_mem={free_mem / (1 << 30):.2f}GiB, "
+                f"target_blocks={target_blocks}, "
+                f"min_draft_tokens={min_draft_tokens}, "
+                f"current_max_tokens={self._kv_cache_config.max_tokens}, "
+                f"free_gpu_memory_fraction={self._kv_cache_config.free_gpu_memory_fraction}")
+
             current_max = self._kv_cache_config.max_tokens
             if current_max is None or current_max < min_draft_tokens:
                 draft_kv_cache_config = self._kv_cache_config.model_copy(
@@ -634,7 +645,8 @@ class KvCacheCreator:
                         'free_gpu_memory_fraction': None,
                     })
                 logger.info(
-                    f"Draft KV cache: setting max_tokens={min_draft_tokens} "
+                    f"Draft KV cache: adjusting max_tokens "
+                    f"{current_max} -> {min_draft_tokens} "
                     f"to match target's {target_blocks} blocks")
 
         return _create_kv_cache_manager(
