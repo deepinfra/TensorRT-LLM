@@ -541,6 +541,8 @@ class TRTLLMGenFusedMoE(MoE):
             routed_scaling_factor = None
 
         routing_bias = routing_bias if router_logits is not None else None
+        if routing_bias is not None and routing_bias.dtype != torch.bfloat16:
+            routing_bias = routing_bias.to(torch.bfloat16)
 
         if token_selected_experts is not None:
             # for cases like deepep low latency where fake top_k=1 might be used
