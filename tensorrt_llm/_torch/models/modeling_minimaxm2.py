@@ -33,6 +33,24 @@ from ..modules.rms_norm import RMSNorm
 from ..utils import AuxStreamType
 from .modeling_utils import DecoderModel, DecoderModelForCausalLM, register_auto_model
 
+class _EScoreCorrectionBiasHolder(nn.Module):
+    """Holds e_score_correction_bias so the generic weight loader visits it with a narrow
+    prefix (block_sparse_moe.e_score_correction_bias). This avoids mark_consumed deleting
+    the whole block_sparse_moe prefix before gate and experts.backend load (see #11119).
+    """
+
+    def __init__(self, num_experts: int):
+        super().__init__()
+        self.e_score_correction_bias = nn.Parameter(
+            torch.empty((num_experts), dtype=torch.float32), requires_grad=False
+        )
+
+    def load_weights(self, weights: List[Dict]):
+        assert len(weights) == 1
+        w = weights[0]
+        # MiniMax M2: HF key is prefix.e_score_correction_bias, so filter_weights yields {"": tensor}.
+        src = w[""]
+        self.e_score_correction_bias.copy_(src[:].to(self.e_score_correction_bias.dtype))
 
 # MiniMax M2/M2.1 requires the implementation of the following two additional components:
 #  1. MoE routing method: Currently, TRT-LLM does not support
@@ -60,16 +78,12 @@ class MiniMaxM2MoE(nn.Module):
             self.hidden_dim, self.num_experts, bias=False, dtype=torch.float32, quant_config=None
         )
 
-        self.e_score_correction_bias = nn.Parameter(
-            torch.empty((self.num_experts), dtype=torch.float32), requires_grad=False
-        )
-
         reduce_results = True
         self.experts = create_moe(
             routing_method=MiniMaxM2MoeRoutingMethod(
                 top_k=self.top_k,
                 num_experts=self.num_experts,
-                callable_e_score_correction_bias=lambda: self.e_score_correction_bias,
+                callable_e_score_correction_bias=lambda: self.e_score_correction_bias.e_score_correction_bias,
             ),
             num_experts=self.num_experts,
             aux_stream_dict={AuxStreamType.MoeChunkingOverlap: aux_stream},
@@ -77,13 +91,9 @@ class MiniMaxM2MoE(nn.Module):
             model_config=model_config,
             layer_idx=layer_idx,
         )
-
-    def load_weights(self, weights: List[Dict]):
-        assert len(weights) == 1
-
-        self.e_score_correction_bias.copy_(
-            weights[0]["e_score_correction_bias"][:].to(self.e_score_correction_bias.dtype)
-        )
+        # Holder ensures generic loader only marks block_sparse_moe.e_score_correction_bias
+        # consumed, so gate and experts.backend can still load (see #11119).
+        self.e_score_correction_bias = _EScoreCorrectionBiasHolder(self.num_experts)
 
     def forward(
         self,
