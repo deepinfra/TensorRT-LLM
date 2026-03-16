@@ -516,6 +516,10 @@ class TRTLLMGenFusedMoE(MoE):
             If do_finalize=True: final_hidden_states tensor
             If do_finalize=False: tuple of intermediate outputs (for nvfp4 and w4a8_nvfp4_fp8)
         """
+        # Ensure router_logits is bfloat16 as required by TRTLLMGen kernels
+        if router_logits is not None and router_logits.dtype != torch.bfloat16:
+            router_logits = router_logits.to(torch.bfloat16)
+
         # Extract routing parameters from routing_method
         if isinstance(self.routing_method, DeepSeekV3MoeRoutingMethod):
             top_k = self.routing_method.routing_impl.top_k
@@ -788,8 +792,6 @@ class TRTLLMGenFusedMoE(MoE):
         **kwargs,
     ) -> torch.Tensor:
         assert x.dtype == torch.bfloat16
-        if router_logits is not None and router_logits.dtype != torch.bfloat16:
-            router_logits = router_logits.to(torch.bfloat16)
 
         # Get top_k for routing (other routing parameters are extracted inside run_moe)
         if isinstance(self.routing_method, DeepSeekV3MoeRoutingMethod):
