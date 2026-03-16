@@ -43,7 +43,7 @@ from .quantization import (
     W4A16MXFP4TRTLLMGenFusedMoEMethod)
 # isort: on
 from .routing import (BaseMoeRoutingMethod, DeepSeekV3MoeRoutingMethod,
-                       MiniMaxM2MoeRoutingMethod)
+                       MiniMaxM2MoeRoutingMethod, RoutingMethodType)
 
 
 class TRTLLMGenFusedMoE(MoE):
@@ -544,6 +544,13 @@ class TRTLLMGenFusedMoE(MoE):
         if routing_bias is not None and routing_bias.dtype != torch.bfloat16:
             routing_bias = routing_bias.to(torch.bfloat16)
 
+        # For routing methods not supported by the C++ kernel (e.g., MiniMax2),
+        # use Renormalize as the kernel routing type since routing is done in Python
+        # and the kernel only needs to handle permutation with pre-computed topk.
+        kernel_routing_method_type = self.routing_method.routing_method_type
+        if isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
+            kernel_routing_method_type = RoutingMethodType.Renormalize
+
         if token_selected_experts is not None:
             # for cases like deepep low latency where fake top_k=1 might be used
             top_k = token_selected_experts.shape[-1]
@@ -578,7 +585,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 topk_weights=token_final_scales,
                 topk_ids=token_selected_experts,
             )
@@ -612,7 +619,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 do_finalize=do_finalize,
                 act_type=act_type,
                 topk_weights=token_final_scales,
@@ -657,7 +664,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 0,  # act_type
                 token_final_scales,
                 token_selected_experts,
@@ -685,7 +692,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 do_finalize=do_finalize,
                 act_type=0,
                 topk_ids=token_selected_experts,
@@ -728,7 +735,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 0,  # act_type
                 token_final_scales,
                 token_selected_experts,
@@ -766,7 +773,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 0,  # act_type
                 token_final_scales,
                 token_selected_experts,
