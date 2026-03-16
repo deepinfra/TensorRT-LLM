@@ -35,7 +35,8 @@ import torch
 from tensorrt_llm._torch.expert_statistic import ExpertStatistic
 from tensorrt_llm._torch.model_config import ModelConfig
 from tensorrt_llm._torch.modules.fused_moe.interface import MoE
-from tensorrt_llm._torch.modules.fused_moe.routing import BaseMoeRoutingMethod
+from tensorrt_llm._torch.modules.fused_moe.routing import (
+    BaseMoeRoutingMethod, MiniMaxM2MoeRoutingMethod)
 from tensorrt_llm._torch.utils import AuxStreamType, EventType, Fp4QuantizedTensor
 from tensorrt_llm.logger import logger
 from tensorrt_llm.models.modeling_utils import QuantConfig
@@ -569,7 +570,13 @@ class ConfigurableMoE(MoE):
 
         # ========== Step 2: Apply routing (only if backend supports load balancer) ==========
 
-        if self.backend._supports_load_balancer():
+        # Force separated routing for methods not supported by C++ kernel (e.g., MiniMax2)
+        needs_separated_routing = (
+            self.backend._supports_load_balancer()
+            or isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod)
+        )
+
+        if needs_separated_routing:
             # Separated routing: ConfigurableMoE calls routing_method
             token_selected_experts, token_final_scales = self.routing_method.apply(router_logits)
 
@@ -1135,8 +1142,10 @@ class ConfigurableMoE(MoE):
             # Determine router_logits based on whether routing has been done
             # If backend doesn't support load balancer, routing is done before communication
             # In that case, router_logits should be None (routing already done)
+            # For MiniMax2 (unsupported by C++ routing kernel), always use separated routing
             router_logits_arg = None
-            if not self.backend._supports_load_balancer():
+            if (not self.backend._supports_load_balancer()
+                    and not isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod)):
                 # For fused routing backends, router_logits is only needed if routing hasn't been done yet
                 router_logits_arg = router_logits
 

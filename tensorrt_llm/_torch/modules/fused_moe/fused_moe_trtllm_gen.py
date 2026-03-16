@@ -973,6 +973,14 @@ class TRTLLMGenFusedMoE(MoE):
                 sizes=None if use_dp_padding else all_rank_num_tokens)
         else:
             # No communication path: use non-post-quant-comm quantization
+            # For routing methods not supported by the C++ kernel (e.g., MiniMax2),
+            # do routing in Python and pass pre-computed topk_ids/topk_weights.
+            if isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
+                token_selected_experts, token_final_scales = self.routing_method.apply(
+                    router_logits)
+                token_selected_experts = token_selected_experts.to(torch.int32)
+                if token_final_scales is not None:
+                    token_final_scales = token_final_scales.to(torch.bfloat16)
             x, x_sf = self.quantize_input(x, post_quant_comm=False)
 
         moe_output: Optional[torch.Tensor] = None
@@ -985,7 +993,11 @@ class TRTLLMGenFusedMoE(MoE):
 
         # Call the extracted run_moe interface
         # Determine router_logits based on post_quant_comm
-        router_logits_arg = None if post_quant_comm else router_logits
+        # For MiniMax2 (unsupported by C++ routing kernel), always use separated routing
+        if post_quant_comm or isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
+            router_logits_arg = None
+        else:
+            router_logits_arg = router_logits
 
         final_hidden_states = self.run_moe(
             x=x,
