@@ -788,6 +788,8 @@ class TRTLLMGenFusedMoE(MoE):
         **kwargs,
     ) -> torch.Tensor:
         assert x.dtype == torch.bfloat16
+        if router_logits is not None and router_logits.dtype != torch.bfloat16:
+            router_logits = router_logits.to(torch.bfloat16)
 
         # Get top_k for routing (other routing parameters are extracted inside run_moe)
         if isinstance(self.routing_method, DeepSeekV3MoeRoutingMethod):
