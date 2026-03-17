@@ -809,6 +809,11 @@ class OpenAIServer:
             post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
             chat_response = post_processor(promise, args)
 
+        for choice in chat_response.choices:
+            if choice.finish_reason is not None:
+                prom_metrics["request_completed_total"] += 1
+                prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+
         if disaggregated_params is not None and chat_response.choices[0].disaggregated_params is None:
             raise ValueError(f"disaggregated_params is not set in the response for request"
                              f" {disaggregated_params.disagg_request_id}")
@@ -1034,27 +1039,6 @@ class OpenAIServer:
                     prom_metrics["request_cancelled_total"] += 1
                     promise.abort()
 
-        async def create_chat_response(
-                promise: RequestOutput, postproc_params: PostprocParams, disaggregated_params: Optional[LlmDisaggregatedParams] = None) -> ChatCompletionResponse:
-            await promise.aresult()
-            if self.postproc_worker_enabled:
-                chat_response =promise.outputs[0]._postprocess_result
-            else:
-                post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
-                chat_response = post_processor(promise, args)
-
-            for choice in chat_response.choices:
-                if choice.finish_reason is not None:
-                    prom_metrics["request_completed_total"] += 1
-                    prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-
-            # Add prompt_tokens_ids to the response
-            if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
-                chat_response.prompt_token_ids = promise.prompt_token_ids
-            raw_request.state.server_first_token_time = get_steady_clock_now_in_seconds()
-            await self._extract_metrics(promise, raw_request)
-            return chat_response
-
         prom_metrics["request_started_total"] += 1
         promise: Optional[RequestOutput] = None
         try:
@@ -1140,9 +1124,14 @@ class OpenAIServer:
                                          media_type="text/event-stream")
             else:
                 response = await self._create_chat_response(promise, postproc_params, disaggregated_params)
+                if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
+                    response.prompt_token_ids = promise.prompt_token_ids
+                raw_request.state.server_first_token_time = get_steady_clock_now_in_seconds()
+                await self._extract_metrics(promise, raw_request)
                 return JSONResponse(content=response.model_dump())
         except CppExecutorError:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except asyncio.CancelledError:
@@ -1433,6 +1422,7 @@ class OpenAIServer:
                 return JSONResponse(content=response.model_dump())
         except CppExecutorError:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except asyncio.CancelledError:
