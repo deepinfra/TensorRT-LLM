@@ -2761,19 +2761,18 @@ class NVFP4TRTLLMGenFusedMoEBaseMethod(NVFP4FusedMoEMethod):
         super().load_quant_scales(module, weights)
 
         # Debug: print scale values to diagnose NVFP4 accuracy issues
-        import logging
-        _logger = logging.getLogger(__name__)
-        _logger.warning(
-            f"[NVFP4 DEBUG] fc31_input_scale={module.fc31_input_scale.data.item():.6e}, "
-            f"fc2_input_scale={module.fc2_input_scale.data.item():.6e}")
-        _logger.warning(
-            f"[NVFP4 DEBUG] fc31_alpha min={module.fc31_alpha.data.min().item():.6e} "
-            f"max={module.fc31_alpha.data.max().item():.6e} "
-            f"mean={module.fc31_alpha.data.mean().item():.6e}")
-        _logger.warning(
-            f"[NVFP4 DEBUG] fc2_alpha min={module.fc2_alpha.data.min().item():.6e} "
-            f"max={module.fc2_alpha.data.max().item():.6e} "
-            f"mean={module.fc2_alpha.data.mean().item():.6e}")
+        print(f"[NVFP4 DEBUG] class={self.__class__.__name__} "
+              f"fc31_input_scale={module.fc31_input_scale.data.item():.6e}, "
+              f"fc2_input_scale={module.fc2_input_scale.data.item():.6e}",
+              flush=True)
+        print(f"[NVFP4 DEBUG] fc31_alpha min={module.fc31_alpha.data.min().item():.6e} "
+              f"max={module.fc31_alpha.data.max().item():.6e} "
+              f"mean={module.fc31_alpha.data.mean().item():.6e}",
+              flush=True)
+        print(f"[NVFP4 DEBUG] fc2_alpha min={module.fc2_alpha.data.min().item():.6e} "
+              f"max={module.fc2_alpha.data.max().item():.6e} "
+              f"mean={module.fc2_alpha.data.mean().item():.6e}",
+              flush=True)
         # Also print a few raw per-expert input_scales from the checkpoint
         sample_experts = list(module.initial_local_expert_ids)[:3]
         for eid in sample_experts:
@@ -2782,12 +2781,12 @@ class NVFP4TRTLLMGenFusedMoEBaseMethod(NVFP4FusedMoEMethod):
                 w2_is = weights.get(f"{eid}.w2.input_scale")
                 ws2_1 = weights.get(f"{eid}.w1.weight_scale_2")
                 ws2_2 = weights.get(f"{eid}.w2.weight_scale_2")
-                _logger.warning(
-                    f"[NVFP4 DEBUG] expert {eid}: "
-                    f"w1.input_scale={w1_is.item():.6e if w1_is is not None else 'N/A'}, "
-                    f"w2.input_scale={w2_is.item():.6e if w2_is is not None else 'N/A'}, "
-                    f"w1.weight_scale_2={ws2_1.item():.6e if ws2_1 is not None else 'N/A'}, "
-                    f"w2.weight_scale_2={ws2_2.item():.6e if ws2_2 is not None else 'N/A'}")
+                print(f"[NVFP4 DEBUG] expert {eid}: "
+                      f"w1.input_scale={w1_is.item():.6e if w1_is is not None else 'N/A'}, "
+                      f"w2.input_scale={w2_is.item():.6e if w2_is is not None else 'N/A'}, "
+                      f"w1.weight_scale_2={ws2_1.item():.6e if ws2_1 is not None else 'N/A'}, "
+                      f"w2.weight_scale_2={ws2_2.item():.6e if ws2_2 is not None else 'N/A'}",
+                      flush=True)
 
         # last step: load fc31_scale_c
         # c_global_sf: fc2_input_scale
