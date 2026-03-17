@@ -1174,6 +1174,7 @@ class ConfigurableMoE(MoE):
         Load weights - delegated to backend
 
         """
+        print(f"[DEBUG] ConfigurableMoE.load_weights called, backend={self.backend.__class__.__name__}", flush=True)
         assert hasattr(self.backend, "load_weights"), (
             f"Backend {self.backend.__class__.__name__} must implement load_weights()"
         )

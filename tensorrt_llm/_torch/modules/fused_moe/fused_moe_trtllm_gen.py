@@ -386,6 +386,7 @@ class TRTLLMGenFusedMoE(MoE):
     def load_weights(self,
                      weights: List[Dict],
                      allow_partial_loading: bool = False):
+        print(f"[DEBUG] TRTLLMGenFusedMoE.load_weights called, quant_method={self.quant_method.__class__.__name__}", flush=True)
         assert self._weights_created
 
         assert len(weights) == 1
