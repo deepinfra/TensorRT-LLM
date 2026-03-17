@@ -2090,7 +2090,6 @@ class NVFP4FusedMoEMethod(FusedMoEMethodBase):
                                              dst_fc2_alpha[expert_idx])
 
     def load_quant_scales(self, module: torch.nn.Module, weights: Dict):
-        print(f"[DEBUG] load_quant_scales called on {self.__class__.__name__}", flush=True)
         # Check if pre_quant_scale exists in the checkpoint (for NVFP4_AWQ)
         has_pre_quant_scale = False
         if module.weight_loading_mode == MoEWeightLoadingMode.VANILLA:

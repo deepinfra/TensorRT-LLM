@@ -890,10 +890,6 @@ def _load_weights_impl(model: Union[nn.Module, DecoderModelForCausalLM],
 
     def load_single_module(name, module):
         torch.cuda.set_device(device_id)
-        if "block_sparse_moe" in name and "experts" in name:
-            print(f"[DEBUG LOAD v1] name={name}, type={type(module).__name__}, "
-                  f"n_params={len(module._parameters)}, has_load_weights={hasattr(module, 'load_weights')}",
-                  flush=True)
         if len(module._parameters) > 0:
             # skip load weights if module is in skip_modules
             if any(skip_module in name for skip_module in skip_modules):
@@ -1029,10 +1025,6 @@ def _load_weights_impl_v2(model: Union[nn.Module, DecoderModelForCausalLM],
 
     def load_single_module(name, module):
         torch.cuda.set_device(device_id)
-        if "block_sparse_moe" in name and "experts" in name:
-            print(f"[DEBUG LOAD v2] name={name}, type={type(module).__name__}, "
-                  f"n_params={len(module._parameters)}, has_load_weights={hasattr(module, 'load_weights')}",
-                  flush=True)
         if len(module._parameters) > 0:
             if weight_mapper.should_skip_module(name):
                 return
