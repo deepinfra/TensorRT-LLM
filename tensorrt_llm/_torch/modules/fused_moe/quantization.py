@@ -2760,6 +2760,33 @@ class NVFP4TRTLLMGenFusedMoEBaseMethod(NVFP4FusedMoEMethod):
     def load_quant_scales(self, module: torch.nn.Module, weights: Dict):
         super().load_quant_scales(module, weights)
 
+        # vLLM-style: fuse per-expert input_scale into alphas.
+        # The base class computes: alpha[e] = ws2[e] / fc31_input_scale = ws2[e] * max_input_scale
+        # vLLM instead computes:   alpha[e] = ws2[e] * per_expert_input_scale[e]
+        # Correction factor:       alpha[e] *= per_expert_input_scale[e] * fc31_input_scale
+        #                        = per_expert_input_scale[e] / max_input_scale
+        for local_slot_id, expert_id in enumerate(
+                module.initial_local_expert_ids):
+            if module.weight_loading_mode == MoEWeightLoadingMode.VANILLA:
+                w1_input_scale = weights[
+                    f"{expert_id}.w1.input_scale"].float().reshape([])
+                w2_input_scale = weights[
+                    f"{expert_id}.w2.input_scale"].float().reshape([])
+            elif module.weight_loading_mode == MoEWeightLoadingMode.FUSED_GATE_UP_PROJ:
+                w1_input_scale = weights[
+                    "gate_up_proj_input_scale"].float().reshape([])
+                w2_input_scale = weights[
+                    "down_proj_input_scale"].float().reshape([])
+            else:
+                raise NotImplementedError(
+                    f"Unknown weight loading mode in MoE: {module.weight_loading_mode}"
+                )
+
+            module.fc31_alpha.data[local_slot_id] *= (
+                w1_input_scale * module.fc31_input_scale.data)
+            module.fc2_alpha.data[local_slot_id] *= (
+                w2_input_scale * module.fc2_input_scale.data)
+
         # last step: load fc31_scale_c
         # c_global_sf: fc2_input_scale
         # For gated activations (SwiGlu), scale_c_fc1 includes both input and weight scales
@@ -2802,6 +2829,27 @@ class NVFP4TRTLLMGenFusedMoEBaseMethod(NVFP4FusedMoEMethod):
                 local_shared_fc31_alpha_tensors,
                 local_shared_fc2_alpha_tensors,
                 ignore_weight_scale=True)
+
+            # Apply vLLM-style per-expert input_scale fusion to shared alphas
+            for idx, expert_id in enumerate(local_shared_load_expert_ids):
+                if module.weight_loading_mode == MoEWeightLoadingMode.VANILLA:
+                    w1_is = weights[
+                        f"{expert_id}.w1.input_scale"].float().reshape([])
+                    w2_is = weights[
+                        f"{expert_id}.w2.input_scale"].float().reshape([])
+                elif module.weight_loading_mode == MoEWeightLoadingMode.FUSED_GATE_UP_PROJ:
+                    w1_is = weights[
+                        "gate_up_proj_input_scale"].float().reshape([])
+                    w2_is = weights[
+                        "down_proj_input_scale"].float().reshape([])
+                else:
+                    raise NotImplementedError(
+                        f"Unknown weight loading mode in MoE: {module.weight_loading_mode}"
+                    )
+                local_shared_fc31_alpha_tensors[idx] *= (
+                    w1_is * module.fc31_input_scale.data.cpu())
+                local_shared_fc2_alpha_tensors[idx] *= (
+                    w2_is * module.fc2_input_scale.data.cpu())
 
             local_shared_fc31_scale_c = module.fc2_input_scale.data.cpu(
             ) * local_shared_fc31_alpha_tensors
