@@ -2773,20 +2773,6 @@ class NVFP4TRTLLMGenFusedMoEBaseMethod(NVFP4FusedMoEMethod):
               f"max={module.fc2_alpha.data.max().item():.6e} "
               f"mean={module.fc2_alpha.data.mean().item():.6e}",
               flush=True)
-        # Also print a few raw per-expert input_scales from the checkpoint
-        sample_experts = list(module.initial_local_expert_ids)[:3]
-        for eid in sample_experts:
-            if module.weight_loading_mode == MoEWeightLoadingMode.VANILLA:
-                w1_is = weights.get(f"{eid}.w1.input_scale")
-                w2_is = weights.get(f"{eid}.w2.input_scale")
-                ws2_1 = weights.get(f"{eid}.w1.weight_scale_2")
-                ws2_2 = weights.get(f"{eid}.w2.weight_scale_2")
-                print(f"[NVFP4 DEBUG] expert {eid}: "
-                      f"w1.input_scale={w1_is.item():.6e if w1_is is not None else 'N/A'}, "
-                      f"w2.input_scale={w2_is.item():.6e if w2_is is not None else 'N/A'}, "
-                      f"w1.weight_scale_2={ws2_1.item():.6e if ws2_1 is not None else 'N/A'}, "
-                      f"w2.weight_scale_2={ws2_2.item():.6e if ws2_2 is not None else 'N/A'}",
-                      flush=True)
 
         # last step: load fc31_scale_c
         # c_global_sf: fc2_input_scale

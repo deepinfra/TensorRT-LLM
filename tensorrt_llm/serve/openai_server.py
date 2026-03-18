@@ -663,6 +663,13 @@ class OpenAIServer:
         prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
                 prom_metrics["num_requests_running"] + all_requests_done))
 
+        logger.warning(f"METRICS_DEBUG: started={prom_metrics['request_started_total']} "
+                       f"completed={prom_metrics['request_completed_total']} "
+                       f"cancelled={prom_metrics['request_cancelled_total']} "
+                       f"failed={prom_metrics['request_failed_total']} "
+                       f"running={prom_metrics['num_requests_running']} "
+                       f"waiting={prom_metrics['num_requests_waiting']}")
+
         resp = ''
         for metric_key, metric_val in prom_metrics.items():
             separator = ',' if '{' in metric_key else '{'
@@ -813,6 +820,12 @@ class OpenAIServer:
             if choice.finish_reason is not None:
                 prom_metrics["request_completed_total"] += 1
                 prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+            else:
+                logger.warning(f"METRICS_DEBUG: _create_chat_response choice has finish_reason=None, "
+                               f"index={choice.index}")
+
+        if not chat_response.choices:
+            logger.warning("METRICS_DEBUG: _create_chat_response has no choices!")
 
         if disaggregated_params is not None and chat_response.choices[0].disaggregated_params is None:
             raise ValueError(f"disaggregated_params is not set in the response for request"
@@ -1040,6 +1053,7 @@ class OpenAIServer:
                     promise.abort()
 
         prom_metrics["request_started_total"] += 1
+        logger.warning(f"METRICS_DEBUG: openai_chat started, stream={request.stream}, total_started={prom_metrics['request_started_total']}")
         promise: Optional[RequestOutput] = None
         try:
             conversation: List[ConversationMessage] = []
@@ -1340,6 +1354,7 @@ class OpenAIServer:
             yield "data: [DONE]\n\n"
 
         prom_metrics["request_started_total"] += 1
+        logger.warning(f"METRICS_DEBUG: openai_completion started, stream={request.stream}, total_started={prom_metrics['request_started_total']}")
         try:
             if request.prompt_token_ids is not None:
                 prompts = [request.prompt_token_ids]
