@@ -438,15 +438,6 @@ class Eagle3OneModelWorker(SpecWorkerBase):
 
                 if self.guided_decoder is not None:
                     new_tokens = inputs["input_ids"][gather_ids]
-                    if (new_tokens < 0).any() or (new_tokens >= 163840).any():
-                        logger.error(
-                            f"[Eagle3] garbage draft input_ids at step={i}: "
-                            f"min={new_tokens.min().item()}, "
-                            f"max={new_tokens.max().item()}, "
-                            f"dtype={new_tokens.dtype}, "
-                            f"input_ids_dtype={inputs['input_ids'].dtype}, "
-                            f"gather_ids={gather_ids.tolist()[:5]}, "
-                            f"num_ctx={num_contexts}, num_gens={num_gens}")
                     self.guided_decoder.add_draft_batch(new_tokens,
                                                         num_accepted_tokens,
                                                         draft_step=i)

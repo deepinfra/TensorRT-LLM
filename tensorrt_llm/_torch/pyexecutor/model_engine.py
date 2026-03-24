@@ -3565,6 +3565,20 @@ class PyTorchModelEngine(ModelEngine):
                         with MoeLoadBalancerIterContext(moe_load_balancer):
                             outputs = self.cuda_graph_runner.replay(key, inputs)
 
+            # Validate spec decoding tokens after graph replay
+            if self.enable_spec_decode:
+                for token_key in ('new_tokens', 'next_draft_tokens'):
+                    tokens = outputs.get(token_key)
+                    if tokens is not None and tokens.numel() > 0:
+                        t_min = tokens.min().item()
+                        t_max = tokens.max().item()
+                        if t_min < 0 or t_max >= self.model.config.vocab_size:
+                            logger.error(
+                                f"[forward] garbage {token_key}: "
+                                f"min={t_min}, max={t_max}, "
+                                f"dtype={tokens.dtype}, "
+                                f"shape={list(tokens.shape)}")
+
             if self.forward_pass_callable is not None:
                 self.forward_pass_callable()
 
