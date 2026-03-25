@@ -2197,8 +2197,10 @@ class PyTorchModelEngine(ModelEngine):
 
             request.py_batch_idx = request.py_seq_slot
 
-        if len(multimodal_params_list) > 0:
-            # discard the text token indices as it only includes context tokens at this moment
+        if len(multimodal_params_list) > 0 and len(scheduled_requests.context_requests) > 0:
+            # Only compute mm indices when there are context requests with
+            # multimodal data. For generation-only batches this is a no-op,
+            # saving a host-device sync from torch.where().
             _, mm_token_indices = self._prepare_multimodal_indices(input_ids)
         else:
             mm_token_indices = None

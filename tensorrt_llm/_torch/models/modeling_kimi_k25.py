@@ -840,38 +840,41 @@ class KimiK25ForConditionalGeneration(DeepseekV3ForCausalLM):
         resource_manager=None,
         **kwargs,
     ) -> torch.Tensor:
-        # --- Vision processing ---
+        # --- Vision processing (skip entirely for generation-only batches) ---
         multimodal_params = kwargs.get("multimodal_params", [])
         mm_embeds = []
 
-        mm_multimodal_params = self._get_requests_with_mm_data(
-            multimodal_params)
-        if len(mm_multimodal_params) > 0:
-            if not _is_disagg() and self.mm_encoder is not None:
-                mm_embeds = get_multimodal_embeddings(
-                    encoder_forward_fn=self.mm_encoder.forward,
-                    multimodal_params=mm_multimodal_params)
-            mm_embeds = find_input_mm_embeds(mm_embeds, mm_multimodal_params)
+        # Fast path: skip multimodal entirely when no params have data
+        has_mm_data = False
+        if multimodal_params:
+            mm_multimodal_params = self._get_requests_with_mm_data(
+                multimodal_params)
+            if len(mm_multimodal_params) > 0:
+                has_mm_data = True
+                if not _is_disagg() and self.mm_encoder is not None:
+                    mm_embeds = get_multimodal_embeddings(
+                        encoder_forward_fn=self.mm_encoder.forward,
+                        multimodal_params=mm_multimodal_params)
+                mm_embeds = find_input_mm_embeds(mm_embeds, mm_multimodal_params)
 
-        # Save original input_ids — Eagle3's drafter needs them even when
-        # fuse_input_embeds returns (None, inputs_embeds) for multimodal.
-        original_input_ids = input_ids
+        if has_mm_data:
+            # Save original input_ids — Eagle3's drafter needs them even when
+            # fuse_input_embeds returns (None, inputs_embeds) for multimodal.
+            original_input_ids = input_ids
 
-        input_ids, inputs_embeds = fuse_input_embeds(
-            self.model.embed_tokens, input_ids, mm_embeds, **kwargs)
+            input_ids, inputs_embeds = fuse_input_embeds(
+                self.model.embed_tokens, input_ids, mm_embeds, **kwargs)
 
-        # When fuse_input_embeds produced inputs_embeds (multimodal case),
-        # input_ids is None. Restore original input_ids so Eagle3 spec decode
-        # can use them (the model ignores input_ids when inputs_embeds exists,
-        # but SpecDecOneEngineForCausalLM passes them to the drafter).
-        # Replace OOV multimodal tokens with 0 to avoid out-of-bounds in the
-        # drafter's embedding layer.
-        if inputs_embeds is not None and input_ids is None:
-            input_ids = original_input_ids
-            if input_ids is not None:
-                vocab_size = self.model.embed_tokens.num_embeddings
-                input_ids = input_ids.clone()
-                input_ids[input_ids >= vocab_size] = 0
+            # When fuse_input_embeds produced inputs_embeds (multimodal case),
+            # input_ids is None. Restore original input_ids so Eagle3 spec decode
+            # can use them.  Replace OOV multimodal tokens with 0 to avoid
+            # out-of-bounds in the drafter's embedding layer.
+            if inputs_embeds is not None and input_ids is None:
+                input_ids = original_input_ids
+                if input_ids is not None:
+                    vocab_size = self.model.embed_tokens.num_embeddings
+                    input_ids = input_ids.clone()
+                    input_ids[input_ids >= vocab_size] = 0
 
         # --- LLM forward (Eagle3 handled by parent) ---
         return super().forward(
