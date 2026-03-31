@@ -100,9 +100,14 @@ class GrammarMatcherWrapper(GrammarMatcher):
 
     def fill_next_token_bitmask(self, next_token_bitmask: torch.Tensor,
                                 index: int) -> None:
+        if not self._guidance_started:
+            next_token_bitmask[index].fill_(-1)
+            return
         self._matcher.fill_next_token_bitmask(next_token_bitmask, index)
 
     def is_terminated(self) -> bool:
+        if not self._guidance_started:
+            return False
         return self._matcher.is_terminated()
     
     def guidance_started(self) -> bool:
