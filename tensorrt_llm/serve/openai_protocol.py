@@ -385,6 +385,12 @@ class CompletionRequest(OpenAIBaseModel):
         default=None,
         description=("Parameters for disaggregated serving"),
     )
+    stream_interval: Optional[int] = Field(
+        default=None,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
 
     # doc: end-completion-extra-params
 
@@ -444,6 +450,8 @@ class CompletionRequest(OpenAIBaseModel):
                     )
                 else:
                     sampling_params._return_log_probs = True
+        if self.stream_interval is not None:
+            sampling_params.stream_interval = self.stream_interval
         return sampling_params
 
     @model_validator(mode="before")
@@ -746,6 +754,12 @@ class ChatCompletionRequest(OpenAIBaseModel):
         ("If specified, KV cache will be salted with the provided string "
          "to limit the kv cache reuse on with the requests having the same string."
          ))
+    stream_interval: Optional[int] = Field(
+        default=None,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
 
     # doc: end-chat-completion-extra-params
 
@@ -805,6 +819,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
                     )
                 else:
                     sampling_params._return_log_probs = True
+        if self.stream_interval is not None:
+            sampling_params.stream_interval = self.stream_interval
         return sampling_params
 
     @model_validator(mode='before')
