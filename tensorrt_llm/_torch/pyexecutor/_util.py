@@ -622,7 +622,8 @@ class KvCacheCreator:
         # (free_gpu_memory_fraction of what remains after target allocation)
         # can leave the draft undersized.  Use the target's block count to
         # compute the minimum tokens the draft needs.
-        draft_kv_cache_config = self._kv_cache_config
+        #draft_kv_cache_config = self._kv_cache_config
+        draft_kv_cache_config = self._kv_cache_config.model_copy(update={'host_cache_size': 0})
         if target_kv_cache_manager is not None:
             target_blocks = target_kv_cache_manager.blocks_in_primary_pool
             min_draft_tokens = target_blocks * self._tokens_per_block
@@ -639,7 +640,8 @@ class KvCacheCreator:
 
             current_max = self._kv_cache_config.max_tokens
             if current_max is None or current_max < min_draft_tokens:
-                draft_kv_cache_config = self._kv_cache_config.model_copy(
+                #draft_kv_cache_config = self._kv_cache_config.model_copy(
+                draft_kv_cache_config = draft_kv_cache_config.model_copy(
                     update={
                         'max_tokens': min_draft_tokens,
                         'free_gpu_memory_fraction': None,
