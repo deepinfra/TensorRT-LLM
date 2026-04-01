@@ -663,13 +663,6 @@ class OpenAIServer:
         prom_metrics["num_requests_waiting"] = max(0, prom_metrics["request_started_total"] - (
                 prom_metrics["num_requests_running"] + all_requests_done))
 
-        logger.warning(f"METRICS_DEBUG: started={prom_metrics['request_started_total']} "
-                       f"completed={prom_metrics['request_completed_total']} "
-                       f"cancelled={prom_metrics['request_cancelled_total']} "
-                       f"failed={prom_metrics['request_failed_total']} "
-                       f"running={prom_metrics['num_requests_running']} "
-                       f"waiting={prom_metrics['num_requests_waiting']}")
-
         resp = ''
         for metric_key, metric_val in prom_metrics.items():
             separator = ',' if '{' in metric_key else '{'
@@ -1053,7 +1046,11 @@ class OpenAIServer:
                     promise.abort()
 
         prom_metrics["request_started_total"] += 1
-        logger.warning(f"METRICS_DEBUG: openai_chat started, stream={request.stream}, total_started={prom_metrics['request_started_total']}")
+        req_log = request.model_dump(exclude={"messages", "prompt_token_ids"})
+        req_log["num_messages"] = len(request.messages)
+        if request.prompt_token_ids is not None:
+            req_log["num_prompt_token_ids"] = len(request.prompt_token_ids)
+        logger.info(f"Chat completion request: {json.dumps(req_log, default=str)}")
         promise: Optional[RequestOutput] = None
         try:
             conversation: List[ConversationMessage] = []
@@ -1354,7 +1351,14 @@ class OpenAIServer:
             yield "data: [DONE]\n\n"
 
         prom_metrics["request_started_total"] += 1
-        logger.warning(f"METRICS_DEBUG: openai_completion started, stream={request.stream}, total_started={prom_metrics['request_started_total']}")
+        req_log = request.model_dump(exclude={"prompt", "prompt_token_ids"})
+        if isinstance(request.prompt, str):
+            req_log["prompt_length"] = len(request.prompt)
+        elif isinstance(request.prompt, list):
+            req_log["num_prompts"] = len(request.prompt)
+        if request.prompt_token_ids is not None:
+            req_log["num_prompt_token_ids"] = len(request.prompt_token_ids)
+        logger.info(f"Completion request: {json.dumps(req_log, default=str)}")
         try:
             if request.prompt_token_ids is not None:
                 prompts = [request.prompt_token_ids]
