@@ -855,6 +855,11 @@ class OpenAIServer:
             return chat_response
 
         prom_metrics["request_started_total"] += 1
+        req_log = request.model_dump(exclude={"messages", "prompt_token_ids"})
+        req_log["num_messages"] = len(request.messages)
+        if request.prompt_token_ids is not None:
+            req_log["num_prompt_token_ids"] = len(request.prompt_token_ids)
+        logger.info(f"Chat completion request: {json.dumps(req_log, default=str)}")
         promise: Optional[RequestOutput] = None
         try:
             conversation: List[ConversationMessage] = []
@@ -1129,6 +1134,14 @@ class OpenAIServer:
             yield "data: [DONE]\n\n"
 
         prom_metrics["request_started_total"] += 1
+        req_log = request.model_dump(exclude={"prompt", "prompt_token_ids"})
+        if isinstance(request.prompt, str):
+            req_log["prompt_length"] = len(request.prompt)
+        elif isinstance(request.prompt, list):
+            req_log["num_prompts"] = len(request.prompt)
+        if request.prompt_token_ids is not None:
+            req_log["num_prompt_token_ids"] = len(request.prompt_token_ids)
+        logger.info(f"Completion request: {json.dumps(req_log, default=str)}")
         try:
             if request.prompt_token_ids is not None:
                 prompts = [request.prompt_token_ids]
