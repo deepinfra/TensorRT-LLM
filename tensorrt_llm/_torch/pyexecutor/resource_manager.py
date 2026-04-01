@@ -279,11 +279,11 @@ class KVCacheManager(BaseResourceManager):
             self.blocks_in_primary_pool = int(kv_cache_config.max_tokens //
                                               tokens_per_block)
 
-            host_cache_size = kv_cache_config.host_cache_size if kv_cache_config.host_cache_size else 0
-            max_tokens_secondary = host_cache_size // self.get_cache_bytes_per_token(
-            )
-            self.blocks_in_secondary_pool = int(max_tokens_secondary //
-                                                tokens_per_block)
+            # Skip secondary (host) pool allocation during estimation.
+            # Estimation only profiles GPU memory; allocating the full host
+            # cache here would double peak pinned-memory usage because the
+            # pool is torn down and re-allocated for the real KV cache.
+            self.blocks_in_secondary_pool = 0
 
             blocks_per_window = {
                 window_size:

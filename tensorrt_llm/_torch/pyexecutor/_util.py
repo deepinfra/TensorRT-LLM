@@ -510,9 +510,16 @@ class KvCacheCreator:
             raise NotImplementedError(
                 "Connector manager is not supported for draft model.")
 
-        draft_kv_cache_manager = self._create_kv_cache_manager(
-            self._draft_model_engine, estimating_kv_cache
-        ) if self._draft_model_engine is not None else None
+        if self._draft_model_engine is not None:
+            # Draft KV cache does not need host offloading — disable secondary
+            # pool to avoid doubling pinned-memory usage.
+            saved_host_cache_size = self._kv_cache_config.host_cache_size
+            self._kv_cache_config.host_cache_size = 0
+            draft_kv_cache_manager = self._create_kv_cache_manager(
+                self._draft_model_engine, estimating_kv_cache)
+            self._kv_cache_config.host_cache_size = saved_host_cache_size
+        else:
+            draft_kv_cache_manager = None
 
         resources[ResourceManagerType.KV_CACHE_MANAGER] = kv_cache_manager
         resources[
