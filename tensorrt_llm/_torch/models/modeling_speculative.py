@@ -1012,9 +1012,11 @@ class SpecDecOneEngineForCausalLM(DecoderModelForCausalLM[TModel, TConfig],
             hidden_states = hidden_states[:attn_metadata.num_tokens]
 
         if self.draft_model is not None:
-            # get logits
+            # get logits — clamp gather_ids to prevent CUDA OOB crash
+            # (unconditional clamp is CUDA-graph safe; no-op when indices are valid)
+            _gids = spec_metadata.gather_ids.clamp(0, hidden_states.shape[0] - 1)
             logits = self.logits_processor.forward(
-                hidden_states[spec_metadata.gather_ids],
+                hidden_states[_gids],
                 self.lm_head,
                 attn_metadata,
                 True,

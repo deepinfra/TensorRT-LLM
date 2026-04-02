@@ -24,7 +24,7 @@ from typing import (AsyncGenerator, AsyncIterator, List, Optional, Tuple,
 
 from tensorrt_llm.llmapi.utils import AsyncQueue
 import uvicorn
-from fastapi import Body, FastAPI, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (FileResponse, JSONResponse, Response,
                                StreamingResponse)

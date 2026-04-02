@@ -261,6 +261,8 @@ class Eagle3SpecMetadata(SpecMetadata):
             residual: Optional[torch.Tensor] = None) -> None:
         token_idx = self.hidden_states_write_indices[:self.num_tokens]
         eagle3_hidden_states = self.eagle3_resource_manager.hidden_states
+        # Clamp write indices to prevent CUDA OOB (CUDA-graph safe)
+        token_idx = token_idx.clamp(0, eagle3_hidden_states.shape[0] - 1)
         for i, captured_layer_id in enumerate(self.layers_to_capture):
             if captured_layer_id == layer_id:
                 to_save = hidden_states + residual if residual is not None else hidden_states
@@ -271,8 +273,11 @@ class Eagle3SpecMetadata(SpecMetadata):
                 break
 
     def get_hidden_states(self):
-        hidden_states = self.eagle3_resource_manager.hidden_states[
-            self.hidden_states_read_indices[:self.num_tokens], :]
+        _read_idx = self.hidden_states_read_indices[:self.num_tokens]
+        # Clamp read indices to prevent CUDA OOB (CUDA-graph safe)
+        _read_idx = _read_idx.clamp(
+            0, self.eagle3_resource_manager.hidden_states.shape[0] - 1)
+        hidden_states = self.eagle3_resource_manager.hidden_states[_read_idx, :]
         if not self.is_first_draft:
             hidden_states = hidden_states[:, :self.hidden_size]
         return hidden_states
@@ -458,6 +463,9 @@ class Eagle3OneModelWorker(SpecWorkerBase):
                 # Currently the spec-dec mask for chained tree is not implemented yet.
                 # When token tree is supported, this can be removed and all steps may use spec-dec mode as well.
                 attn_metadata.use_spec_decoding = False
+
+                # Clamp gather_ids to prevent CUDA OOB crash (CUDA-graph safe)
+                gather_ids = gather_ids.clamp(0, hidden_states.shape[0] - 1)
 
                 logits = draft_model.logits_processor(hidden_states[gather_ids],
                                                       draft_model.lm_head,
