@@ -1023,7 +1023,7 @@ class OpenAIServer:
         async def chat_stream_generator(
                 promise: RequestOutput, postproc_params: PostprocParams) -> AsyncGenerator[str, None]:
             nonlocal did_complete
-            is_first_chunk = request.return_token_ids
+            return_token_ids_on_first_chunk = request.return_token_ids
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
             try:
@@ -1037,9 +1037,9 @@ class OpenAIServer:
                                 prom_metrics["request_completed_total"] += 1
                                 prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
-                        if is_first_chunk:
+                        if return_token_ids_on_first_chunk:
                             pp_res.prompt_token_ids = promise.prompt_token_ids
-                            is_first_chunk = False
+                            return_token_ids_on_first_chunk = False
                         pp_res_json = pp_res.model_dump_json(exclude_unset=True)
                         yield f"data: {pp_res_json}\n\n"
                 yield f"data: [DONE]\n\n"
@@ -1310,7 +1310,7 @@ class OpenAIServer:
 
         async def completion_generator(promise: RequestOutput, params: Optional[PostprocParams]):
             did_complete = False
-            is_first_chunk = request.return_token_ids
+            return_token_ids_on_first_chunk = request.return_token_ids
             try:
                 async for output in promise:
                     if not self.postproc_worker_enabled:
@@ -1325,9 +1325,9 @@ class OpenAIServer:
                                 did_complete = True
                                 prom_metrics["request_completed_total"] += 1
                                 prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
-                        if is_first_chunk:
+                        if return_token_ids_on_first_chunk:
                             pp_res.prompt_token_ids = promise.prompt_token_ids
-                            is_first_chunk = False
+                            return_token_ids_on_first_chunk = False
                         pp_res_json = pp_res.model_dump_json(exclude_unset=True)
                         yield f"data: {pp_res_json}\n\n"
             finally:
