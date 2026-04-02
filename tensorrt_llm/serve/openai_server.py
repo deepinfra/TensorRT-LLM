@@ -1023,6 +1023,7 @@ class OpenAIServer:
         async def chat_stream_generator(
                 promise: RequestOutput, postproc_params: PostprocParams) -> AsyncGenerator[str, None]:
             nonlocal did_complete
+            is_first_chunk = request.return_token_ids
             if not self.postproc_worker_enabled:
                 post_processor, args = postproc_params.post_processor, postproc_params.postproc_args
             try:
@@ -1036,6 +1037,9 @@ class OpenAIServer:
                                 prom_metrics["request_completed_total"] += 1
                                 prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
 
+                        if is_first_chunk:
+                            pp_res.prompt_token_ids = promise.prompt_token_ids
+                            is_first_chunk = False
                         pp_res_json = pp_res.model_dump_json(exclude_unset=True)
                         yield f"data: {pp_res_json}\n\n"
                 yield f"data: [DONE]\n\n"
@@ -1136,6 +1140,8 @@ class OpenAIServer:
             else:
                 response = await self._create_chat_response(promise, postproc_params, disaggregated_params)
                 if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
+                    response.prompt_token_ids = promise.prompt_token_ids
+                if request.return_token_ids:
                     response.prompt_token_ids = promise.prompt_token_ids
                 raw_request.state.server_first_token_time = get_steady_clock_now_in_seconds()
                 await self._extract_metrics(promise, raw_request)
@@ -1260,6 +1266,8 @@ class OpenAIServer:
             if disaggregated_params and disaggregated_params.request_type and disaggregated_params.request_type == "context_only":
                 # Include prompt token ids for context-only requests
                 pp_result.prompt_token_ids = response.prompt_token_ids
+            if request.return_token_ids:
+                pp_result.prompt_token_ids = response.prompt_token_ids
             raw_request.state.server_first_token_time = get_steady_clock_now_in_seconds()
             await self._extract_metrics(response, raw_request)
 
@@ -1302,6 +1310,7 @@ class OpenAIServer:
 
         async def completion_generator(promise: RequestOutput, params: Optional[PostprocParams]):
             did_complete = False
+            is_first_chunk = request.return_token_ids
             try:
                 async for output in promise:
                     if not self.postproc_worker_enabled:
@@ -1316,6 +1325,9 @@ class OpenAIServer:
                                 did_complete = True
                                 prom_metrics["request_completed_total"] += 1
                                 prom_metrics[f"request_success_total{{finished_reason=\"{choice.finish_reason}\""] += 1
+                        if is_first_chunk:
+                            pp_res.prompt_token_ids = promise.prompt_token_ids
+                            is_first_chunk = False
                         pp_res_json = pp_res.model_dump_json(exclude_unset=True)
                         yield f"data: {pp_res_json}\n\n"
             finally:

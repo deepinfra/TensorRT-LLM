@@ -192,6 +192,7 @@ class CompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    prompt_token_ids: Optional[List[int]] = None
 
 def _response_format_to_guided_decoding_params(
     response_format: Optional[ResponseFormat],
@@ -361,6 +362,7 @@ class CompletionRequest(OpenAIBaseModel):
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     return_context_logits: bool = False
     detokenize: bool = True
+    return_token_ids: bool = False
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -608,6 +610,7 @@ class ChatCompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    prompt_token_ids: Optional[List[int]] = None
 
 
 class FunctionDefinition(OpenAIBaseModel):
@@ -684,6 +687,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     lora_request: Optional[LoRARequest] = None
+    return_token_ids: bool = False
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
