@@ -3214,7 +3214,7 @@ class PyExecutor:
             should_emit = (
                 request.py_decoding_iter == 1
                 or request.is_finished
-                or request.py_decoding_iter % self.stream_interval == 0
+                or request.py_decoding_iter % (request.py_stream_interval or self.stream_interval) == 0
                 or (self.stream_emit_interval_ms > 0
                     and request.py_last_stream_emit_time
                     and (now - request.py_last_stream_emit_time) * 1000 >
