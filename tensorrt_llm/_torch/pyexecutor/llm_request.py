@@ -624,7 +624,7 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         self.py_stream_interval = None
         self.py_stream_interval_ms = None
         self.py_last_stream_emit_time = None
-        self.py_iters_since_last_emit = 0
+        self.py_last_stream_emit_iter = 0
         self.is_attention_dp_dummy = False
         self.is_cuda_graph_dummy = False
         self.py_kv_transfer_start_time = None

@@ -3211,7 +3211,7 @@ class PyExecutor:
 
             request_done = False
             request.py_last_stream_emit_iter += 1
-            now = time.monotonic()
+            now = get_steady_clock_now_in_seconds()
 
             # Resolve effective intervals (per-request > engine > default)
             token_interval = request.py_stream_interval or self.stream_interval
