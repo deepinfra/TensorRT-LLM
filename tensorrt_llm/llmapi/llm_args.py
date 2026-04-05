@@ -2999,6 +2999,7 @@ class TorchLlmArgs(BaseLlmArgs):
     # TODO: make this a per-request parameter
     stream_interval: int = Field(
         default=1,
+        ge=1,
         description=
         "The iteration interval to create responses under the streaming mode. "
         "Set this to a larger value when the batch size is large, which helps reduce the streaming overhead.",
@@ -3220,13 +3221,6 @@ class TorchLlmArgs(BaseLlmArgs):
         else:
             self.decoding_config = None
 
-        return self
-
-    @model_validator(mode="after")
-    def validate_stream_interval(self):
-        if self.stream_interval <= 0:
-            raise ValueError(
-                f"stream_interval must be positive, got {self.stream_interval}")
         return self
 
     @model_validator(mode="after")
