@@ -292,6 +292,7 @@ class SamplingParams:
     skip_special_tokens: bool = True
     spaces_between_special_tokens: bool = True
     stream_interval: Optional[int] = None
+    stream_interval_ms: Optional[int] = None
 
     def __post_init__(self):
         if self.pad_id is None:
@@ -318,6 +319,10 @@ class SamplingParams:
         if self.stream_interval is not None and self.stream_interval <= 0:
             raise ValueError(
                 f"require stream_interval > 0, got stream_interval={self.stream_interval}"
+            )
+        if self.stream_interval_ms is not None and self.stream_interval_ms <= 0:
+            raise ValueError(
+                f"require stream_interval_ms > 0, got stream_interval_ms={self.stream_interval_ms}"
             )
         if self.top_p is not None and (self.top_p < 0 or self.top_p > 1):
             raise ValueError(f"require 0 <= top_p <= 1, got top_p={self.top_p}")

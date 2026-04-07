@@ -335,7 +335,7 @@ class PyExecutor:
         self.enable_iter_perf_stats = self.llm_args.enable_iter_perf_stats
         self.enable_iter_req_stats = self.llm_args.enable_iter_req_stats
         self.stream_interval = self.llm_args.stream_interval
-        self.stream_emit_interval_ms = self.llm_args.stream_emit_interval_ms
+        self.stream_interval_ms = self.llm_args.stream_interval_ms
         self.attention_dp_enable_balance = (
             self.llm_args.attention_dp_config is not None
             and self.llm_args.attention_dp_config.enable_balance)
@@ -3210,17 +3210,27 @@ class PyExecutor:
                 request.update_perf_metrics(self.iter_counter)
 
             request_done = False
+            request.py_last_stream_emit_iter += 1
             now = get_steady_clock_now_in_seconds()
-            should_emit = (
-                request.py_decoding_iter == 1
-                or request.is_finished
-                or request.py_decoding_iter % (request.py_stream_interval or self.stream_interval) == 0
-                or (self.stream_emit_interval_ms > 0
-                    and request.py_last_stream_emit_time
-                    and (now - request.py_last_stream_emit_time) * 1000 >
-                    self.stream_emit_interval_ms)
-            )
+
+            # Resolve effective intervals (per-request > engine > default)
+            token_interval = request.py_stream_interval or self.stream_interval
+            time_interval_ms = request.py_stream_interval_ms or self.stream_interval_ms or 0
+
+            # Time interval takes priority; fall back to token interval
+            if time_interval_ms > 0:
+                interval_triggered = (
+                    request.py_last_stream_emit_time is not None
+                    and (now - request.py_last_stream_emit_time) * 1000
+                    >= time_interval_ms)
+            else:
+                interval_triggered = request.py_last_stream_emit_iter >= token_interval
+
+            should_emit = (request.py_decoding_iter == 1
+                           or request.is_finished or interval_triggered)
+
             if should_emit:
+                request.py_last_stream_emit_iter = 0
                 request.py_last_stream_emit_time = now
                 response = request.create_response(False, self.dist.rank)
                 if response:
