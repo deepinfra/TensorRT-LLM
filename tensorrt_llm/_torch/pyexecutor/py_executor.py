@@ -3220,12 +3220,11 @@ class PyExecutor:
             # Check triggers
             # If token_interval is 1 (default value), we will try to use time_interval_ms
             token_triggered = (request.py_last_stream_emit_iter >= token_interval
-                              and not (token_interval == 1 and time_interval_ms > 0))
-            time_triggered = (
-                time_interval_ms > 0
-                and request.py_last_stream_emit_time is not None
-                and (now - request.py_last_stream_emit_time) * 1000
-                >= time_interval_ms)
+                               and not (token_interval == 1 and time_interval_ms > 0))
+            time_triggered = (time_interval_ms > 0
+                              and request.py_last_stream_emit_time is not None
+                              and (now - request.py_last_stream_emit_time) * 1000
+                              >= time_interval_ms)
 
             should_emit = (request.py_decoding_iter == 1
                            or request.is_finished or token_triggered
