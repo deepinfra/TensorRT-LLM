@@ -3010,7 +3010,7 @@ class TorchLlmArgs(BaseLlmArgs):
         description=
         "The time interval in milliseconds to create responses under the streaming mode. "
         "Set to 0 to disable time-based streaming throttle. "
-        "When both stream_interval and stream_interval_ms are set, whichever triggers first will emit a response.",
+        "When stream_interval_ms is set (> 0), it takes priority over stream_interval.",
     )
 
     force_dynamic_quantization: bool = Field(
