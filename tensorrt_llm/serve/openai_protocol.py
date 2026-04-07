@@ -189,6 +189,7 @@ class CompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    prompt_token_ids: Optional[List[int]] = None
 
 def _response_format_to_guided_decoding_params(
     response_format: Optional[ResponseFormat],
@@ -358,6 +359,7 @@ class CompletionRequest(OpenAIBaseModel):
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     return_context_logits: bool = False
     detokenize: bool = True
+    return_token_ids: bool = False
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -378,6 +380,20 @@ class CompletionRequest(OpenAIBaseModel):
     disaggregated_params: Optional[DisaggregatedParams] = Field(
         default=None,
         description=("Parameters for disaggregated serving"),
+    )
+    stream_interval: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
+    stream_interval_ms: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The time interval in milliseconds to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
     )
 
     # doc: end-completion-extra-params
@@ -425,6 +441,8 @@ class CompletionRequest(OpenAIBaseModel):
 
             # completion-extra-params
             add_special_tokens=self.add_special_tokens,
+            stream_interval=self.stream_interval,
+            stream_interval_ms=self.stream_interval_ms,
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=bool(self.logprobs),
@@ -604,6 +622,7 @@ class ChatCompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    prompt_token_ids: Optional[List[int]] = None
 
 
 class FunctionDefinition(OpenAIBaseModel):
@@ -680,6 +699,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     lora_request: Optional[LoRARequest] = None
+    return_token_ids: bool = False
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
@@ -738,6 +758,20 @@ class ChatCompletionRequest(OpenAIBaseModel):
         ("If specified, KV cache will be salted with the provided string "
          "to limit the kv cache reuse on with the requests having the same string."
          ))
+    stream_interval: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
+    stream_interval_ms: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The time interval in milliseconds to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
 
     # doc: end-chat-completion-extra-params
 
@@ -783,6 +817,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
 
             # chat-completion-extra-params
             add_special_tokens=self.add_special_tokens,
+            stream_interval=self.stream_interval,
+            stream_interval_ms=self.stream_interval_ms,
 
             # TODO: migrate to use logprobs and prompt_logprobs
             _return_log_probs=bool(self.logprobs),
@@ -894,6 +930,20 @@ class ResponsesRequest(OpenAIBaseModel):
     top_p: Optional[float] = None
     truncation: Optional[Literal["auto", "disabled"]] = "disabled"
     user: Optional[str] = None
+    stream_interval: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
+    stream_interval_ms: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The time interval in milliseconds to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
 
     request_id: str = Field(
         default_factory=lambda: f"resp_{str(uuid.uuid4().hex)}",
@@ -939,6 +989,8 @@ class ResponsesRequest(OpenAIBaseModel):
             logprobs=self.top_logprobs,
             stop_token_ids=stop_token_ids,
             guided_decoding=guided_decoding,
+            stream_interval=self.stream_interval,
+            stream_interval_ms=self.stream_interval_ms,
         )
 
     @model_validator(mode="before")

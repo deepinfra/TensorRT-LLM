@@ -685,9 +685,13 @@ class BaseLLM:
                 sampling_params.return_generation_logits = True
                 sampling_params._generation_logits_auto_enabled = True
 
-        if sampling_params._stream_interval is None:
-            sampling_params._stream_interval = getattr(self.args,
-                                                       "stream_interval", 1)
+        if sampling_params.stream_interval is None:
+            sampling_params.stream_interval = getattr(self.args,
+                                                      "stream_interval", 1)
+        if sampling_params.stream_interval_ms is None:
+            engine_val = getattr(self.args, "stream_interval_ms", 0)
+            if engine_val > 0:
+                sampling_params.stream_interval_ms = engine_val
         sampling_params.return_perf_metrics = sampling_params.return_perf_metrics or self.args.return_perf_metrics
         return sampling_params
 

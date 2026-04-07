@@ -532,7 +532,10 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         self.py_num_accepted_draft_tokens_indices = []
         self.py_rewind_draft_token_separate_adjustment = 0
         self.py_decoding_iter = 0
-        self.py_last_stream_emit_time = None
+        self.py_stream_interval = None
+        self.py_stream_interval_ms = None
+        self.py_last_stream_emit_time: Optional[float] = None
+        self.py_last_stream_emit_iter = 0
         self.is_attention_dp_dummy = False
         self.is_cuda_graph_dummy = False
         self.py_kv_transfer_start_time = None
@@ -833,6 +836,10 @@ def executor_request_to_llm_request(
         logprobs_mode=getattr(executor_request, "py_logprobs_mode",
                               LogprobMode.RAW),
     )
+    llm_request.py_stream_interval = getattr(executor_request,
+                                             "py_stream_interval", None)
+    llm_request.py_stream_interval_ms = getattr(executor_request,
+                                                "py_stream_interval_ms", None)
     if child_req_ids:
         for child_id in child_req_ids:
             llm_request.create_child_request(child_id)
