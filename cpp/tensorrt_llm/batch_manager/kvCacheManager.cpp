@@ -1876,6 +1876,47 @@ std::vector<WindowBlockManager::BatchSeqStats> WindowBlockManager::addSequenceBa
     return results;
 }
 
+SizeType32 WindowBlockManager::countReferencedReusableBlocks(
+    VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const
+{
+    // Like countReusableBlocks, but only counts blocks that have active references.
+    // Unreferenced reusable blocks sit in the eviction policy's free queues, so claiming
+    // them during allocation consumes a free block. The scheduler must not subtract these
+    // from the required count to avoid over-estimating available capacity.
+    auto blockedUniqueTokens
+        = chopVectorIntoBlocks<UniqueToken>(uniqueTokens, uniqueTokens.size(), mTokensPerBlock, false);
+    auto blockKeys = buildBlockKeys(blockedUniqueTokens, llmRequest);
+
+    SizeType32 reusableBlocks = 0;
+    std::lock_guard<std::mutex> lock(mCachedBlocksRootMutex);
+    auto searchRoot = mCachedBlocksRoot;
+
+    for (auto const& blockKey : blockKeys)
+    {
+        auto [partialMatch, numMatched, matchingBlock] = searchRoot != nullptr
+            ? searchRoot->findMatchingBlock(blockKey, false, false)
+            : std::make_tuple(false, 0, nullptr);
+
+        if (matchingBlock == nullptr)
+        {
+            // No more matching blocks found
+            break;
+        }
+
+        // Only count blocks that have references (i.e. shared with active sequences).
+        // These blocks are NOT in the free queue, so reusing them is truly "free".
+        if (matchingBlock->hasRefs())
+        {
+            ++reusableBlocks;
+        }
+        searchRoot = std::move(matchingBlock);
+    }
+
+    TLLM_LOG_DEBUG(
+        "%s::countReferencedReusableBlocks - Found %d referenced reusable blocks", mLogPrefix.c_str(), reusableBlocks);
+    return reusableBlocks;
+}
+
 bool WindowBlockManager::blockInRadixTree(BlockPtr const& block)
 {
     return !block->getUniqueTokens().empty() && block->getPrevBlock() != nullptr;
@@ -1973,6 +2014,10 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
                 if (matchingBlock->hasRefs() || !matchingBlock->isLeaf())
                 {
                     // Somebody else is using block or it is not a leaf, copy reusable tokens
+                    TLLM_CHECK_WITH_INFO(hasFreeBlocks(),
+                        "%s::loadOrAllocateBlocks - No free blocks to copy partial block for request %lu at block %d "
+                        "(free=%d)",
+                        mLogPrefix.c_str(), sequence.getRequestId(), bi, getNumFreeBlocks());
                     auto newBlock = getFreeBlock(
                         sequence, matchingBlock->getPriority(), matchingBlock->getDurationMs(), mode, directory);
                     mTransferManager->onboard(matchingBlock, newBlock, mPools, numMatched, mode, directory);
@@ -2054,7 +2099,10 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
             }
 
             // If we haven't set a priority, set it to the default priority level (low)
-            freeBlock = getFreeBlock(sequence,
+            TLLM_CHECK_WITH_INFO(hasFreeBlocks(),
+                "%s::loadOrAllocateBlocks - No free blocks for request %lu at shared block %d (free=%d)",
+                mLogPrefix.c_str(), sequence.getRequestId(), bi, getNumFreeBlocks());
+            auto freeBlock = getFreeBlock(sequence,
                 perBlockRetentions[bi].retentionPriority.value_or(
                     executor::KvCacheRetentionConfig::kDefaultRetentionPriority),
                 perBlockRetentions[bi].durationMs, mode, directory, /*wantPlaceholder=*/!shouldAllocate);
@@ -2082,6 +2130,9 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
         for (SizeType32 beamIdx = 0; beamIdx < beamWidth; ++beamIdx)
         {
             // If we haven't set a priority, set it to the default priority level (low)
+            TLLM_CHECK_WITH_INFO(hasFreeBlocks(),
+                "%s::loadOrAllocateBlocks - No free blocks for request %lu at non-shared block %d beam %d (free=%d)",
+                mLogPrefix.c_str(), sequence.getRequestId(), bi, beamIdx, getNumFreeBlocks());
             auto freeBlock = getFreeBlock(sequence,
                 perBlockRetentions[bi].retentionPriority.value_or(
                     executor::KvCacheRetentionConfig::kDefaultRetentionPriority),
@@ -3269,7 +3320,11 @@ SizeType32 KVCacheManager::getNeededBlocksOneStep(LlmRequest const& req, bool tw
             = tc::ceilDiv(numUnSharedTokens, getTokensPerBlock()) * req.mSamplingConfig.beamWidth;
         auto numRequiredBlocks = numSharedBlocks + numUnSharedBlocks;
 
-        // Subtract reusable blocks if block reuse is enabled and we're not using variable window attention
+        // Subtract only referenced reusable blocks (blocks shared with active sequences).
+        // Unreferenced reusable blocks are in the eviction policy's free queues, so claiming
+        // them during allocation still consumes a free block. Subtracting all reusable blocks
+        // (including unreferenced) would double-count them against the free pool, causing the
+        // MAX_UTILIZATION scheduler to over-estimate available capacity.
         if (mEnableBlockReuse && !mBlockManager.isVariableWindow() && !isCrossKv()
             && !req.isDisaggGenerationInitState())
         {
@@ -3382,9 +3437,14 @@ SizeType32 KVCacheManager::getRemainingBlocksToCompletion(
         }
     }
 
-    // Only subtract reusable blocks that are already allocated (have active refs). See the
-    // comment in getNeededBlocksOneStep for the full rationale — free reusable blocks must
-    // not be subtracted because they are already counted in the eviction policy's free count.
+    // Calculate reusable blocks to subtract from context blocks (for new context requests)
+    // Only apply reuse accounting if:
+    // 1. Block reuse is enabled
+    // 2. Not using variable window attention
+    // 3. Request is in context init state and first context chunk
+    // 4. No blocks have been allocated yet for this sequence (otherwise reuse already applied during allocation)
+    // Use countReferencedReusableBlocks to avoid double-counting unreferenced blocks that are
+    // also in the free pool (same fix as getNeededBlocksOneStep).
     SizeType32 numReusableContextBlocks = 0;
     if (mEnableBlockReuse && !mBlockManager.isVariableWindow() && req.isContextInitState() && req.isFirstContextChunk()
         && numAllocBlocksPerBeam == 0)
@@ -3405,7 +3465,7 @@ SizeType32 KVCacheManager::getRemainingBlocksToCompletion(
             std::min({summary.reusableBlocksAll, numContextBlocks, maxRecoverableBlocks}) * getTokensPerBlock());
         TLLM_LOG_DEBUG(
             "getRemainingBlocksToCompletion: request ID %lu, numContextBlocks=%d, "
-            "numReusableBlocksAllocated=%d, numReusableBlocksAll=%d, "
+            "numReusableBlocks=%d, "
             "numReusableContextBlocks=%d, numGenBlocksPerBeam=%d",
             req.mRequestId, numContextBlocks, summary.reusableBlocksAllocated, summary.reusableBlocksAll,
             numReusableContextBlocks, numGenBlocksPerBeam);
@@ -3546,6 +3606,12 @@ PrefixReuseSummary KVCacheManager::analyzePrefixReuse(
     VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const
 {
     return mBlockManager.analyzePrefixReuse(uniqueTokens, llmRequest);
+}
+
+SizeType32 KVCacheManager::countReferencedReusableBlocks(
+    VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const
+{
+    return mBlockManager.countReferencedReusableBlocks(uniqueTokens, llmRequest);
 }
 
 void KVCacheManager::addSequence(
