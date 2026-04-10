@@ -2823,6 +2823,20 @@ class NVFP4TRTLLMGenFusedMoEBaseMethod(NVFP4FusedMoEMethod):
     def load_quant_scales(self, module: torch.nn.Module, weights: Dict):
         super().load_quant_scales(module, weights)
 
+        # Debug: print scale values to diagnose NVFP4 accuracy issues
+        print(f"[NVFP4 DEBUG] class={self.__class__.__name__} "
+              f"fc31_input_scale={module.fc31_input_scale.data.item():.6e}, "
+              f"fc2_input_scale={module.fc2_input_scale.data.item():.6e}",
+              flush=True)
+        print(f"[NVFP4 DEBUG] fc31_alpha min={module.fc31_alpha.data.min().item():.6e} "
+              f"max={module.fc31_alpha.data.max().item():.6e} "
+              f"mean={module.fc31_alpha.data.mean().item():.6e}",
+              flush=True)
+        print(f"[NVFP4 DEBUG] fc2_alpha min={module.fc2_alpha.data.min().item():.6e} "
+              f"max={module.fc2_alpha.data.max().item():.6e} "
+              f"mean={module.fc2_alpha.data.mean().item():.6e}",
+              flush=True)
+
         # last step: load fc31_scale_c
         # c_global_sf: fc2_input_scale
         # For gated activations (SwiGlu), scale_c_fc1 includes both input and weight scales

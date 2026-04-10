@@ -44,7 +44,8 @@ from .quantization import (
     W4A16MXFP4TRTLLMGenFusedMoEMethod)
 # isort: on
 from .routing import (BaseMoeRoutingMethod, DeepSeekV3MoeRoutingMethod,
-                      DefaultMoeRoutingMethod)
+                      DefaultMoeRoutingMethod, MiniMaxM2MoeRoutingMethod,
+                      RoutingMethodType)
 
 
 class TRTLLMGenFusedMoE(MoE):
@@ -572,6 +573,12 @@ class TRTLLMGenFusedMoE(MoE):
             n_group = self.routing_method.routing_impl.n_group
             topk_group = self.routing_method.routing_impl.topk_group
             routed_scaling_factor = self.routing_method.routing_impl.routed_scaling_factor
+        elif isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
+            top_k = self.routing_method.top_k
+            routing_bias = self.routing_method.e_score_correction_bias
+            n_group = None
+            topk_group = None
+            routed_scaling_factor = None
         else:
             top_k = self.routing_method.top_k
             routing_bias = None
@@ -580,6 +587,19 @@ class TRTLLMGenFusedMoE(MoE):
             routed_scaling_factor = None
 
         routing_bias = routing_bias if router_logits is not None else None
+        if routing_bias is not None and routing_bias.dtype != torch.bfloat16:
+            routing_bias = routing_bias.to(torch.bfloat16)
+
+        # DeepSeekV3 and MiniMax2 require float32 router_logits for the C++ kernel;
+        # all other routing methods require bfloat16.
+        if router_logits is not None:
+            if isinstance(self.routing_method, (DeepSeekV3MoeRoutingMethod, MiniMaxM2MoeRoutingMethod)):
+                if router_logits.dtype != torch.float32:
+                    router_logits = router_logits.to(torch.float32)
+            elif router_logits.dtype != torch.bfloat16:
+                router_logits = router_logits.to(torch.bfloat16)
+
+        kernel_routing_method_type = self.routing_method.routing_method_type
 
         if token_selected_experts is not None:
             # for cases like deepep low latency where fake top_k=1 might be used
@@ -594,7 +614,7 @@ class TRTLLMGenFusedMoE(MoE):
 
         if self.has_deepseek_fp8_block_scales:
             assert do_finalize, "fp8_block_scale_moe_runner does not support do_finalize=False"
-            # fp8_block_scale_moe_runner needs 2D shape for x_sf and only support SM100+
+            # fp8_quantize_1x128 returns 2D x_sf on SM100+, 1D on SM90
             if x_sf is None:
                 x, x_sf = torch.ops.trtllm.fp8_quantize_1x128(x)
             result = self.op_backend.run_fp8_block_scale_moe(
@@ -614,7 +634,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 topk_weights=token_final_scales,
                 topk_ids=token_selected_experts,
                 output=moe_output,
@@ -658,7 +678,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 do_finalize=do_finalize,
                 topk_weights=token_final_scales,
                 topk_ids=token_selected_experts,
@@ -703,7 +723,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 do_finalize=do_finalize,
                 act_type=0,
                 topk_weights=token_final_scales,
@@ -749,7 +769,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                self.routing_method.routing_method_type,
+                kernel_routing_method_type,
                 0,  # act_type
                 token_final_scales,
                 token_selected_experts,
@@ -959,6 +979,14 @@ class TRTLLMGenFusedMoE(MoE):
                 sizes=None if use_dp_padding else all_rank_num_tokens)
         else:
             # No communication path: use non-post-quant-comm quantization
+            # For routing methods not supported by the C++ kernel (e.g., MiniMax2),
+            # do routing in Python and pass pre-computed topk_ids/topk_weights.
+            if isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
+                token_selected_experts, token_final_scales = self.routing_method.apply(
+                    router_logits)
+                token_selected_experts = token_selected_experts.to(torch.int32)
+                if token_final_scales is not None:
+                    token_final_scales = token_final_scales.to(torch.bfloat16)
             x, x_sf = self.quantize_input(x, post_quant_comm=False)
 
         moe_output: Optional[torch.Tensor] = None
@@ -971,7 +999,11 @@ class TRTLLMGenFusedMoE(MoE):
 
         # Call the extracted run_moe interface
         # Determine router_logits based on post_quant_comm
-        router_logits_arg = None if post_quant_comm else router_logits
+        # For MiniMax2 (unsupported by C++ routing kernel), always use separated routing
+        if post_quant_comm or isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
+            router_logits_arg = None
+        else:
+            router_logits_arg = router_logits
 
         final_hidden_states = self.run_moe(
             x=x,
@@ -1069,8 +1101,9 @@ class TRTLLMGenFusedMoE(MoE):
         else:
             is_deepseek_v3_routing = isinstance(self.routing_method,
                                                 DeepSeekV3MoeRoutingMethod)
+            is_minimax_routing = isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod)
             top_k = self.routing_method.routing_impl.top_k if is_deepseek_v3_routing else self.routing_method.top_k
-            routing_bias = self.routing_method.e_score_correction_bias if is_deepseek_v3_routing else None
+            routing_bias = self.routing_method.e_score_correction_bias if (is_deepseek_v3_routing or is_minimax_routing) else None
             return fp4_block_scale_fake_output_without_finalize(
                 x,
                 self.num_experts,
