@@ -846,9 +846,9 @@ def find_mm_token_positions(
             mm_token_ids = torch.unique(mm_token_ids)
         mm_mask = torch.isin(input_ids, mm_token_ids)
 
-    # If no multimodal tokens found, return empty list
+    # If no multimodal tokens found, return empty lists
     if not torch.any(mm_mask):
-        return []
+        return [], []
 
     # Get positions of all multimodal tokens
     mm_positions = torch.where(mm_mask)[0].tolist()

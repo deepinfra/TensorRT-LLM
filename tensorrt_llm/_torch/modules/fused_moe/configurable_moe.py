@@ -631,7 +631,11 @@ class ConfigurableMoE(MoE):
 
         # ========== Step 2: Apply routing (only if backend supports load balancer) ==========
 
-        if self.backend._supports_load_balancer():
+        needs_separated_routing = (
+            self.backend._supports_load_balancer()
+        )
+
+        if needs_separated_routing:
             # Separated routing: ConfigurableMoE calls routing_method
             token_selected_experts, token_final_scales = self.routing_method.apply(router_logits)
 

@@ -138,8 +138,14 @@ class KvCacheCreator:
     def _get_kv_size_per_token(self):
         model_config = self._model_engine.model.model_config
         mapping = self._mapping
+        logger.info(
+            f"[DEBUG _get_kv_size_per_token] kv_cache_manager_cls={self._kv_cache_manager_cls.__name__}"
+        )
         kv_size_per_token = self._kv_cache_manager_cls.get_cache_size_per_token(
             model_config, mapping, tokens_per_block=self._tokens_per_block)
+        logger.info(
+            f"[DEBUG _get_kv_size_per_token] main model kv_size_per_token={kv_size_per_token}"
+        )
         if self._draft_model_engine is not None:
             draft_model_config = self._draft_model_engine.model.model_config
             draft_kv_cache_manager_cls = self._get_model_kv_cache_manager_cls(
@@ -169,6 +175,9 @@ class KvCacheCreator:
                     mapping,
                     tokens_per_block=self._tokens_per_block,
                     num_layers=self._get_num_draft_layers())
+        logger.info(
+            f"[DEBUG _get_kv_size_per_token] final kv_size_per_token={kv_size_per_token}"
+        )
         return kv_size_per_token
 
     def _cal_max_memory(self, peak_memory, total_gpu_memory, fraction,
@@ -645,9 +654,9 @@ class KvCacheCreator:
         return get_num_spec_layers(self._speculative_config)
 
     def _create_one_model_draft_kv_cache_manager(
-        self,
-        estimating_kv_cache: bool = False,
-        kv_cache_config_override: Optional[KvCacheConfig] = None,
+            self,
+            estimating_kv_cache: bool = False,
+            target_kv_cache_manager: Optional[KVCacheManager] = None,
     ) -> Optional[KVCacheManager]:
         """
         Create a KV cache manager for draft model layers in one-model mode
@@ -694,12 +703,48 @@ class KvCacheCreator:
         # the sparse_attention_config. Get it from effective_draft_config which
         # falls back to the target model's config for MTP mode.
         sparse_attn_config = effective_draft_config.sparse_attention_config
-        draft_kv_config = kv_cache_config_override if kv_cache_config_override is not None else self._kv_cache_config
+
+        # The scheduler only accounts for target KV cache capacity when
+        # scheduling, so the draft must have enough blocks for all sequences
+        # the scheduler admits.  When target uses MLA (compressed KV) but draft
+        # uses standard MHA (e.g., Eagle3 with Llama-style attention), the
+        # draft's per-token cost can be comparable to the target's despite
+        # having far fewer layers.  Relying on leftover GPU memory
+        # (free_gpu_memory_fraction of what remains after target allocation)
+        # can leave the draft undersized.  Use the target's block count to
+        # compute the minimum tokens the draft needs.
+        draft_kv_cache_config = self._kv_cache_config.model_copy(update={'host_cache_size': 0})
+        if target_kv_cache_manager is not None:
+            target_blocks = target_kv_cache_manager.blocks_in_primary_pool
+            min_draft_tokens = target_blocks * self._tokens_per_block
+
+            # Log what the draft would get from leftover GPU memory
+            free_mem, _ = torch.cuda.mem_get_info()
+            logger.info(
+                f"Draft KV cache sizing: "
+                f"gpu_free_mem={free_mem / (1 << 30):.2f}GiB, "
+                f"target_blocks={target_blocks}, "
+                f"min_draft_tokens={min_draft_tokens}, "
+                f"current_max_tokens={self._kv_cache_config.max_tokens}, "
+                f"free_gpu_memory_fraction={self._kv_cache_config.free_gpu_memory_fraction}")
+
+            current_max = self._kv_cache_config.max_tokens
+            if current_max is None or current_max < min_draft_tokens:
+                draft_kv_cache_config = draft_kv_cache_config.model_copy(
+                    update={
+                        'max_tokens': min_draft_tokens,
+                        'free_gpu_memory_fraction': None,
+                    })
+                logger.info(
+                    f"Draft KV cache: adjusting max_tokens "
+                    f"{current_max} -> {min_draft_tokens} "
+                    f"to match target's {target_blocks} blocks")
+
         return _create_kv_cache_manager(
             model_engine=None,
             kv_cache_manager_cls=draft_kv_cache_manager_cls,
             mapping=self._mapping,
-            kv_cache_config=draft_kv_config,
+            kv_cache_config=draft_kv_cache_config,
             tokens_per_block=self._tokens_per_block,
             max_seq_len=self._max_seq_len,
             max_batch_size=self._max_batch_size,
@@ -795,7 +840,7 @@ class KvCacheCreator:
         elif self._should_create_separate_draft_kv_cache():
             draft_kv_cache_manager = self._create_one_model_draft_kv_cache_manager(
                 estimating_kv_cache,
-                kv_cache_config_override=draft_kv_cache_config)
+                target_kv_cache_manager=kv_cache_manager)
 
         resources[ResourceManagerType.KV_CACHE_MANAGER] = kv_cache_manager
         resources[
