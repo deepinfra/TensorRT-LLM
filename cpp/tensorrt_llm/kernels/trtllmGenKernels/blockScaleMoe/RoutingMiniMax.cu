@@ -269,13 +269,13 @@ int32_t constexpr getMaxNumExperts(int32_t numExperts)
 #define LAUNCH_ROUTING_MINIMAX_IMPL(data, coopLaunch, kernel, numBlocks, numThreads, smemSize, stream, numExperts)     \
     if (data.mDtypeExpW == tg::Dtype::Fp32)                                                                            \
     {                                                                                                                  \
-        LAUNCH_TILEN(data, coopLaunch, LAUNCH_ESC(float, float, numExperts, false), kernel, numBlocks, numThreads,     \
-            smemSize, stream);                                                                                         \
+        LAUNCH_TILEN(data, coopLaunch, LAUNCH_ESC(float, float, numExperts, MaxSupportedTopExperts, false), kernel,    \
+            numBlocks, numThreads, smemSize, stream);                                                                  \
     }                                                                                                                  \
     else if (data.mDtypeExpW == tg::Dtype::Bfloat16)                                                                   \
     {                                                                                                                  \
-        LAUNCH_TILEN(data, coopLaunch, LAUNCH_ESC(float, __nv_bfloat16, numExperts, false), kernel, numBlocks,         \
-            numThreads, smemSize, stream);                                                                             \
+        LAUNCH_TILEN(data, coopLaunch, LAUNCH_ESC(float, __nv_bfloat16, numExperts, MaxSupportedTopExperts, false),    \
+            kernel, numBlocks, numThreads, smemSize, stream);                                                          \
     }                                                                                                                  \
     else                                                                                                               \
     {                                                                                                                  \
