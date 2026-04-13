@@ -2060,7 +2060,7 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
             TLLM_CHECK_WITH_INFO(hasFreeBlocks(),
                 "%s::loadOrAllocateBlocks - No free blocks for request %lu at shared block %d (free=%d)",
                 mLogPrefix.c_str(), sequence.getRequestId(), bi, getNumFreeBlocks());
-            auto freeBlock = getFreeBlock(sequence,
+            freeBlock = getFreeBlock(sequence,
                 perBlockRetentions[bi].retentionPriority.value_or(
                     executor::KvCacheRetentionConfig::kDefaultRetentionPriority),
                 perBlockRetentions[bi].durationMs, mode, directory, /*wantPlaceholder=*/!shouldAllocate);
