@@ -760,8 +760,8 @@ class KimiK25VisionEncoder(nn.Module):
         placeholders_separator="\n",
     ))
 @register_vision_encoder(KimiK25VisionEncoder, vlm_base_model=MoonViT3dModel)
-@register_auto_model("KimiK25ForConditionalGeneration")
-class KimiK25ForConditionalGeneration(DeepseekV3ForCausalLM):
+@register_auto_model("KimiK25VisionForConditionalGeneration")
+class KimiK25VisionForConditionalGeneration(DeepseekV3ForCausalLM):
     """Kimi-K2.5 VLM: DeepseekV3 LLM + MoonViT3d vision + PatchMergerMLP.
 
     Extends DeepseekV3ForCausalLM directly so Eagle3 speculative decoding
@@ -909,7 +909,7 @@ class KimiK25ForConditionalGeneration(DeepseekV3ForCausalLM):
 # Weight Mapper
 # ============================================================================
 
-@register_mapper("HF", "KimiK25ForConditionalGeneration")
+@register_mapper("HF", "KimiK25VisionForConditionalGeneration")
 class KimiK25HfWeightMapper(HfWeightMapper):
     """Weight mapper that strips 'language_model.' prefix from LLM weights."""
 
