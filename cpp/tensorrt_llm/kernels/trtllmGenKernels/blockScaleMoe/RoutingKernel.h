@@ -362,8 +362,8 @@ struct Data : public DataBase
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <typename InputT_, typename OutputT_, int MaxNumExperts_, bool DoSoftmaxBeforeTopK_, bool isPow2_, bool UsePdl_>
-struct KernelParams : public KernelParamsBase<InputT_, OutputT_, MaxNumExperts_, isPow2_, UsePdl_>
+template <typename InputT_, typename OutputT_, int MaxNumExperts_, int MaxNumTopExperts_, bool DoSoftmaxBeforeTopK_, bool isPow2_, bool UsePdl_>
+struct KernelParams : public KernelParamsBase<InputT_, OutputT_, MaxNumExperts_, MaxNumTopExperts_, isPow2_, UsePdl_>
 {
     using InputT = InputT_;
     using OutputT = OutputT_;
