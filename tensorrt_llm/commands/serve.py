@@ -1102,7 +1102,7 @@ def launch_visual_gen_server(
     "gRPC server accepts pre-tokenized requests and returns raw token IDs.",
     status="prototype")
 @stability_option(
-    "--served_model_name",
+    "--served-model-name",
     type=str,
     default=None,
     help="The model name used in the API. If not specified, the model path is "
