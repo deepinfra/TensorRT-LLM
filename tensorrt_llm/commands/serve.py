@@ -847,7 +847,7 @@ class ChoiceWithAlias(click.Choice):
     help="Run gRPC server instead of OpenAI HTTP server. "
     "gRPC server accepts pre-tokenized requests and returns raw token IDs.")
 @click.option(
-    "--served_model_name",
+    "--served-model-name",
     type=str,
     default=None,
     help=help_info_with_stability_tag(
