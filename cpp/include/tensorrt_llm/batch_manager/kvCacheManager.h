@@ -942,11 +942,6 @@ public:
     [[nodiscard]] SizeType32 countReusableBlocks(
         VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest, bool onlyAllocated = false) const;
 
-    //! \brief Count referenced reusable blocks (blocks shared with active sequences, not in free queue).
-    //! \details Used by the scheduler to avoid double-counting blocks that are both free and reusable.
-    [[nodiscard]] SizeType32 countReferencedReusableBlocks(
-        VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const;
-
     [[nodiscard]] runtime::BufferManager const& getBufferManager() const
     {
         return mBufferManager;
@@ -1282,11 +1277,6 @@ public:
     //! \details WILL NOT WORK FOR VARIABLE WINDOW ATTENTION.
     [[nodiscard]] SizeType32 countReusableBlocks(
         VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest, bool onlyAllocated = false) const;
-
-    //! \brief Count referenced reusable blocks (blocks shared with active sequences, not in free queue).
-    //! \details WILL NOT WORK FOR VARIABLE WINDOW ATTENTION.
-    [[nodiscard]] SizeType32 countReferencedReusableBlocks(
-        VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const;
 
     //! \brief Bring block from primary to secondary memory for window size.
     //! \details Does nothing if block is already in primary memory.
@@ -1796,11 +1786,6 @@ public:
         VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest, bool onlyAllocated = false) const
         = 0;
 
-    //! \brief Count referenced reusable blocks (blocks shared with active sequences, not in free queue).
-    [[nodiscard]] virtual SizeType32 countReferencedReusableBlocks(
-        VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const
-        = 0;
-
     //! \brief Store full context blocks contributed by llmRequest.
     //! \details These blocks become reusable from next step.
     virtual void storeContextBlocks(LlmRequest const& llmRequest) = 0;
@@ -2194,10 +2179,6 @@ public:
     //! \brief Count the number of full blocks that can be reused from the KV cache for a given request.
     [[nodiscard]] SizeType32 countReusableBlocks(
         VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest, bool onlyAllocated = false) const override;
-
-    //! \brief Count referenced reusable blocks (blocks shared with active sequences, not in free queue).
-    [[nodiscard]] SizeType32 countReferencedReusableBlocks(
-        VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const override;
 
     //! \brief Store full context blocks contributed by llmRequest.
     //! \details These blocks become reusable from next step.
