@@ -91,6 +91,15 @@ void MicroBatchScheduler::fitDraftTokens(RequestVector& contextsToBeChunked,
                 // How much space is remaining before reaching ctxTokensCapacity?
                 remainingSpaceForDraftTokens
                     = std::min(remainingSpaceForDraftTokens, ctxTokensCapacity.value() - numCtxTokens);
+            }
+            // Clamp to [0, numDraftTokens]: earlier mins can go negative when the batch has already
+            // exceeded ctxTokensCapacity or the chunk is at maxContextLength, which would otherwise
+            // make draftTokensToDiscard exceed the number of draft tokens and trip the assertion in
+            // LlmRequest::discardDraftTokens.
+            remainingSpaceForDraftTokens
+                = std::max<SizeType32>(0, std::min(remainingSpaceForDraftTokens, llmReq->getNumDraftTokens()));
+            if (ctxTokensCapacity)
+            {
                 numCtxTokens += remainingSpaceForDraftTokens;
             }
             // Discard draft tokens.
