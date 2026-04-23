@@ -1436,6 +1436,31 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
     auto searchRoot = mCachedBlocksRoot;
     std::set<KVCacheBlock::IdType> reusedBlockIds;
 
+    // [kv-debug] Per-request breakdown of how each context block was obtained.
+    // Used to correlate against admission-time demand when "No free blocks" fires.
+    SizeType32 const dbgEntryFreePrimary = getNumFreeBlocks();
+    SizeType32 const dbgEntryFreeSecondary = mEvictionPolicy->getNumFreeBlocks(kSecondaryLevel);
+    SizeType32 dbgMatchPrimRef{0};     // hasRefs && isPrimary (0 primary cost)
+    SizeType32 dbgMatchPrimFree{0};    // !hasRefs && isPrimary (1 primary, claim from free)
+    SizeType32 dbgMatchSecondary{0};   // !isPrimary (1 primary, onboard)
+    SizeType32 dbgPartialCopy{0};      // partial + (hasRefs || !isLeaf) (1 primary, copy)
+    SizeType32 dbgPartialLeaf{0};      // partial + free leaf (1 primary, claim)
+    SizeType32 dbgNoMatch{0};          // no-match fresh alloc (1 primary)
+    SizeType32 dbgNonSharedBeam{0};    // non-shared beam alloc (1 primary each)
+    auto dbgSummary = [&](char const* event)
+    {
+        return tensorrt_llm::common::fmtstr(
+            "rid=%lu ws=%d %s | numCtxBlocks=%d | "
+            "matched[primRef=%d primFree=%d secondary=%d partialCopy=%d partialLeaf=%d] "
+            "noMatch=%d nonSharedBeam=%d | "
+            "free(prim)=%d->%d free(sec)=%d->%d",
+            sequence.getRequestId(), mWindowSize, event, numContextBlocks, dbgMatchPrimRef, dbgMatchPrimFree,
+            dbgMatchSecondary, dbgPartialCopy, dbgPartialLeaf, dbgNoMatch, dbgNonSharedBeam, dbgEntryFreePrimary,
+            getNumFreeBlocks(), dbgEntryFreeSecondary, mEvictionPolicy->getNumFreeBlocks(kSecondaryLevel));
+    };
+    TLLM_LOG_INFO("[kv-debug] loadOrAllocateBlocks BEGIN: rid=%lu ws=%d numCtxBlocks=%d free(prim)=%d free(sec)=%d",
+        sequence.getRequestId(), mWindowSize, numContextBlocks, dbgEntryFreePrimary, dbgEntryFreeSecondary);
+
     // The last block cannot be shared between beams because it will be written to.
     // Make sure a unique block is allocated per beam.
     auto const beamWidth = sequence.getBeamWidth();
@@ -1455,6 +1480,11 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
         {
             KVCacheBlock::IdType matchingBlockId = matchingBlock->getBlockId();
 
+            // [kv-debug] Classify match BEFORE any mutation changes isPrimary/hasRefs state.
+            bool const dbgMatchIsPrimary = !matchingBlock->isPlaceholder() && matchingBlock->isPrimary();
+            bool const dbgMatchHasRefs = matchingBlock->hasRefs();
+            bool const dbgMatchIsLeaf = matchingBlock->isLeaf();
+
             numMatchedTokens += numMatched > 0 ? numMatched : blockItr->uniqueTokens.size();
             if (!matchingBlock->isPlaceholder())
             {
@@ -1472,11 +1502,13 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
             {
                 if (matchingBlock->hasRefs() || !matchingBlock->isLeaf())
                 {
+                    ++dbgPartialCopy;
                     // Somebody else is using block or it is not a leaf, copy reusable tokens
                     TLLM_CHECK_WITH_INFO(hasFreeBlocks(),
                         "%s::loadOrAllocateBlocks - No free blocks to copy partial block for request %lu at block %d "
-                        "(free=%d)",
-                        mLogPrefix.c_str(), sequence.getRequestId(), bi, getNumFreeBlocks());
+                        "(free=%d) [kv-debug] %s",
+                        mLogPrefix.c_str(), sequence.getRequestId(), bi, getNumFreeBlocks(),
+                        dbgSummary("ASSERT-partial-copy").c_str());
                     auto newBlock = getFreeBlock(
                         sequence, matchingBlock->getPriority(), matchingBlock->getDurationMs(), mode, directory);
                     mTransferManager->onboard(matchingBlock, newBlock, mPools, numMatched, mode, directory);
@@ -1493,6 +1525,7 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
                 }
                 else
                 {
+                    ++dbgPartialLeaf;
                     // Leaf block that nobody is using. Make block private and reuse
                     freeLeafBlock(matchingBlock);
                     mEvictionPolicy->claimBlock(
@@ -1504,12 +1537,20 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
             }
             else
             {
+                // [kv-debug] Full-match classification by tier.
+                if (!dbgMatchIsPrimary)
+                    ++dbgMatchSecondary;
+                else if (dbgMatchHasRefs)
+                    ++dbgMatchPrimRef;
+                else
+                    ++dbgMatchPrimFree;
                 searchRoot = matchingBlock;
                 // Recover block and reuse
                 mEvictionPolicy->claimBlock(
                     matchingBlock, perBlockRetentions[bi].retentionPriority, perBlockRetentions[bi].durationMs);
-                TLLM_LOG_DEBUG("%s::loadOrAllocateBlocks for request %lu - Matched full block %d", mLogPrefix.c_str(),
-                    sequence.getRequestId(), matchingBlockId);
+                TLLM_LOG_DEBUG("%s::loadOrAllocateBlocks for request %lu - Matched full block %d [tier=%s refs=%d leaf=%d]",
+                    mLogPrefix.c_str(), sequence.getRequestId(), matchingBlockId,
+                    dbgMatchIsPrimary ? "primary" : "secondary", dbgMatchHasRefs, dbgMatchIsLeaf);
             }
             onboardBlock(sequence, matchingBlock, mode, directory);
             addBlockToAllBeams(matchingBlock, sequence);
@@ -1540,10 +1581,12 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
                     mLogPrefix.c_str(), bi, shouldAllocate, sequence.getRequestId());
             }
 
+            ++dbgNoMatch;
             // If we haven't set a priority, set it to the default priority level (low)
             TLLM_CHECK_WITH_INFO(hasFreeBlocks(),
-                "%s::loadOrAllocateBlocks - No free blocks for request %lu at shared block %d (free=%d)",
-                mLogPrefix.c_str(), sequence.getRequestId(), bi, getNumFreeBlocks());
+                "%s::loadOrAllocateBlocks - No free blocks for request %lu at shared block %d (free=%d) [kv-debug] %s",
+                mLogPrefix.c_str(), sequence.getRequestId(), bi, getNumFreeBlocks(),
+                dbgSummary("ASSERT-shared").c_str());
             freeBlock = getFreeBlock(sequence,
                 perBlockRetentions[bi].retentionPriority.value_or(
                     executor::KvCacheRetentionConfig::kDefaultRetentionPriority),
@@ -1571,10 +1614,13 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
         // This work is described in JIRA task https://jirasw.nvidia.com/browse/TRTLLM-2069.
         for (SizeType32 beamIdx = 0; beamIdx < beamWidth; ++beamIdx)
         {
+            ++dbgNonSharedBeam;
             // If we haven't set a priority, set it to the default priority level (low)
             TLLM_CHECK_WITH_INFO(hasFreeBlocks(),
-                "%s::loadOrAllocateBlocks - No free blocks for request %lu at non-shared block %d beam %d (free=%d)",
-                mLogPrefix.c_str(), sequence.getRequestId(), bi, beamIdx, getNumFreeBlocks());
+                "%s::loadOrAllocateBlocks - No free blocks for request %lu at non-shared block %d beam %d (free=%d) "
+                "[kv-debug] %s",
+                mLogPrefix.c_str(), sequence.getRequestId(), bi, beamIdx, getNumFreeBlocks(),
+                dbgSummary("ASSERT-nonshared").c_str());
             auto freeBlock = getFreeBlock(sequence,
                 perBlockRetentions[bi].retentionPriority.value_or(
                     executor::KvCacheRetentionConfig::kDefaultRetentionPriority),
@@ -1603,6 +1649,7 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
         numMatchedTokens = (latestMatchingNonPlaceholderBlockIdx + 1) * mTokensPerBlock;
     }
     sequence.setCurrentPrepopulatedPromptLen(numMatchedTokens);
+    TLLM_LOG_INFO("[kv-debug] loadOrAllocateBlocks END: %s", dbgSummary("END").c_str());
     return sequence.getCurrentPrepopulatedPromptLen();
 }
 
@@ -2820,6 +2867,10 @@ SizeType32 KVCacheManager::getRemainingBlocksToCompletion(LlmRequest const& req,
     // comment in getNeededBlocksOneStep for the full rationale — free reusable blocks must
     // not be subtracted because they are already counted in the eviction policy's free count.
     SizeType32 numReusableContextBlocks = 0;
+    // [kv-debug] Capture the raw reuse counts regardless of whether the branch below runs, so
+    // the admission log always prints the same fields.
+    SizeType32 dbgNumReusableAllocated{-1};
+    SizeType32 dbgNumReusableAll{-1};
     if (mEnableBlockReuse && !mBlockManager.isVariableWindow() && req.isContextInitState() && req.isFirstContextChunk()
         && numAllocBlocksPerBeam == 0)
     {
@@ -2833,6 +2884,8 @@ SizeType32 KVCacheManager::getRemainingBlocksToCompletion(LlmRequest const& req,
         // not be recomputed regardless of whether their blocks currently have active refs.
         auto const numReusableBlocksAll = countReusableBlocks(uniqueTokens, req, /*onlyAllocated=*/false);
         req.setEstimatedReusableTokens(std::min(numReusableBlocksAll, numContextBlocks) * getTokensPerBlock());
+        dbgNumReusableAllocated = numReusableBlocksAllocated;
+        dbgNumReusableAll = numReusableBlocksAll;
         TLLM_LOG_DEBUG(
             "getRemainingBlocksToCompletion: request ID %lu, numContextBlocks=%d, "
             "numReusableBlocksAllocated=%d, numReusableBlocksAll=%d, "
@@ -2857,14 +2910,29 @@ SizeType32 KVCacheManager::getRemainingBlocksToCompletion(LlmRequest const& req,
     // Adjust for reusable context blocks (only allocated ones)
     SizeType32 const effectiveContextBlocks = numContextBlocks - numReusableContextBlocks;
 
+    SizeType32 demand;
     if (numAllocBlocksPerBeam < effectiveContextBlocks) // Still haven't allocated all context blocks
     {
-        return effectiveContextBlocks - numAllocBlocksPerBeam
+        demand = effectiveContextBlocks - numAllocBlocksPerBeam
             + (numGenBlocksPerBeam + numExtraBlocksPerBeam) * req.mSamplingConfig.beamWidth;
     }
-
-    SizeType32 const effectiveTotalBlocks = numTotalBlocksPerBeam - numReusableContextBlocks;
-    return (effectiveTotalBlocks - numAllocBlocksPerBeam + numExtraBlocksPerBeam) * req.mSamplingConfig.beamWidth;
+    else
+    {
+        SizeType32 const effectiveTotalBlocks = numTotalBlocksPerBeam - numReusableContextBlocks;
+        demand = (effectiveTotalBlocks - numAllocBlocksPerBeam + numExtraBlocksPerBeam) * req.mSamplingConfig.beamWidth;
+    }
+    // [kv-debug] Single-line admission trace that mirrors the END log from loadOrAllocateBlocks,
+    // so the two can be grep'd and diff'd per request.
+    TLLM_LOG_INFO(
+        "[kv-debug] getRemainingBlocksToCompletion: rid=%lu ws=%d state=%d firstChunk=%d "
+        "promptLen=%d maxNew=%d numCtxBlocks=%d numTotalPerBeam=%d numAllocPerBeam=%d "
+        "numReusableAllocated=%d numReusableAll=%d numReusableCtxBlocks=%d numGenPerBeam=%d "
+        "extraPerBeam=%d beam=%d demand=%d",
+        req.mRequestId, windowSize, static_cast<int>(req.getState()),
+        static_cast<int>(req.isFirstContextChunk()), req.mPromptLen, req.mMaxNewTokens, numContextBlocks,
+        numTotalBlocksPerBeam, numAllocBlocksPerBeam, dbgNumReusableAllocated, dbgNumReusableAll,
+        numReusableContextBlocks, numGenBlocksPerBeam, numExtraBlocksPerBeam, req.mSamplingConfig.beamWidth, demand);
+    return demand;
 }
 
 void BlockManager::updateSequenceCacheBlockOffsets(GenerationRequest& sequence, SizeType32 windowSize)
