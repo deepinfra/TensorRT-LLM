@@ -267,6 +267,29 @@ class TransformersTokenizer(TokenizerBase):
             last_new_tokens + pending_tokens,
             skip_special_tokens=skip_special_tokens,
             spaces_between_special_tokens=spaces_between_special_tokens)
+        # Safety cap: if pending_tokens grows beyond this, the UTF-8 tail is
+        # never completing (e.g. stream of lone continuation bytes / invalid
+        # start bytes). Force-flush with 'replace' to escape the O(N^2)
+        # accumulation on every subsequent step.
+        _PENDING_FORCE_FLUSH = 8
+        force_flush = len(pending_tokens) >= _PENDING_FORCE_FLUSH
+
+        if force_flush:
+            logger.warning(
+                "trtllm_decode_incrementally: pending_tokens buffer reached "
+                f"{len(pending_tokens)} without draining "
+                f"(curr tail repr={curr_new_text[-8:]!r}). "
+                "Likely cause: model emitted bytes that don't form valid UTF-8 "
+                "(lone continuation bytes, invalid start bytes, or truncated "
+                "multi-byte sequences). Force-flushing to prevent O(N^2) "
+                "detokenization cost.")
+
+        # if not (flush or force_flush) and (len(curr_new_text.rstrip()) <= len(
+        #         last_new_text.rstrip()) or curr_new_text.endswith("�")):
+        #     return prev_text, {
+        #         'last_new_tokens': last_new_tokens,
+        #         'pending_tokens': pending_tokens
+        #     }
         if not flush and (len(curr_new_text.rstrip()) <= len(
                 last_new_text.rstrip()) or curr_new_text.endswith("�")):
             return prev_text, {
