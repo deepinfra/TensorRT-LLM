@@ -387,6 +387,33 @@ class SimpleScheduler(RequestScheduler):
         context_requests, generation_requests = self.micro_batch_scheduler.schedule(
             fitting_requests, inflight_request_ids
         )
+
+        # [chunk-debug] Log context_chunk_size per admitted context request after the
+        # microbatch chunker ran. Cross-referenced against total_num_tokens seen in the
+        # forward pass, this pinpoints which request's chunk is overshooting max_num_tokens.
+        # total_num_tokens = sum(chunkSize) over ctx + sum(1 + numDraft) over gen.
+        ctx_total = 0
+        for r in context_requests:
+            ctx_total += r.context_chunk_size
+            logger.info(
+                f"[chunk-debug] rid={r.request_id} "
+                f"is_first={r.is_first_context_chunk} "
+                f"state={int(r.state)} "
+                f"promptLen={r.prompt_len} "
+                f"ctxPos={r.context_current_position} "
+                f"chunkSize={r.context_chunk_size} "
+                f"remaining={r.context_remaining_length} "
+                f"estReusable={r.estimated_reusable_tokens} "
+                f"numDraft={r.num_draft_tokens}"
+            )
+        gen_total = sum(1 + r.num_draft_tokens for r in generation_requests)
+        logger.info(
+            f"[chunk-debug] summary: ctx_requests={len(context_requests)} "
+            f"gen_requests={len(generation_requests)} "
+            f"sum_chunk_sizes={ctx_total} gen_token_count={gen_total} "
+            f"predicted_total_num_tokens={ctx_total + gen_total}"
+        )
+
         # Convert from binding type RequestVector to list[LlmRequest],
         # so Python fields on LlmRequest won't be stripped away
         return SchedulerOutput(
