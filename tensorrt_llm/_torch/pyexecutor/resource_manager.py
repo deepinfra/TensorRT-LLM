@@ -616,7 +616,32 @@ class KVCacheManager(BaseResourceManager):
             remaining_tokens / self.tokens_per_block)
         return need_blocks
 
+    def _dbg_add_token(self, rid: int, site: str) -> None:
+        """[kv-debug] add_token wrapper that logs free-block delta when it changes.
+
+        Used to find per-iteration drift between main and draft primary pools. Only
+        emits when the call actually consumed a block (delta != 0), so the log stays
+        grep-able under load.
+        """
+        before = self.get_num_free_blocks()
+        self.impl.add_token(rid)
+        after = self.get_num_free_blocks()
+        if before != after:
+            manager_type = "draft" if self.is_draft else "main"
+            logger.info(
+                f"[kv-debug-add-token] type={manager_type} rid={rid} site={site} "
+                f"free={before}->{after} delta={after - before}")
+
     def prepare_resources(self, scheduled_batch: ScheduledRequests):
+        # [kv-debug] Capture free-block count at entry/exit so we can correlate
+        # per-iteration drain with what's happening on each manager.
+        dbg_mgr_type = "draft" if self.is_draft else "main"
+        dbg_entry_free = self.get_num_free_blocks()
+        dbg_n_ctx = len(scheduled_batch.context_requests)
+        dbg_n_gen = len(scheduled_batch.generation_requests)
+        logger.info(
+            f"[kv-debug-prepare] BEGIN type={dbg_mgr_type} "
+            f"free={dbg_entry_free} nCtx={dbg_n_ctx} nGen={dbg_n_gen}")
         with request_context(self.is_draft, scheduled_batch):
             # wait for all pending work to finish before launching offload/onboarding/partial copy
             self.impl.sync_transfer_manager_with_buffer_manager()
@@ -661,9 +686,9 @@ class KVCacheManager(BaseResourceManager):
                                                req.prompt_len, req_beam_width,
                                                req)
                         for _ in range(self.num_extra_kv_tokens):
-                            self.impl.add_token(req.py_request_id)
+                            self._dbg_add_token(req.py_request_id, "ctx-extra-kv")
                         for _ in range(get_draft_token_length(req)):
-                            self.impl.add_token(req.py_request_id)
+                            self._dbg_add_token(req.py_request_id, "ctx-draft-tokens")
 
                         if self.kv_connector_manager is not None:
                             block_ids = self.get_cache_indices(req)
@@ -685,12 +710,17 @@ class KVCacheManager(BaseResourceManager):
                         req.py_helix_is_inactive_rank = True
                         # Skip allocating KV cache at decode for inactive helix ranks.
                         continue
-                self.impl.add_token(req.py_request_id)
+                self._dbg_add_token(req.py_request_id, "gen-step")
                 for _ in range(get_draft_token_length(req)):
-                    self.impl.add_token(req.py_request_id)
+                    self._dbg_add_token(req.py_request_id, "gen-draft-tokens")
 
             # prefill and generation kernels wait for scheduled offload/onboard/partial copy work before launching
             self.impl.refresh_blocks()
+        dbg_exit_free = self.get_num_free_blocks()
+        logger.info(
+            f"[kv-debug-prepare] END type={dbg_mgr_type} "
+            f"free={dbg_entry_free}->{dbg_exit_free} delta={dbg_exit_free - dbg_entry_free} "
+            f"nCtx={dbg_n_ctx} nGen={dbg_n_gen}")
 
         if self.kv_connector_manager is not None:
             self.kv_connector_manager.build_scheduler_output(
@@ -856,8 +886,17 @@ class KVCacheManager(BaseResourceManager):
             f"[remove_sequence] {manager_type} kv_cache: "
             f"req_id={request.py_request_id}")
         self._active_sequences.discard(request.py_request_id)
-        return self.impl.remove_sequence(request.py_request_id, request,
-                                         pin_on_release)
+        # [kv-debug] Log free-block delta so we can see release timing asymmetry
+        # between main and draft managers.
+        dbg_before = self.get_num_free_blocks()
+        result = self.impl.remove_sequence(request.py_request_id, request,
+                                           pin_on_release)
+        dbg_after = self.get_num_free_blocks()
+        logger.info(
+            f"[kv-debug-free] type={manager_type} rid={request.py_request_id} "
+            f"free={dbg_before}->{dbg_after} delta={dbg_after - dbg_before} "
+            f"state={request.state} pin={pin_on_release}")
+        return result
 
     def store_blocks_for_reuse(self,
                                request: LlmRequest,
