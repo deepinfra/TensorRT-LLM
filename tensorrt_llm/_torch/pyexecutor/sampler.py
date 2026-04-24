@@ -70,6 +70,7 @@ from tensorrt_llm.bindings.internal.runtime import (
 )
 from tensorrt_llm.executor.result import Logprob
 from tensorrt_llm.llmapi.llm_args import KvCacheConfig
+from tensorrt_llm.logger import logger
 from tensorrt_llm.mapping import Mapping
 from tensorrt_llm.sampling_params import LogprobMode, SamplingParams
 
