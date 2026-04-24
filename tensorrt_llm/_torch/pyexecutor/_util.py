@@ -1391,12 +1391,20 @@ def create_py_executor_instance(
             two_step_lookahead=mapping.has_pp(),
             scheduler_capacity=scheduler_capacity)
     else:
+        # Pass the draft KV cache manager so the scheduler can re-check admission
+        # against the draft primary pool. The C++ CapacityScheduler only looks at
+        # the target pool; with separate draft KV (MTP / Eagle3), the draft can
+        # fill up while the target has headroom.
+        draft_kv_cache_manager = resources.get(
+            ResourceManagerType.DRAFT_KV_CACHE_MANAGER)
         capacity_scheduler = BindCapacityScheduler(
             scheduler_capacity,
             kv_cache_manager.impl if kv_cache_manager is not None else None,
             peft_cache_manager.impl if peft_cache_manager is not None else None,
             scheduler_config.capacity_scheduler_policy,
-            two_step_lookahead=mapping.has_pp())
+            two_step_lookahead=mapping.has_pp(),
+            draft_kv_cache_manager=draft_kv_cache_manager.impl
+            if draft_kv_cache_manager is not None else None)
 
         mb_scheduler = BindMicroBatchScheduler(max_batch_size, max_num_tokens,
                                                ctx_chunk_config)
