@@ -257,7 +257,18 @@ class BindCapacityScheduler(CapacityScheduler):
         )
 
         def draft_demand(req):
-            return {ws: draft.get_remaining_blocks_to_completion(req, ws) for ws in draft_avail}
+            # draft.get_remaining_blocks_to_completion() has a side effect: it calls
+            # req.setEstimatedReusableTokens(numReusableBlocksAll * tokensPerBlock), where
+            # numReusableBlocksAll counts ALL tree matches (primary + secondary, with or
+            # without refs). Main's admission (getNeededBlocksOneStep for MAX_UTILIZATION)
+            # already set estimated_reusable_tokens to a smaller hasRefs-only count. If we
+            # overwrite it with draft's larger value, the microbatch scheduler under-budgets
+            # compute tokens for this request and the forward pass overshoots max_num_tokens.
+            # Save and restore to keep this call side-effect-free.
+            saved = req.estimated_reusable_tokens
+            result = {ws: draft.get_remaining_blocks_to_completion(req, ws) for ws in draft_avail}
+            req.estimated_reusable_tokens = saved
+            return result
 
         def try_fit(req):
             demand = draft_demand(req)
