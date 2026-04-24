@@ -249,6 +249,12 @@ class BindCapacityScheduler(CapacityScheduler):
         """
         draft = self.draft_kv_cache_manager
         draft_avail = dict(draft.get_kv_cache_stats().num_free_blocks_per_window_size)
+        # Entry log so we can see whether the filter is running at all.
+        logger.info(
+            f"[draft-aware-admission] ENTRY fitting={len(fitting)} "
+            f"fitting_disagg={len(fitting_disagg)} paused={len(paused)} "
+            f"draft_avail={draft_avail}"
+        )
 
         def draft_demand(req):
             return {ws: draft.get_remaining_blocks_to_completion(req, ws) for ws in draft_avail}
