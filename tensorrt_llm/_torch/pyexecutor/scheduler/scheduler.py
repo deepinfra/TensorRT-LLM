@@ -398,7 +398,7 @@ class SimpleScheduler(RequestScheduler):
             logger.info(
                 f"[chunk-debug] rid={r.request_id} "
                 f"is_first={r.is_first_context_chunk} "
-                f"state={int(r.state)} "
+                f"state={r.state} "
                 f"promptLen={r.prompt_len} "
                 f"ctxPos={r.context_current_position} "
                 f"chunkSize={r.context_chunk_size} "
