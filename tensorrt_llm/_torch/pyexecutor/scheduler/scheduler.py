@@ -207,17 +207,10 @@ class BindCapacityScheduler(CapacityScheduler):
         peft_cache_manager: tb_internal.batch_manager.PeftCacheManager | None,
         scheduler_policy: CapacitySchedulerPolicy = CapacitySchedulerPolicy.GUARANTEED_NO_EVICT,
         two_step_lookahead: bool = False,
-        draft_kv_cache_manager=None,
     ):
         super(BindCapacityScheduler, self).__init__()
         self.kv_cache_manager = kv_cache_manager
         self.peft_cache_manager = peft_cache_manager
-        # The C++ CapacityScheduler only budgets the target KV cache pool. With one-model
-        # speculative decoding (MTP / Eagle3), the draft manager has an independent primary
-        # pool that can fill up even when the target has headroom. See the separate-draft
-        # KV-cache path in _util._create_one_model_draft_kv_cache_manager. We re-check each
-        # admitted request against the draft pool here and drop any that don't fit.
-        self.draft_kv_cache_manager = draft_kv_cache_manager
 
         self.impl = tb_internal.algorithms.CapacityScheduler(
             max_num_requests=max_num_requests,
@@ -231,100 +224,9 @@ class BindCapacityScheduler(CapacityScheduler):
     def schedule_request(
         self, active_requests: RequestList
     ) -> tuple[list[LlmRequest], list[LlmRequest], list[LlmRequest]]:
-        fitting, fitting_disagg, paused = self.impl(
+        return self.impl(
             active_requests, self.kv_cache_manager, self.peft_cache_manager
         )
-        if self.draft_kv_cache_manager is None:
-            return fitting, fitting_disagg, paused
-        return self._filter_by_draft_capacity(fitting, fitting_disagg, paused)
-
-    def _filter_by_draft_capacity(self, fitting, fitting_disagg, paused):
-        """Drop admitted context-init / disagg-gen-init requests that wouldn't fit in the
-        draft manager's primary pool. In-progress generation requests are preserved
-        unconditionally (they're already running) but their demand is still subtracted
-        from the draft budget so subsequent pending requests see an accurate budget.
-
-        Budget order matches the C++ CapacityScheduler: in-progress first (unconditional),
-        then disagg-gen-init, then pending context-init.
-        """
-        draft = self.draft_kv_cache_manager
-        draft_avail = dict(draft.get_kv_cache_stats().num_free_blocks_per_window_size)
-        # Entry log so we can see whether the filter is running at all.
-        logger.info(
-            f"[draft-aware-admission] ENTRY fitting={len(fitting)} "
-            f"fitting_disagg={len(fitting_disagg)} paused={len(paused)} "
-            f"draft_avail={draft_avail}"
-        )
-
-        def draft_demand(req):
-            # draft.get_remaining_blocks_to_completion() has a side effect: it calls
-            # req.setEstimatedReusableTokens(numReusableBlocksAll * tokensPerBlock), where
-            # numReusableBlocksAll counts ALL tree matches (primary + secondary, with or
-            # without refs). Main's admission (getNeededBlocksOneStep for MAX_UTILIZATION)
-            # already set estimated_reusable_tokens to a smaller hasRefs-only count. If we
-            # overwrite it with draft's larger value, the microbatch scheduler under-budgets
-            # compute tokens for this request and the forward pass overshoots max_num_tokens.
-            # Save and restore to keep this call side-effect-free.
-            saved = req.estimated_reusable_tokens
-            result = {ws: draft.get_remaining_blocks_to_completion(req, ws) for ws in draft_avail}
-            req.estimated_reusable_tokens = saved
-            return result
-
-        def try_fit(req):
-            demand = draft_demand(req)
-            if all(demand[ws] <= draft_avail[ws] for ws in draft_avail):
-                for ws, n in demand.items():
-                    draft_avail[ws] -= n
-                return True, demand
-            return False, demand
-
-        # Partition fitting into in-progress (mandatory) and pending context-init.
-        in_progress = [r for r in fitting if r.is_generation_in_progress_state]
-        pending_ctx = [r for r in fitting if not r.is_generation_in_progress_state]
-
-        # 1. In-progress: always kept; subtract demand even if it pushes below zero (that
-        #    state is the bug we're detecting, and the deficit will crash naturally).
-        for req in in_progress:
-            for ws, n in draft_demand(req).items():
-                draft_avail[ws] -= n
-
-        dropped = 0
-
-        # 2. Disagg gen-init: admit in order, drop on draft overflow.
-        kept_disagg: list[LlmRequest] = []
-        for req in fitting_disagg:
-            fits, demand = try_fit(req)
-            if fits:
-                kept_disagg.append(req)
-            else:
-                dropped += 1
-                logger.info(
-                    f"[draft-aware-admission] Dropping disagg-gen-init req {req.request_id}: "
-                    f"draft_demand={demand} draft_avail={draft_avail}"
-                )
-
-        # 3. Pending context-init: admit in order, drop on draft overflow.
-        kept_pending_ctx: list[LlmRequest] = []
-        for req in pending_ctx:
-            fits, demand = try_fit(req)
-            if fits:
-                kept_pending_ctx.append(req)
-            else:
-                dropped += 1
-                logger.info(
-                    f"[draft-aware-admission] Dropping ctx-init req {req.request_id}: "
-                    f"draft_demand={demand} draft_avail={draft_avail}"
-                )
-
-        kept_fitting = in_progress + kept_pending_ctx
-
-        if dropped:
-            logger.info(
-                f"[draft-aware-admission] dropped={dropped} kept_fitting={len(kept_fitting)} "
-                f"(in_progress={len(in_progress)} pending_ctx={len(kept_pending_ctx)}) "
-                f"kept_disagg={len(kept_disagg)} draft_avail_final={draft_avail}"
-            )
-        return kept_fitting, kept_disagg, paused
 
 
 class MicroBatchScheduler(ABC):
