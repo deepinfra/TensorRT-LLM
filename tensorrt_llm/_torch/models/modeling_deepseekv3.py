@@ -1944,3 +1944,72 @@ class KimiK25ForConditionalGeneration(DeepseekV3ForCausalLM):
             weights = filter_weights("language_model", weights)
             weights = ConsumableWeightsDict(weights)
         super().load_weights(weights)
+        self._audit_loaded_parameters()
+
+    def _audit_loaded_parameters(self):
+        """[kimi-load-audit] Verify all parameters/buffers are finite and have plausible
+        magnitudes after weight loading. A mismatched / un-loaded parameter retains its
+        constructor-time torch.empty() value (uninitialized GPU memory), which under
+        NVFP4 / FP8 quantization often dequantizes to NaN/Inf. The resulting NaN output
+        is non-deterministic across launches because cudaMalloc returns different bytes
+        each time — which matches the observed "happens early or never" bimodal pattern.
+
+        Runs once after load_weights. Logs only — does not raise. Negligible startup
+        cost; zero per-iteration cost.
+        """
+        from tensorrt_llm.logger import logger as _logger
+
+        bad = []      # non-finite (NaN/Inf): hard signal of bad load
+        suspect = []  # finite but extreme: soft signal of misloaded scale/weight
+
+        def _check_tensor(name: str, t, kind: str):
+            if not t.is_floating_point() or t.numel() == 0:
+                return
+            try:
+                if not torch.isfinite(t).all().item():
+                    n_nan = torch.isnan(t).sum().item()
+                    n_inf = torch.isinf(t).sum().item()
+                    bad.append((kind, name, tuple(t.shape), str(t.dtype),
+                                f"nan={n_nan} inf={n_inf}"))
+                    return
+                mx = t.abs().max().item()
+                # Heuristics: weight tensors normally have |x| << 100. Scale tensors
+                # legitimately span a wide range but should never be all-zero (would
+                # zero out every dequantized value through that scale).
+                lname = name.lower()
+                if "scale" in lname or "amax" in lname:
+                    if mx == 0.0:
+                        suspect.append((kind, name, tuple(t.shape), str(t.dtype),
+                                        f"zero-scale max={mx:.3e}"))
+                else:
+                    if mx > 1e3:
+                        suspect.append((kind, name, tuple(t.shape), str(t.dtype),
+                                        f"huge-magnitude max={mx:.3e}"))
+            except Exception as e:
+                _logger.warning(
+                    f"[kimi-load-audit] could not check {kind} {name}: {e}")
+
+        for name, p in self.named_parameters():
+            _check_tensor(name, p, "param")
+        for name, b in self.named_buffers():
+            _check_tensor(name, b, "buffer")
+
+        if bad:
+            for entry in bad[:32]:
+                _logger.error(f"[kimi-load-audit] BAD: {entry}")
+            if len(bad) > 32:
+                _logger.error(
+                    f"[kimi-load-audit] ...and {len(bad) - 32} more non-finite tensors")
+            _logger.error(
+                f"[kimi-load-audit] {len(bad)} non-finite tensor(s) after load — "
+                f"engine will likely produce NaN at runtime")
+        if suspect:
+            for entry in suspect[:32]:
+                _logger.warning(f"[kimi-load-audit] SUSPECT: {entry}")
+            if len(suspect) > 32:
+                _logger.warning(
+                    f"[kimi-load-audit] ...and {len(suspect) - 32} more suspect tensors")
+        if not bad and not suspect:
+            _logger.info(
+                "[kimi-load-audit] all parameters/buffers loaded with finite, "
+                "reasonable values")

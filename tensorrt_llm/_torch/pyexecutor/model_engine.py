@@ -3870,6 +3870,26 @@ class PyTorchModelEngine(ModelEngine):
         if gather_ids is not None:
             outputs['logits'] = logits[gather_ids]
 
+        # [nan-logits-warmup-check] If warmup itself produces NaN/Inf logits, the engine
+        # has been initialized into a bad state (FP8-saturated KV pool, NaN-poisoned
+        # CUDA-graph capture, broken model integration) and will emit garbage tokens
+        # downstream. Sync once during warmup to detect this and raise — pod will exit,
+        # supervisor restarts. Zero cost in steady state since this branch only runs
+        # during warmup.
+        if getattr(self, "is_warmup", False):
+            final_logits = outputs['logits']
+            if not torch.isfinite(final_logits).all().item():
+                from tensorrt_llm.logger import logger as _logger
+                _logger.error(
+                    f"[nan-logits-warmup-check] Warmup forward produced non-finite logits: "
+                    f"shape={tuple(final_logits.shape)} dtype={final_logits.dtype} "
+                    f"any_nan={torch.isnan(final_logits).any().item()} "
+                    f"any_inf={torch.isinf(final_logits).any().item()}. "
+                    f"Engine is starting in a corrupted state; failing startup."
+                )
+                raise RuntimeError(
+                    "Warmup forward produced non-finite logits — engine init is broken")
+
         return outputs
 
     @nvtx_range("_forward_step_mm_encoder_only")

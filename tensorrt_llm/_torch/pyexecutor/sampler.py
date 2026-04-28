@@ -4750,9 +4750,10 @@ class TRTLLMSampler(Sampler[SampleStateTRTLLM], AsyncWorkerMixin):
 
         # [maxTokensPerStep, batchSize, maxBeamWidth]
         new_tokens = state.host.new_tokens[0, seq_slots, 0].tolist()
-        # [sampler-guard] Out-of-vocab IDs produce "None" detokenizer warnings and, fed back into
-        # the next step's embedding lookup, cause CUDA "vectorized gather kernel index out of bounds".
-        # Clamp in place and log rid+value so we can correlate with request state.
+        # [sampler-guard] Log out-of-vocab tokens for correlation with downstream "None" detokenizer
+        # warnings or CUDA "gather index out of bounds" crashes. Logging only — do NOT clamp here:
+        # if our vocab_size doesn't match the model's actual logits dim (e.g., Kimi K2.5 with
+        # extended tokenizer), clamping would mangle valid outputs into PAD.
         vocab_size = getattr(self, "_vocab_size_for_guard", None)
         if vocab_size is not None:
             bad = [(i, tok) for i, tok in enumerate(new_tokens) if tok < 0 or tok >= vocab_size]
@@ -4763,10 +4764,8 @@ class TRTLLMSampler(Sampler[SampleStateTRTLLM], AsyncWorkerMixin):
                 logger.error(
                     f"[sampler-guard] out-of-range tokens from TRTLLM sampler: "
                     f"rids={bad_rids} seq_slots={bad_seq_slots} values={bad_vals} "
-                    f"vocab_size={vocab_size}; clamping to 0"
+                    f"vocab_size={vocab_size} (not clamping)"
                 )
-                for i, _ in bad:
-                    new_tokens[i] = 0
         add_new_tokens_to_requests(reqs_with_new_tokens, new_tokens, 0)
 
         # Log probs
@@ -4815,10 +4814,11 @@ class TRTLLMSampler(Sampler[SampleStateTRTLLM], AsyncWorkerMixin):
     ) -> None:
         assert state.host is not None
         new_tokens_host = state.host.new_tokens.tolist()
-        # [sampler-guard] Same clamp-and-log as the single-beam path. Shape is
-        # [maxTokensPerStep, batchSize, maxBeamWidth]; we walk all three dims
-        # once and clamp in place. Fires rarely (only on bad sampler output)
-        # so the nested loop is not hot-path cost.
+        # [sampler-guard] Multi-beam / drafting path reads the FULL [maxTokensPerStep, batchSize,
+        # maxBeamWidth] tensor — including unused slots with leftover values, and the actual
+        # Eagle3 / draft-sampled tokens. Clamping here corrupted valid outputs (Kimi K2.5
+        # with extended tokenizer hit values > model.config.vocab_size and got mangled into PAD).
+        # Logging only; do NOT clamp.
         vocab_size = getattr(self, "_vocab_size_for_guard", None)
         if vocab_size is not None:
             bad_reports = []
@@ -4827,12 +4827,11 @@ class TRTLLMSampler(Sampler[SampleStateTRTLLM], AsyncWorkerMixin):
                     for beam_idx, tok in enumerate(slot_vals):
                         if tok < 0 or tok >= vocab_size:
                             bad_reports.append((step_idx, slot_idx, beam_idx, tok))
-                            new_tokens_host[step_idx][slot_idx][beam_idx] = 0
             if bad_reports:
                 logger.error(
                     f"[sampler-guard] out-of-range tokens in multi-beam/drafting path: "
                     f"count={len(bad_reports)} samples={bad_reports[:8]} "
-                    f"vocab_size={vocab_size}; clamped to 0"
+                    f"vocab_size={vocab_size} (not clamping)"
                 )
         finished_sum_host = state.host.finished_sum.tolist()
         finish_reasons = state.host.finish_reasons.flatten().tolist()
