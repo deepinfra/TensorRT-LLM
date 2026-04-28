@@ -464,6 +464,46 @@ class PyExecutor:
         torch.cuda.current_stream().wait_stream(self.execution_stream)
         self.is_warmup = False
 
+        # [kv-pool-zero-init] Zero-fill primary KV cache pools after warmup.
+        # cudaMalloc returns uninitialized memory; with FP8 KV cache, those raw
+        # bytes can decode to NaN. FlashAttention-style kernels bulk-load full
+        # tiles before masking, so a tile that includes unwritten positions can
+        # propagate NaN through softmax even if those positions are masked in
+        # the final reduction. Probability of hitting an uninit-byte slot decays
+        # as the pool warms up but never reaches zero. A one-shot post-warmup
+        # zero-fill replaces uninit bytes with 0.0, which dequantizes finite
+        # and masks correctly. Cost: one cudaMemset over a few-GB pool, ~50ms
+        # at startup, zero ongoing cost.
+        for kvm in (self.kv_cache_manager,
+                    getattr(self.resource_manager, "resource_managers", {}).get(
+                        ResourceManagerType.DRAFT_KV_CACHE_MANAGER, None)):
+            if kvm is None or not hasattr(kvm, "impl"):
+                continue
+            tag = "draft" if getattr(kvm, "is_draft", False) else "main"
+            try:
+                num_pools = kvm.impl.num_pools
+                logger.info(
+                    f"[kv-pool-zero-init] zeroing {num_pools} primary pool(s) "
+                    f"for {tag} kv cache manager")
+                # Try the unique-pool fast path first; fall back to per-layer.
+                try:
+                    pool = kvm.impl.get_unique_primary_pool()
+                    pool.zero_()
+                except Exception:
+                    num_layers = getattr(kvm, "num_layers", None) or 256
+                    for layer_idx in range(num_layers):
+                        try:
+                            slice_t = kvm.impl.get_primary_pool_data(layer_idx)
+                            slice_t.zero_()
+                        except Exception:
+                            break
+            except Exception as e:
+                logger.warning(
+                    f"[kv-pool-zero-init] could not zero pool for {tag} "
+                    f"manager: {e}")
+        torch.cuda.synchronize()
+        logger.info("[kv-pool-zero-init] done")
+
         # Snapshot some cumulative KV cache counters so that stats reported to
         # users exclude blocks reused and missed during warmup dummy requests.
         if hasattr(self.kv_cache_manager, 'snapshot_warmup_baseline'):
