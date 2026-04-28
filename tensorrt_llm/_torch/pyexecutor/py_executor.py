@@ -478,7 +478,6 @@ class PyExecutor:
         # confirming that uninitialized FP8 bytes are indeed the failure mode.
         # If NaN-fill produces consistent crashes and 0-fill produces clean
         # runs, the uninit-byte hypothesis is conclusively confirmed.
-        import os
         kv_pool_fill_mode = os.environ.get("TLLM_KV_POOL_INIT", "zero").lower()
         if kv_pool_fill_mode == "nan":
             fill_value = float("nan")
