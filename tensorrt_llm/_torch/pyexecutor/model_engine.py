@@ -3871,24 +3871,33 @@ class PyTorchModelEngine(ModelEngine):
             outputs['logits'] = logits[gather_ids]
 
         # [nan-logits-warmup-check] If warmup itself produces NaN/Inf logits, the engine
-        # has been initialized into a bad state (FP8-saturated KV pool, NaN-poisoned
-        # CUDA-graph capture, broken model integration) and will emit garbage tokens
-        # downstream. Sync once during warmup to detect this and raise — pod will exit,
-        # supervisor restarts. Zero cost in steady state since this branch only runs
-        # during warmup.
+        # has been initialized into a bad state. Sync once during non-capturing warmup
+        # forwards to detect this and raise — pod will exit, supervisor restarts.
+        #
+        # IMPORTANT: skip when a CUDA graph is capturing on this stream — host-device
+        # syncs (which .item() requires) are forbidden during capture and would crash
+        # with "operation not permitted when stream is capturing". CUDA graph warmup
+        # captures will be checked indirectly via subsequent non-capturing warmup
+        # forwards on the same shapes.
         if getattr(self, "is_warmup", False):
-            final_logits = outputs['logits']
-            if not torch.isfinite(final_logits).all().item():
-                from tensorrt_llm.logger import logger as _logger
-                _logger.error(
-                    f"[nan-logits-warmup-check] Warmup forward produced non-finite logits: "
-                    f"shape={tuple(final_logits.shape)} dtype={final_logits.dtype} "
-                    f"any_nan={torch.isnan(final_logits).any().item()} "
-                    f"any_inf={torch.isinf(final_logits).any().item()}. "
-                    f"Engine is starting in a corrupted state; failing startup."
-                )
-                raise RuntimeError(
-                    "Warmup forward produced non-finite logits — engine init is broken")
+            try:
+                capturing = torch.cuda.is_current_stream_capturing()
+            except Exception:
+                capturing = False
+            if not capturing:
+                final_logits = outputs['logits']
+                if not torch.isfinite(final_logits).all().item():
+                    from tensorrt_llm.logger import logger as _logger
+                    _logger.error(
+                        f"[nan-logits-warmup-check] Warmup forward produced non-finite "
+                        f"logits: shape={tuple(final_logits.shape)} "
+                        f"dtype={final_logits.dtype} "
+                        f"any_nan={torch.isnan(final_logits).any().item()} "
+                        f"any_inf={torch.isinf(final_logits).any().item()}. "
+                        f"Engine is starting in a corrupted state; failing startup."
+                    )
+                    raise RuntimeError(
+                        "Warmup forward produced non-finite logits — engine init is broken")
 
         return outputs
 
