@@ -1,3 +1,4 @@
+import math
 import os
 from typing import Dict, List, Optional, Union
 
@@ -717,19 +718,24 @@ class KvCacheCreator:
         # draft's per-token cost can be comparable to the target's despite
         # having far fewer layers.  Relying on leftover GPU memory
         # (free_gpu_memory_fraction of what remains after target allocation)
-        # can leave the draft undersized.  Use the target's block count to
-        # compute the minimum tokens the draft needs.
+        # can leave the draft undersized.  Size the draft 10% larger than the
+        # target's block count: per-step growth is identical between pools, but
+        # asymmetric prefix reuse (target hits cached blocks, draft typically
+        # doesn't) lets draft drift below target's free count over time. The
+        # 10% buffer absorbs that drift without needing a runtime admission
+        # check that re-budgets every scheduling step.
         draft_kv_cache_config = self._kv_cache_config.model_copy(update={'host_cache_size': 0})
         if target_kv_cache_manager is not None:
             target_blocks = target_kv_cache_manager.blocks_in_primary_pool
-            min_draft_tokens = target_blocks * self._tokens_per_block
+            min_draft_blocks = math.ceil(target_blocks * 1.1)
+            min_draft_tokens = min_draft_blocks * self._tokens_per_block
 
-            # Log what the draft would get from leftover GPU memory
             free_mem, _ = torch.cuda.mem_get_info()
             logger.info(
                 f"Draft KV cache sizing: "
                 f"gpu_free_mem={free_mem / (1 << 30):.2f}GiB, "
                 f"target_blocks={target_blocks}, "
+                f"min_draft_blocks={min_draft_blocks}, "
                 f"min_draft_tokens={min_draft_tokens}, "
                 f"current_max_tokens={self._kv_cache_config.max_tokens}, "
                 f"free_gpu_memory_fraction={self._kv_cache_config.free_gpu_memory_fraction}")
@@ -744,7 +750,7 @@ class KvCacheCreator:
                 logger.info(
                     f"Draft KV cache: adjusting max_tokens "
                     f"{current_max} -> {min_draft_tokens} "
-                    f"to match target's {target_blocks} blocks")
+                    f"({min_draft_blocks} blocks = 1.1 * target's {target_blocks})")
 
         return _create_kv_cache_manager(
             model_engine=None,
