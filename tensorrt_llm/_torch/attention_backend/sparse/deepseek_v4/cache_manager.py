@@ -48,11 +48,20 @@ def _estimate_bytes_per_token(
     has_fp8_kv_cache,
     attn_types: set[DeepseekV4AttentionType] | None = None,
 ) -> int:
+    # Only the COMPRESS and INDEXER_COMPRESS pools scale per logical token; the
+    # other attention types (SWA, COMPRESSOR_STATE/SCORE, INDEXER_COMPRESSOR_*)
+    # are fixed-size sliding-window pools whose footprint is per request, not
+    # per token. Including their per-slot bytes here produces a ~90x pessimistic
+    # budget at long context and forces the cache pool to demand far more memory
+    # than the V2 cache manager will actually allocate.
+    if attn_types is None:
+        attn_types = {
+            DeepseekV4AttentionType.COMPRESS,
+            DeepseekV4AttentionType.INDEXER_COMPRESS,
+        }
     total_bytes = 0
     for ratio in compress_ratios:
-        for attn in DeepseekV4AttentionType:
-            if attn_types is not None and attn not in attn_types:
-                continue
+        for attn in attn_types:
             if compress_ratio_has_attention(ratio, attn):
                 total_bytes += _get_attn_bytes_per_token(
                     head_dim,
@@ -459,9 +468,19 @@ class DeepseekV4CacheManager(KVCacheManagerV2):
         # the typical step. An all-generation typical_step over-provisions the
         # compressed-cache pool at the expense of the SWA pool, starving the
         # SWA pool and artificially capping the achievable batch size.
+        #
+        # When chunked-prefill is in effect (max_num_tokens < max_seq_len), the
+        # max_seq_len worth of blocks. Without this, fixed-window pools size
+        # for history_length=0 (no blocks stale) and demand ~max_seq_len blocks
+        # per layer, blowing past the GPU memory budget at long context.
+        ctx_history = (
+            max(0, max_seq_len - max_num_tokens)
+            if max_num_tokens is not None and max_num_tokens > 0 and max_num_tokens < max_seq_len
+            else 0
+        )
         typical_step = BatchDesc(
             kv_caches=[
-                KVCacheDesc(capacity=max_seq_len, history_length=0),
+                KVCacheDesc(capacity=max_seq_len, history_length=ctx_history),
             ]
             + [KVCacheDesc(capacity=max_seq_len, history_length=max_seq_len - max_draft_len - 1)]
             * (max_batch_size - 1),
@@ -470,7 +489,8 @@ class DeepseekV4CacheManager(KVCacheManagerV2):
         constraints = []
         # Constraint 1: one context request at max_seq_len, this case is used in warmup stage.
         # max_draft_len is already included in max_seq_len, so no need to add it again.
-        constraints.append(BatchDesc([KVCacheDesc(capacity=max_seq_len, history_length=0)]))
+        # See ctx_history note above on why we shift history_length when chunking.
+        constraints.append(BatchDesc([KVCacheDesc(capacity=max_seq_len, history_length=ctx_history)]))
 
         # Constraint 2: when user given max_input_len and max_num_tokens, we can build constraints for context requests.
         if max_input_len is not None and max_num_tokens is not None:
