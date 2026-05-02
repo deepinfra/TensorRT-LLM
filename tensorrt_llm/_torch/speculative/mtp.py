@@ -1,3 +1,4 @@
+import os
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional
@@ -8,6 +9,7 @@ import torch.nn.functional as F
 from tensorrt_llm._torch.pyexecutor.mamba_cache_manager import \
     MambaHybridCacheManager
 from tensorrt_llm._utils import prefer_pinned
+from tensorrt_llm.logger import logger
 from tensorrt_llm.mapping import Mapping
 
 from ..attention_backend import AttentionMetadata
@@ -779,6 +781,25 @@ class MTPWorker(SpecWorkerBase):
 
         if logits.dim() == 1:
             logits = logits.unsqueeze(0)
+
+        # Terminate the engine on non-finite target logits. Eagle3/MTP sample via
+        # top-1 (argmax or mtp_sampling op), and argmax(NaN) deterministically
+        # returns 0 = PAD on CUDA — silently emitting [PAD][PAD]... to the user
+        # instead of the loud OOB-sampler crash the multinomial-based TRTLLMSampler
+        # produces. Detect the NaN at the source so both spec and non-spec paths
+        # fail fast.
+        #
+        # Use os._exit instead of `raise` because the executor's _sample_async
+        # wraps this call in `except Exception` and recovers via _handle_errors,
+        # which would let the engine continue running with a poisoned KV cache.
+        # Hard-exit so the supervisor restarts the pod.
+        if not torch.isfinite(logits).all().item():
+            msg = ("FATAL: non-finite target logits in spec-decode sampler — "
+                   "likely FP8 KV cache poisoning. Terminating engine.")
+            logger.error(msg)
+            sys.stderr.write(msg + "\n")
+            sys.stderr.flush()
+            os._exit(1)
 
         # The return buffer
         if self.spec_config.use_relaxed_acceptance_for_thinking or not self.is_thop:
