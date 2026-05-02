@@ -540,7 +540,10 @@ class SpecWorkerBase(nn.Module, ABC):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
-            'next_new_tokens': next_new_tokens
+            'next_new_tokens': next_new_tokens,
+            'logits_finite': None,
+            'logits_nan_count': None,
+            'logits_inf_count': None,
         }
 
     def skip_drafting(
@@ -588,7 +591,8 @@ class SpecWorkerBase(nn.Module, ABC):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
-            'next_new_tokens': next_new_tokens
+            'next_new_tokens': next_new_tokens,
+            'logits_finite': getattr(self, 'logits_finite', None),
         }
 
     def set_guided_decoder(self,
@@ -848,6 +852,31 @@ class SpecWorkerBase(nn.Module, ABC):
         Returns:
             sampled_tokens: [num_tokens] - Sampled token ids
         """
+        # Terminate the engine if any row of target logits is unsampleable
+        # (all values non-finite). Spec-decode uses deterministic top-1 for
+        # the target token, and argmax over an all-NaN row deterministically
+        # returns 0 (PAD) on CUDA — silently emitting [PAD][PAD]... instead
+        # of crashing. The bug we're guarding is when *every* position of a
+        # row is non-finite, which makes the row unsampleable.
+        #
+        # NOTE: -inf values from xgrammar-style guided decoding are legitimate
+        # (masked-out tokens). Those rows still have finite values at allowed
+        # positions, so the per-row "any(isfinite)" check correctly accepts
+        # them and only crashes when there are no sampleable positions.
+        #
+        # Compute as a 0-d GPU tensor without .item() so this is safe inside
+        # CUDA graph capture and adds no host sync. The Worker's forward
+        # propagates it into the sampler output dict; the host check happens
+        # in SpecSamplerBase.update_requests where there's already a sync.
+        # See mtp.MTPWorker.sample_and_accept_draft_tokens for the analogous
+        # check on the MTP-relaxed and MTP-strict-thop paths.
+        self.logits_finite = torch.isfinite(logits).any(dim=-1).all()
+        # Counts for the failure diagnostic; only inspected on the crash
+        # path. Cheap GPU reductions, no host sync, no fresh allocations
+        # (safe inside CUDA graph capture).
+        self.logits_nan_count = torch.isnan(logits).sum()
+        self.logits_inf_count = torch.isinf(logits).sum()
+
         if spec_metadata.allow_advanced_sampling:
             from .one_model_sampler import sampling_batch_spec_dec_one_model
 
