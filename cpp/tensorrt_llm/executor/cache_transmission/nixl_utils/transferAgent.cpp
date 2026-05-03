@@ -324,6 +324,14 @@ NixlTransferStatus::NixlTransferStatus(nixlAgent* agent, nixlXferReqH* handle)
     TLLM_CHECK(mHandle);
 }
 
+NixlTransferStatus::~NixlTransferStatus()
+{
+    if (!release())
+    {
+        TLLM_LOG_WARNING("NIXL transfer handle release failed during destruction; backend handle may remain active");
+    }
+}
+
 [[nodiscard]] MemoryDescs NixlHelper::coalesceMemoryDescs(MemoryDescs const& descs)
 {
     auto const& descVec = descs.getDescs();
@@ -484,6 +492,11 @@ NixlTransferStatus::NixlTransferStatus(nixlAgent* agent, nixlXferReqH* handle)
 
 TransferState NixlTransferStatus::wait(int64_t timeout_ms) const
 {
+    if (mHandle == nullptr)
+    {
+        return TransferState::kFAILURE;
+    }
+
     auto startTime = std::chrono::steady_clock::now();
 
     while (true)
@@ -520,7 +533,108 @@ TransferState NixlTransferStatus::wait(int64_t timeout_ms) const
 
 [[nodiscard]] bool NixlTransferStatus::isCompleted() const
 {
+    if (mHandle == nullptr)
+    {
+        return false;
+    }
     return mRawAgent->getXferStatus(mHandle) == NIXL_SUCCESS;
+}
+
+[[nodiscard]] bool NixlTransferStatus::release()
+{
+    if (mHandle == nullptr)
+    {
+        return true;
+    }
+
+    auto status = mRawAgent->releaseXferReq(mHandle);
+    if (status == NIXL_SUCCESS)
+    {
+        mHandle = nullptr;
+        return true;
+    }
+
+    TLLM_LOG_WARNING("NIXL releaseXferReq failed with status: %s", nixlEnumStrings::statusStr(status).c_str());
+    return false;
+}
+
+[[nodiscard]] MemoryDescs NixlHelper::splitVmmDescs(MemoryDescs const& descs, size_t& detectedChunkSize)
+{
+    detectedChunkSize = 0;
+    auto const& descVec = descs.getDescs();
+    if (descVec.empty() || descs.getType() != MemoryType::kVRAM)
+        return descs;
+
+    std::vector<MemoryDesc> result;
+    result.reserve(descVec.size());
+
+    for (auto const& desc : descVec)
+    {
+        uintptr_t addr = desc.getAddr();
+        size_t len = desc.getLen();
+        uint32_t deviceId = desc.getDeviceId();
+
+        if (len == 0)
+            continue;
+
+        // Query start and end of the descriptor
+        CUdeviceptr startBase = 0;
+        size_t startSize = 0;
+        CUresult startErr = cuMemGetAddressRange(&startBase, &startSize, static_cast<CUdeviceptr>(addr));
+
+        CUdeviceptr endBase = 0;
+        size_t endSize = 0;
+        CUresult endErr = cuMemGetAddressRange(&endBase, &endSize, static_cast<CUdeviceptr>(addr + len - 1));
+
+        // If either query fails, or both are in the same allocation -> no split needed
+        if (startErr != CUDA_SUCCESS || endErr != CUDA_SUCCESS || startBase == endBase)
+        {
+            result.emplace_back(addr, len, deviceId);
+            continue;
+        }
+
+        // Multi-chunk VMM detected: use first chunk's size as uniform chunk size
+        size_t chunkSize = startSize;
+
+        TLLM_CHECK_WITH_INFO(endSize == chunkSize,
+            "VMM chunk size mismatch: first chunk %zu bytes, last chunk %zu bytes. "
+            "All VMM chunks must be the same size.",
+            chunkSize, endSize);
+
+        TLLM_CHECK_WITH_INFO(addr % chunkSize == 0,
+            "VMM descriptor start address 0x%lx is not aligned to chunk size %zu. "
+            "Pool base address must be chunk-aligned.",
+            static_cast<unsigned long>(addr), chunkSize);
+
+        if (detectedChunkSize > 0)
+        {
+            TLLM_CHECK_WITH_INFO(chunkSize == detectedChunkSize,
+                "Inconsistent VMM chunk sizes across descriptors: %zu vs %zu. "
+                "All VMM pools must use the same chunk size.",
+                chunkSize, detectedChunkSize);
+        }
+        detectedChunkSize = chunkSize;
+
+        uintptr_t current = addr;
+        size_t remaining = len;
+
+        while (remaining > 0)
+        {
+            size_t offsetInChunk = static_cast<size_t>(current % chunkSize);
+            size_t pieceSize = std::min(remaining, chunkSize - offsetInChunk);
+            result.emplace_back(current, pieceSize, deviceId);
+            current += pieceSize;
+            remaining -= pieceSize;
+        }
+    }
+
+    if (result.size() != descVec.size())
+    {
+        TLLM_LOG_DEBUG("NixlHelper::splitVmmDescs: split %zu -> %zu VRAM entries (chunkSize=%zu)", descVec.size(),
+            result.size(), detectedChunkSize);
+    }
+
+    return MemoryDescs{descs.getType(), std::move(result)};
 }
 
 NixlTransferAgent::NixlTransferAgent(BaseAgentConfig const& config)
