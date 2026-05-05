@@ -1075,4 +1075,8 @@ class NemotronHMTP(nn.Module):
         return hidden_states
 
 
-AutoConfig.register(NemotronHConfig.model_type, NemotronHConfig)
+try:
+    AutoConfig.register(NemotronHConfig.model_type, NemotronHConfig)
+except ValueError:
+    # Already registered natively (transformers>=5)
+    pass

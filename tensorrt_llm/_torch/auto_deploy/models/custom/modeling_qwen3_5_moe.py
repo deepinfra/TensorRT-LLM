@@ -2887,8 +2887,16 @@ class Qwen3_5MoeFactory(AutoModelForImageTextToTextFactory):
 # Registration
 # =============================================================================
 
-AutoConfig.register("qwen3_5_moe", Qwen3_5MoeConfig)
-AutoConfig.register("qwen3_5_moe_text", Qwen3_5MoeTextConfig)
+try:
+    AutoConfig.register("qwen3_5_moe", Qwen3_5MoeConfig)
+except ValueError:
+    # Already registered natively (transformers>=5)
+    pass
+try:
+    AutoConfig.register("qwen3_5_moe_text", Qwen3_5MoeTextConfig)
+except ValueError:
+    # Already registered natively (transformers>=5)
+    pass
 
 AutoModelForCausalLMFactory.register_custom_model_cls("Qwen3_5MoeTextConfig", Qwen3_5MoeForCausalLM)
 AutoModelForCausalLMFactory.register_custom_model_cls(

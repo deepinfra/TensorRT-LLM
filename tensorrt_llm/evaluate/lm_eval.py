@@ -60,13 +60,19 @@ class LmEvalWrapper(TemplateLM):
                  chat_template_kwargs: Optional[dict[str, Any]] = None,
                  model_type: str | None = None,
                  is_force_single_image: bool = False,
-                 output_dir: Optional[str] = None):
+                 output_dir: Optional[str] = None,
+                 sampling_override: bool = False):
         super().__init__()
         self.llm = llm
         self.sampling_params = sampling_params
         self.streaming = streaming
         self.chat_template_kwargs = chat_template_kwargs
         self.output_dir = output_dir
+        # When True, CLI-provided sampling params (temperature/top_k/top_p/seed)
+        # take precedence over task yaml gen_kwargs.  Needed to match the
+        # sampling recipe published by a model card (e.g., Gemma4 26B:
+        # temperature=1.0, top_p=0.95, top_k=64).
+        self.sampling_override = sampling_override
 
     @property
     def eot_token_id(self) -> int:
@@ -128,9 +134,14 @@ class LmEvalWrapper(TemplateLM):
         else:
             sampling_params = copy.deepcopy(self.sampling_params)
 
+        # If sampling_override is set, CLI-provided temperature / top_k / top_p
+        # win over gen_kwargs.  We still respect gen_kwargs' ``until`` stop
+        # tokens and ``max_gen_toks`` (harness computes them from task config).
+        override_keys = {"temperature", "top_p"
+                         } if self.sampling_override else set()
         for lm_eval_key, trtllm_key in params_mapping.items():
             value = gen_kwargs.pop(lm_eval_key, None)
-            if value is not None:
+            if value is not None and lm_eval_key not in override_keys:
                 setattr(sampling_params, trtllm_key, value)
         return sampling_params
 
@@ -181,7 +192,8 @@ class MultimodalLmEvalWrapper(LmEvalWrapper):
                  chat_template_kwargs: Optional[dict[str, Any]] = None,
                  model_type: str | None = None,
                  is_force_single_image: bool = False,
-                 output_dir: Optional[str] = None):
+                 output_dir: Optional[str] = None,
+                 sampling_override: bool = False):
         """
         Initialize the multimodal wrapper.
 
@@ -192,8 +204,13 @@ class MultimodalLmEvalWrapper(LmEvalWrapper):
             max_images: Maximum number of images per prompt (currently unlimited in TRT-LLM), set to 999 from lm_eval's default value.
             chat_template_kwargs: Chat template kwargs as JSON string
             output_dir: Directory to save the task infos.
+            sampling_override: If True, sampling_params override task gen_kwargs.
         """
-        super().__init__(llm, sampling_params, streaming, output_dir=output_dir)
+        super().__init__(llm,
+                         sampling_params,
+                         streaming,
+                         output_dir=output_dir,
+                         sampling_override=sampling_override)
 
         # NOTE: Required by lm_eval to identify this as a multimodal model
         self.MULTIMODAL = True
@@ -203,9 +220,20 @@ class MultimodalLmEvalWrapper(LmEvalWrapper):
             llm)
         self.is_force_single_image = is_force_single_image
 
-        # NOTE: In TRT-LLM, currently we do not support interleaved text and image. Instead, we are adding image placeholders at the end of the text or at the beginning of the text.
-        # So, until we support interleaved text and image, we set this to False.
-        self.interleave = False
+        # For OPENAI content-format templates (e.g., Gemma4, Qwen2.5-VL), preserve
+        # the original interleaved positions of images inside the question text.
+        # Benchmarks such as MMMU Pro embed ``<image N>`` tags inside the question
+        # (e.g., "Consider <image 1>. What does <image 2> show?") and lose answer
+        # grounding when all images are bulk-prepended before the text.  Setting
+        # interleave=True makes apply_chat_template below produce a
+        # ``content_parts`` list that interleaves text segments with media entries,
+        # which ``_build_openai_content`` turns into a correctly-ordered OpenAI
+        # content list.  Effect is bounded by the fraction of multi-image
+        # questions in the task — modest on MMMU Pro (~8% multi-image, ~+1 pp)
+        # but critical when it matters.  STRING-template paths still use the old
+        # strip-and-prepend behaviour (interleaving is handled via the registered
+        # placeholder_placement at the content-flattening step).
+        self.interleave = True
 
     def _get_model_type(self, llm: Union[LLM, PyTorchLLM]) -> str:
         """Extract model type from the model configuration."""
@@ -256,15 +284,40 @@ class MultimodalLmEvalWrapper(LmEvalWrapper):
             image_count = min(self.max_images,
                               text.count(LM_EVAL_DEFAULT_IMAGE_PLACEHOLDER))
 
-            if self.interleave:
-                # TODO: Implement interleaved text and image.
-                text.split(LM_EVAL_DEFAULT_IMAGE_PLACEHOLDER)
-                ...
+            # Interleaved content_parts is only meaningful for OPENAI
+            # templates (which consume a list-of-dicts content). STRING
+            # templates use add_multimodal_placeholders on the flat text.
+            build_interleaved = (self.interleave and image_count > 1
+                                 and content_format == ContentFormat.OPENAI)
+            content_parts = None
+            if build_interleaved:
+                segments = text.split(LM_EVAL_DEFAULT_IMAGE_PLACEHOLDER)
+                # N images -> N+1 segments; keep only the first ``image_count``
+                # splits so trailing images past ``max_images`` are dropped.
+                if len(segments) > image_count + 1:
+                    segments = segments[:image_count] + [
+                        LM_EVAL_DEFAULT_IMAGE_PLACEHOLDER.join(
+                            segments[image_count:])
+                    ]
+                content_parts = []
+                for seg_idx, seg in enumerate(segments):
+                    if seg:
+                        content_parts.append(seg)
+                    if seg_idx < image_count:
+                        content_parts.append({
+                            "type": "image",
+                            "media_index": seg_idx,
+                        })
+                # Also strip placeholders from the flat text in case any
+                # downstream path uses ``content`` directly.
+                text = "".join(s for s in segments)
             else:
                 text = text.replace(LM_EVAL_DEFAULT_IMAGE_PLACEHOLDER, "")
 
             conv = ConversationMessage(role=content.get("role", "user"),
                                        content=text)
+            if content_parts is not None:
+                conv["content_parts"] = content_parts
             mm_data_tracker = MultimodalDataTracker(self.model_type)
 
             # NOTE: Since we already have loaded images, for the placeholder purpose, we add data here.
@@ -478,8 +531,12 @@ class LmEvalEvaluator(Evaluator):
         path = Path(self.output_path)
         path.mkdir(parents=True, exist_ok=True)
         result_path = (path / f"samples_{self.task_name}.json")
+        # lm-eval's filter_list embeds live function objects in the config
+        # payload, so a vanilla json.dump raises TypeError.  Fall back to
+        # repr() for anything that isn't directly serializable instead of
+        # losing the per-sample outputs users want to inspect.
         with open(result_path, "w") as f:
-            json.dump(results, f, indent=2)
+            json.dump(results, f, indent=2, default=repr)
         logger.info(f"Results saved to {result_path}")
 
     def evaluate(self,
@@ -488,7 +545,8 @@ class LmEvalEvaluator(Evaluator):
                  streaming: bool = False,
                  scores_filter: str = None,
                  model_type: str = None,
-                 is_force_single_image: bool = False) -> float:
+                 is_force_single_image: bool = False,
+                 sampling_override: bool = False) -> float:
         import lm_eval
         lm_cls = MultimodalLmEvalWrapper if self.MULTIMODAL else LmEvalWrapper
 
@@ -499,7 +557,8 @@ class LmEvalEvaluator(Evaluator):
                       chat_template_kwargs=self.chat_template_kwargs,
                       model_type=model_type,
                       is_force_single_image=is_force_single_image,
-                      output_dir=self.output_dir),
+                      output_dir=self.output_dir,
+                      sampling_override=sampling_override),
             task_dict=self.task_dict,
             limit=self.num_samples,
             apply_chat_template=self.apply_chat_template,
@@ -550,11 +609,33 @@ class LmEvalEvaluator(Evaluator):
                         log_samples=kwargs.pop("log_samples", False),
                         output_path=kwargs.pop("output_path", None),
                         output_dir=kwargs.pop("output_dir", None))
+        # Optional sampling overrides (default: greedy, as before).
+        # When any of temperature / top_p / top_k / seed is set, the wrapper
+        # uses CLI values in preference to the task yaml's gen_kwargs so
+        # model-card sampling recipes can be faithfully reproduced.
+        temperature = kwargs.pop("temperature", None)
+        top_p = kwargs.pop("top_p", None)
+        top_k = kwargs.pop("top_k", None)
+        seed = kwargs.pop("sampling_seed", None)
+        sampling_override = any(x is not None
+                                for x in (temperature, top_p, top_k, seed))
+        sp_kwargs = {}
+        if temperature is not None:
+            sp_kwargs["temperature"] = float(temperature)
+        if top_p is not None:
+            sp_kwargs["top_p"] = float(top_p)
+        if top_k is not None:
+            sp_kwargs["top_k"] = int(top_k)
+        if seed is not None:
+            sp_kwargs["seed"] = int(seed)
         sampling_params = SamplingParams(
             max_tokens=kwargs.pop("max_output_length"),
             truncate_prompt_tokens=kwargs.pop("max_input_length"),
-            stop=kwargs.pop("stop", None))
-        evaluator.evaluate(llm, sampling_params)
+            stop=kwargs.pop("stop", None),
+            **sp_kwargs)
+        evaluator.evaluate(llm,
+                           sampling_params,
+                           sampling_override=sampling_override)
         llm.shutdown()
 
 
@@ -606,6 +687,23 @@ class GSM8K(LmEvalEvaluator):
                   type=int,
                   default=256,
                   help="Maximum generation length.")
+    @click.option("--temperature",
+                  type=float,
+                  default=None,
+                  help="Sampling temperature. Overrides task yaml gen_kwargs.")
+    @click.option(
+        "--top_p",
+        type=float,
+        default=None,
+        help="Nucleus sampling top_p. Overrides task yaml gen_kwargs.")
+    @click.option("--top_k",
+                  type=int,
+                  default=None,
+                  help="Top-k sampling. Overrides task yaml gen_kwargs.")
+    @click.option("--sampling_seed",
+                  type=int,
+                  default=None,
+                  help="Random seed for generation sampling.")
     @click.option("--log_samples",
                   is_flag=True,
                   default=False,
@@ -684,6 +782,24 @@ class GPQADiamond(LmEvalEvaluator):
                   type=str,
                   default=None,
                   help="Directory to save the task infos.")
+    @click.option("--temperature",
+                  type=float,
+                  default=None,
+                  help="Sampling temperature. Overrides task yaml gen_kwargs.")
+    @click.option(
+        "--top_p",
+        type=float,
+        default=None,
+        help="Nucleus sampling top_p. Overrides task yaml gen_kwargs.")
+    @click.option("--top_k",
+                  type=int,
+                  default=None,
+                  help="Top-k sampling. Overrides task yaml gen_kwargs.")
+    @click.option("--sampling_seed",
+                  type=int,
+                  default=None,
+                  help="Random seed for generation sampling "
+                  "(per-request; does not affect dataset order).")
     @click.pass_context
     @staticmethod
     def command(ctx, **kwargs) -> None:
@@ -812,6 +928,150 @@ class GPQAExtended(LmEvalEvaluator):
     @staticmethod
     def command(ctx, **kwargs) -> None:
         GPQAExtended.command_harness(ctx, **kwargs)
+
+
+class MMMUPro(LmEvalEvaluator):
+    """MMMU Pro benchmark — 10-option multimodal multiple-choice QA.
+
+    MMMU Pro (https://huggingface.co/datasets/MMMU/MMMU_Pro) is a harder
+    sibling of MMMU with an expanded option set and a broader mix of
+    subjects.  Gemma4's HF blog reports MMMU Pro numbers, so we expose it
+    here as a first-class trtllm-eval task backed by a custom lm-eval
+    task yaml under ``tensorrt_llm/evaluate/lm_eval_tasks/mmmu_pro``.
+    """
+
+    def __init__(self, subset: str = "standard_10", **kwargs):
+        task_name = {
+            "standard_10": "mmmu_pro_standard_10",
+            "standard_4": "mmmu_pro_standard_4",
+        }.get(subset, subset)
+        super().__init__(task_name, **kwargs)
+
+    @click.command("mmmu_pro")
+    @click.option("--subset",
+                  type=click.Choice(["standard_10", "standard_4"]),
+                  default="standard_10",
+                  help=("MMMU Pro subset to evaluate. "
+                        "'standard_10' is the 10-option multiple-choice set "
+                        "reported on the Gemma4 model card (default); "
+                        "'standard_4' is the easier 4-option variant."))
+    @click.option("--dataset_path",
+                  type=str,
+                  default=None,
+                  help="The path to MMMU Pro dataset. "
+                  "If unspecified, the dataset is downloaded from HF hub.")
+    @click.option(
+        "--num_samples",
+        type=int,
+        default=None,
+        help="Number of samples to run the evaluation; None means full dataset."
+    )
+    @click.option("--random_seed",
+                  type=int,
+                  default=0,
+                  help="Random seed for dataset processing.")
+    @click.option(
+        "--chat_template_kwargs",
+        type=str,
+        default=None,
+        callback=lambda ctx, param, value: json.loads(value) if value else None,
+        help=
+        'Chat template kwargs as JSON string, e.g., \'{"thinking_budget": 0}\'')
+    @click.option(
+        "--system_prompt",
+        type=str,
+        default=None,
+        help=
+        "The system prompt to be added on the prompt. If specified, it will add {'role': 'system', 'content': system_prompt} to the prompt."
+    )
+    @click.option("--max_input_length",
+                  type=int,
+                  default=8192,
+                  help="Maximum prompt length.")
+    @click.option("--max_output_length",
+                  type=int,
+                  default=512,
+                  help="Maximum generation length.")
+    @click.option("--temperature",
+                  type=float,
+                  default=None,
+                  help="Sampling temperature. Overrides task yaml gen_kwargs.")
+    @click.option(
+        "--top_p",
+        type=float,
+        default=None,
+        help="Nucleus sampling top_p. Overrides task yaml gen_kwargs.")
+    @click.option("--top_k",
+                  type=int,
+                  default=None,
+                  help="Top-k sampling. Overrides task yaml gen_kwargs.")
+    @click.option("--sampling_seed",
+                  type=int,
+                  default=None,
+                  help="Random seed for generation sampling.")
+    @click.option("--log_samples",
+                  is_flag=True,
+                  default=False,
+                  help="Log sample outputs for debugging.")
+    @click.option("--output_path",
+                  type=str,
+                  default=None,
+                  help="Path to save evaluation results.")
+    @click.option("--output_dir",
+                  type=str,
+                  default=None,
+                  help="Directory to save the task infos.")
+    @click.pass_context
+    @staticmethod
+    def command(ctx, **kwargs) -> None:
+        kwargs["is_multimodal"] = True
+        kwargs["apply_chat_template"] = True
+        kwargs["stop"] = "<|endoftext|>"
+        MMMUPro.command_harness(ctx, **kwargs)
+
+    @classmethod
+    def command_harness(cls, ctx, **kwargs):
+        llm = ctx.obj
+        subset = kwargs.pop("subset", "standard_10")
+
+        evaluator = cls(subset=subset,
+                        dataset_path=kwargs.pop("dataset_path", None),
+                        num_samples=kwargs.pop("num_samples", None),
+                        random_seed=kwargs.pop("random_seed", 0),
+                        apply_chat_template=kwargs.pop("apply_chat_template",
+                                                       False),
+                        system_prompt=kwargs.pop("system_prompt", None),
+                        is_multimodal=kwargs.pop("is_multimodal", False),
+                        chat_template_kwargs=kwargs.pop("chat_template_kwargs",
+                                                        None),
+                        log_samples=kwargs.pop("log_samples", False),
+                        output_path=kwargs.pop("output_path", None),
+                        output_dir=kwargs.pop("output_dir", None))
+
+        temperature = kwargs.pop("temperature", None)
+        top_p = kwargs.pop("top_p", None)
+        top_k = kwargs.pop("top_k", None)
+        seed = kwargs.pop("sampling_seed", None)
+        sampling_override = any(x is not None
+                                for x in (temperature, top_p, top_k, seed))
+        sp_kwargs = {}
+        if temperature is not None:
+            sp_kwargs["temperature"] = float(temperature)
+        if top_p is not None:
+            sp_kwargs["top_p"] = float(top_p)
+        if top_k is not None:
+            sp_kwargs["top_k"] = int(top_k)
+        if seed is not None:
+            sp_kwargs["seed"] = int(seed)
+        sampling_params = SamplingParams(
+            max_tokens=kwargs.pop("max_output_length"),
+            truncate_prompt_tokens=kwargs.pop("max_input_length"),
+            stop=kwargs.pop("stop", None),
+            **sp_kwargs)
+        evaluator.evaluate(llm,
+                           sampling_params,
+                           sampling_override=sampling_override)
+        llm.shutdown()
 
 
 class MMMU(LmEvalEvaluator):
@@ -1053,3 +1313,239 @@ class LongBenchV1(LmEvalEvaluator):
 
         evaluator.evaluate(llm, sampling_params)
         llm.shutdown()
+
+
+class AIME2026(LmEvalEvaluator):
+    """AIME 2026 no-tools (30 problems, MathArena/aime_2026).
+
+    Task yaml + process_results utilities live under
+    ``tensorrt_llm/evaluate/lm_eval_tasks/aime/`` since upstream lm-eval does
+    not ship an ``aime26`` task as of writing. ``LmEvalEvaluator`` passes
+    ``include_path`` for that directory to the lm-eval ``TaskManager`` so the
+    local yaml is discoverable alongside upstream tasks.
+
+    "no tools" = no code interpreter / calculator, which is the default for
+    lm-eval generate_until tasks. As with aime25, the harness yaml is greedy
+    / single-sample; pass ``--temperature``/``--top_p``/``--top_k`` with
+    multiple ``--sampling_seed`` runs to approximate model-card avg@k.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__("aime26", **kwargs)
+
+    @click.command("aime26")
+    @click.option("--dataset_path",
+                  type=str,
+                  default=None,
+                  help="The path to AIME 2026 dataset. "
+                  "If unspecified, the dataset is downloaded from HF hub "
+                  "(MathArena/aime_2026).")
+    @click.option(
+        "--num_samples",
+        type=int,
+        default=None,
+        help=
+        "Number of samples to run the evaluation; None means full dataset (30)."
+    )
+    @click.option("--random_seed",
+                  type=int,
+                  default=0,
+                  help="Random seed for dataset processing.")
+    @click.option("--apply_chat_template",
+                  type=click.BOOL,
+                  default=True,
+                  show_default=True,
+                  help="Whether to apply chat template. Default True — "
+                  "AIME is generation+chat-tuned-model, raw completion-style "
+                  "prompt typically degenerates on instruct models.")
+    @click.option(
+        "--chat_template_kwargs",
+        type=str,
+        default='{"thinking_budget": 32768}',
+        show_default=True,
+        callback=lambda ctx, param, value: json.loads(value) if value else None,
+        help='Chat template kwargs as JSON string. Default enables Gemma-style '
+        'thinking with a 32k budget (set thinking_budget to 0 to disable '
+        'thinking, or pass e.g. \'{"enable_thinking": true}\' for Qwen-style '
+        'templates).')
+    @click.option("--fewshot_as_multiturn",
+                  is_flag=True,
+                  default=False,
+                  help="Apply fewshot as multiturn.")
+    @click.option("--system_prompt",
+                  type=str,
+                  default=None,
+                  help="System prompt.")
+    @click.option("--max_input_length",
+                  type=int,
+                  default=4096,
+                  help="Maximum prompt length.")
+    @click.option("--max_output_length",
+                  type=int,
+                  default=32768,
+                  show_default=True,
+                  help="Maximum generation length "
+                  "(AIME is long-CoT; upstream yaml uses max_gen_toks=32768). "
+                  "Must fit within trtllm-eval --max_seq_len = "
+                  "max_input_length + max_output_length.")
+    @click.option("--temperature",
+                  type=float,
+                  default=1.0,
+                  show_default=True,
+                  help="Sampling temperature. Default matches the Gemma 4 "
+                  "recommended recipe (temperature=1.0); overrides task yaml "
+                  "gen_kwargs (which is greedy). Pass --temperature 0 to "
+                  "reproduce the lm-eval greedy leaderboard score.")
+    @click.option(
+        "--top_p",
+        type=float,
+        default=0.95,
+        show_default=True,
+        help="Nucleus sampling top_p. Default 0.95 per Gemma 4 recipe. "
+        "Overrides task yaml gen_kwargs.")
+    @click.option("--top_k",
+                  type=int,
+                  default=64,
+                  show_default=True,
+                  help="Top-k sampling. Default 64 per Gemma 4 recipe. "
+                  "Overrides task yaml gen_kwargs.")
+    @click.option("--sampling_seed",
+                  type=int,
+                  default=None,
+                  help="Random seed for generation sampling "
+                  "(per-request; does not affect dataset order).")
+    @click.option("--log_samples",
+                  is_flag=True,
+                  default=False,
+                  help="Log sample outputs for debugging.")
+    @click.option("--output_path",
+                  type=str,
+                  default=None,
+                  help="Path to save evaluation results.")
+    @click.option("--output_dir",
+                  type=str,
+                  default=None,
+                  help="Directory to save the task infos.")
+    @click.pass_context
+    @staticmethod
+    def command(ctx, **kwargs) -> None:
+        if kwargs.get("fewshot_as_multiturn", False):
+            assert kwargs.get(
+                "apply_chat_template", False
+            ), "apply_chat_template must be True when fewshot_as_multiturn is True"
+        AIME2026.command_harness(ctx, **kwargs)
+
+
+class AIME2025(LmEvalEvaluator):
+    """AIME 2025 (30 problems) via upstream lm-evaluation-harness ``aime25`` task.
+
+    Defaults to the harness's greedy / single-sample recipe, which matches the
+    lm-eval leaderboard. To reproduce model-card style avg@k scores, pass
+    ``--temperature``/``--top_p``/``--top_k`` (sampling_override=True) and run
+    multiple times with different ``--sampling_seed`` values, then average.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__("aime25", **kwargs)
+
+    @click.command("aime25")
+    @click.option("--dataset_path",
+                  type=str,
+                  default=None,
+                  help="The path to AIME 2025 dataset. "
+                  "If unspecified, the dataset is downloaded from HF hub "
+                  "(math-ai/aime25).")
+    @click.option(
+        "--num_samples",
+        type=int,
+        default=None,
+        help=
+        "Number of samples to run the evaluation; None means full dataset (30)."
+    )
+    @click.option("--random_seed",
+                  type=int,
+                  default=0,
+                  help="Random seed for dataset processing.")
+    @click.option("--apply_chat_template",
+                  type=click.BOOL,
+                  default=True,
+                  show_default=True,
+                  help="Whether to apply chat template. Default True — "
+                  "AIME is generation+chat-tuned-model, raw completion-style "
+                  "prompt typically degenerates on instruct models.")
+    @click.option(
+        "--chat_template_kwargs",
+        type=str,
+        default='{"thinking_budget": 32768}',
+        show_default=True,
+        callback=lambda ctx, param, value: json.loads(value) if value else None,
+        help='Chat template kwargs as JSON string. Default enables Gemma-style '
+        'thinking with a 32k budget (set thinking_budget to 0 to disable '
+        'thinking, or pass e.g. \'{"enable_thinking": true}\' for Qwen-style '
+        'templates).')
+    @click.option("--fewshot_as_multiturn",
+                  is_flag=True,
+                  default=False,
+                  help="Apply fewshot as multiturn.")
+    @click.option("--system_prompt",
+                  type=str,
+                  default=None,
+                  help="System prompt.")
+    @click.option("--max_input_length",
+                  type=int,
+                  default=4096,
+                  help="Maximum prompt length.")
+    @click.option("--max_output_length",
+                  type=int,
+                  default=32768,
+                  show_default=True,
+                  help="Maximum generation length "
+                  "(AIME is long-CoT; upstream yaml uses max_gen_toks=32768). "
+                  "Must fit within trtllm-eval --max_seq_len = "
+                  "max_input_length + max_output_length.")
+    @click.option("--temperature",
+                  type=float,
+                  default=1.0,
+                  show_default=True,
+                  help="Sampling temperature. Default matches the Gemma 4 "
+                  "recommended recipe (temperature=1.0); overrides task yaml "
+                  "gen_kwargs (which is greedy). Pass --temperature 0 to "
+                  "reproduce the lm-eval greedy leaderboard score.")
+    @click.option(
+        "--top_p",
+        type=float,
+        default=0.95,
+        show_default=True,
+        help="Nucleus sampling top_p. Default 0.95 per Gemma 4 recipe. "
+        "Overrides task yaml gen_kwargs.")
+    @click.option("--top_k",
+                  type=int,
+                  default=64,
+                  show_default=True,
+                  help="Top-k sampling. Default 64 per Gemma 4 recipe. "
+                  "Overrides task yaml gen_kwargs.")
+    @click.option("--sampling_seed",
+                  type=int,
+                  default=None,
+                  help="Random seed for generation sampling "
+                  "(per-request; does not affect dataset order).")
+    @click.option("--log_samples",
+                  is_flag=True,
+                  default=False,
+                  help="Log sample outputs for debugging.")
+    @click.option("--output_path",
+                  type=str,
+                  default=None,
+                  help="Path to save evaluation results.")
+    @click.option("--output_dir",
+                  type=str,
+                  default=None,
+                  help="Directory to save the task infos.")
+    @click.pass_context
+    @staticmethod
+    def command(ctx, **kwargs) -> None:
+        if kwargs.get("fewshot_as_multiturn", False):
+            assert kwargs.get(
+                "apply_chat_template", False
+            ), "apply_chat_template must be True when fewshot_as_multiturn is True"
+        AIME2025.command_harness(ctx, **kwargs)
