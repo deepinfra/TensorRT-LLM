@@ -6,6 +6,7 @@ from .modeling_clip import CLIPVisionModel
 from .modeling_cohere2 import Cohere2ForCausalLM
 from .modeling_deepseekv3 import DeepseekV3ForCausalLM
 from .modeling_deepseekv4 import DeepseekV4ForCausalLM
+from .modeling_kimi_k25 import KimiK25ForConditionalGeneration
 from .modeling_exaone4 import Exaone4ForCausalLM
 from .modeling_exaone_moe import ExaoneMoeForCausalLM
 from .modeling_gemma3 import Gemma3ForCausalLM
@@ -48,6 +49,7 @@ __all__ = [
     "BertForSequenceClassification",
     "CLIPVisionModel",
     "DeepseekV3ForCausalLM",
+    "KimiK25ForConditionalGeneration",
     "Exaone4ForCausalLM",
     "ExaoneMoeForCausalLM",
     "Gemma3ForCausalLM",

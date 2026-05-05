@@ -313,12 +313,21 @@ class ModelConfig(Generic[TConfig]):
 
         json_quant_configs = quant_config_dict['quantization']
 
-        quant_config.quant_algo = json_quant_configs.get('quant_algo', None)
+        raw_quant_algo = json_quant_configs.get('quant_algo', None)
         # fp8_pb_wo from modelopt is the same as FP8_BLOCK_SCALES
-        if quant_config.quant_algo == "fp8_pb_wo":
-            quant_config.quant_algo = 'FP8_BLOCK_SCALES'
-        quant_config.kv_cache_quant_algo = json_quant_configs.get(
-            'kv_cache_quant_algo', None)
+        if raw_quant_algo == "fp8_pb_wo":
+            raw_quant_algo = 'FP8_BLOCK_SCALES'
+        # Normalize JSON strings to QuantAlgo enum members. On Python 3.11+
+        # with strenum >= 0.4.15, StrEnum auto() generates lowercase values
+        # (e.g. "fp8"), but hf_quant_config.json stores uppercase member names
+        # (e.g. "FP8"). Use name-based lookup to handle both cases.
+        quant_config.quant_algo = (
+            QuantAlgo[raw_quant_algo.upper()]
+            if raw_quant_algo is not None else None)
+        raw_kv_algo = json_quant_configs.get('kv_cache_quant_algo', None)
+        quant_config.kv_cache_quant_algo = (
+            QuantAlgo[raw_kv_algo.upper()]
+            if raw_kv_algo is not None else None)
         quant_config.group_size = json_quant_configs.get('group_size', None)
         quant_config.exclude_modules = json_quant_configs.get(
             'exclude_modules', None)
@@ -337,15 +346,18 @@ class ModelConfig(Generic[TConfig]):
                 )
             json_quant_configs.update(json_extended_quant_configs)
             # kv_cache_quant_algo is global regardless of MIXED_PRECISION
-            kv_cache_quant_algo = json_quant_configs.get(
+            raw_kv_algo_mp = json_quant_configs.get(
                 'kv_cache_quant_algo', None)
+            kv_cache_quant_algo = (QuantAlgo[raw_kv_algo_mp.upper()]
+                                   if raw_kv_algo_mp is not None else None)
             mixed_quant_configs = json_quant_configs.get(
                 'quantized_layers', None)
             if (kv_quant_lhs := json_extended_quant_configs.get(
                     "kv_cache_quant_algo", None)) is not None and (
                         kv_quant_rhs :=
                         quant_config.kv_cache_quant_algo) is not None:
-                if kv_quant_lhs != kv_quant_rhs:
+                kv_quant_lhs_norm = QuantAlgo[kv_quant_lhs.upper()]
+                if kv_quant_lhs_norm != kv_quant_rhs:
                     raise RuntimeError(
                         f"The kvcache config in 'quant_cfg.json', {kv_quant_lhs},"
                         f"is different from 'hf_quant_config.json', {kv_quant_rhs}!"
@@ -354,7 +366,9 @@ class ModelConfig(Generic[TConfig]):
             for layer in mixed_quant_configs:
                 config = QuantConfig()
                 config.kv_cache_quant_algo = kv_cache_quant_algo
-                config.quant_algo = mixed_quant_configs[layer]['quant_algo']
+                raw_layer_algo = mixed_quant_configs[layer]['quant_algo']
+                config.quant_algo = (QuantAlgo[raw_layer_algo.upper()]
+                                     if raw_layer_algo is not None else None)
                 config.group_size = mixed_quant_configs[layer].get(
                     'group_size', None)
                 mixed_quant_configs[layer] = config

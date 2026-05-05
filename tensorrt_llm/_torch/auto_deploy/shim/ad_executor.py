@@ -502,6 +502,7 @@ class ADEngine(ModelEngine):
         self.llm_args.enable_iter_perf_stats = reporting_info.enable_iter_perf_stats
         self.llm_args.enable_iter_req_stats = reporting_info.enable_iter_req_stats
         self.llm_args.stream_interval = 1
+        self.llm_args.stream_interval_ms = 0
         self.llm_args.attention_dp_config = None
         self.llm_args.batch_wait_timeout_ms = 0
         self.llm_args.batch_wait_timeout_iters = 0
