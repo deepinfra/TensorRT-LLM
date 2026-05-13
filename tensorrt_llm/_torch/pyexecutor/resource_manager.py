@@ -1909,6 +1909,8 @@ class KVCacheManagerV2(BaseResourceManager):
         self.is_disagg = is_disagg
 
         assert kv_connector_manager is None, "kv_connector_manager is not supported for KVCacheManagerV2"
+        # V2 has no kv connector; method needed by shared prepare_resources path.
+        self.kv_connector_manager = None
         assert max_beam_width == 1, "max_beam_width must be 1 for KVCacheManagerV2"
         assert not (mapping.cp_config.get('cp_type') == CpType.STAR), \
             "Star attention is not supported for KVCacheManagerV2"
@@ -2784,6 +2786,12 @@ class KVCacheManagerV2(BaseResourceManager):
 
     # ---- prepare_resources ----
 
+    def _kv_connector_should_add_sequence(self, request: LlmRequest) -> bool:
+        """V2 does not support kv_connector_manager; always add the sequence.
+        Matches the V1 method's semantics when kv_connector_manager is None,
+        which is the only configuration V2 allows."""
+        return True
+
     @nvtx_range("prepare_resources_kv_cache_manager_v2")
     def prepare_resources(self, scheduled_batch: ScheduledRequests):
         if self.is_draft:
@@ -2805,13 +2813,24 @@ class KVCacheManagerV2(BaseResourceManager):
                         "Star attention is not supported for kv cache manager v2"
                     )
                 else:
-                    if req.is_first_context_chunk and self._kv_connector_should_add_sequence(
-                            req):
-                        # Last token cannot be recovered, so we don't include it in the input tokens to look up for the block that can be reused.
-                        kv_cache = self._create_kv_cache(
-                            req.py_request_id, req.lora_task_id,
-                            req.get_tokens(DEFAULT_BEAM_INDEX)[:-1]
-                            if self.enable_block_reuse else None)
+                    # Idempotent re-entry guard: the overlap scheduler can
+                    # invoke prepare_resources on the same first-chunk request
+                    # twice (e.g. once for CPU-side scheduling, once for the
+                    # actual GPU step). V1 tracks this via _active_sequences;
+                    # V2 skips the first-chunk setup if the KV cache for this
+                    # request already exists and is active.
+                    _existing = self.kv_cache_map.get(req.py_request_id)
+                    if (req.is_first_context_chunk
+                            and self._kv_connector_should_add_sequence(req)
+                            and not (_existing is not None and _existing.is_active)):
+                        if _existing is None:
+                            # Last token cannot be recovered, so we don't include it in the input tokens to look up for the block that can be reused.
+                            kv_cache = self._create_kv_cache(
+                                req.py_request_id, req.lora_task_id,
+                                req.get_tokens(DEFAULT_BEAM_INDEX)[:-1]
+                                if self.enable_block_reuse else None)
+                        else:
+                            kv_cache = _existing
                         assert beam_width == 1, "Currently, KVCacheManagerV2 only supports beam width 1"
                         if not self.enable_block_reuse:
                             assert kv_cache.num_committed_tokens == 0

@@ -779,7 +779,13 @@ class MTPWorker(SpecWorkerBase):
         # wraps this call in `except Exception` and recovers via _handle_errors,
         # which would let the engine continue running with a poisoned KV cache.
         # Hard-exit so the supervisor restarts the pod.
-        if not torch.isfinite(logits).all().item():
+        #
+        # Skip the check while CUDA graph capture is in progress: `.item()` would
+        # force a host sync, which fails capture with cudaErrorStreamCaptureUnsupported.
+        # Warmup uses dummy inputs that are always finite anyway, so the check would
+        # always pass during capture. Real-traffic eager-mode forward still runs this.
+        if not torch.cuda.is_current_stream_capturing() and \
+                not torch.isfinite(logits).all().item():
             msg = ("FATAL: non-finite target logits in spec-decode sampler — "
                    "likely FP8 KV cache poisoning. Terminating engine.")
             logger.error(msg)
