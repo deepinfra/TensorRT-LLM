@@ -1425,10 +1425,6 @@ public:
     [[nodiscard]] PrefixReuseSummary analyzePrefixReuse(
         VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const;
 
-    //! \brief Count referenced reusable blocks (blocks shared with active sequences, not in free queue).
-    //! \details WILL NOT WORK FOR VARIABLE WINDOW ATTENTION.
-    [[nodiscard]] SizeType32 countReferencedReusableBlocks(
-        VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const;
 
     //! \brief Bring block from primary to secondary memory for window size.
     //! \details Does nothing if block is already in primary memory.
