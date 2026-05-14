@@ -779,7 +779,14 @@ class MTPWorker(SpecWorkerBase):
         # wraps this call in `except Exception` and recovers via _handle_errors,
         # which would let the engine continue running with a poisoned KV cache.
         # Hard-exit so the supervisor restarts the pod.
-        if not torch.isfinite(logits).all().item():
+        #
+        # Skip the check during CUDA graph capture: `.item()` is a synchronous
+        # device→host transfer and is forbidden under capture
+        # (cudaErrorStreamCaptureUnsupported). Capture only runs at warmup with
+        # synthetic inputs, so NaN poisoning of the real KV cache is not a concern
+        # for the captured graph; the check still runs on every real iteration.
+        if not torch.cuda.is_current_stream_capturing() \
+                and not torch.isfinite(logits).all().item():
             msg = ("FATAL: non-finite target logits in spec-decode sampler — "
                    "likely FP8 KV cache poisoning. Terminating engine.")
             logger.error(msg)
