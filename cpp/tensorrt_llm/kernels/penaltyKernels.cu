@@ -204,6 +204,7 @@ __global__ void batchApplyPenalty(T const* const* inputLogits, T* outputLogits, 
                         logit = logit < 0.0f ? logit * repetitionPenalty : logit / repetitionPenalty;
                     }
                 }
+
                 if (numOccurences > 0)
                 {
                     // Presence
