@@ -606,6 +606,13 @@ class KVCacheManager:
 
     @property
     def need_adjustment(self) -> bool:
+        # Workaround for a CUDA_ERROR_ILLEGAL_ADDRESS crash in
+        # cuEventSynchronize during cache shrink under heavy MTP + V2 traffic.
+        # Setting this env var disables periodic cache resize entirely, which
+        # prevents the slot-recycle event from being synced on a freed handle.
+        import os
+        if os.environ.get("TRTLLM_DISABLE_KV_CACHE_ADJUST", "0") == "1":
+            return False
         if self._num_sampled_kv_caches < 2000:
             return False
         if time.monotonic() - self._last_adjustment_time < 120:
