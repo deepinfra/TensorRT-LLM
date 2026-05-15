@@ -562,7 +562,7 @@ class SamplingParams:
 
         if self.guided_decoding.json_object:
             return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.JSON, None, self.guided_decoding.guidance_start_token_id,
+                tllme.GuidedDecodingParams.GuideType.JSON, None,
             )
         elif self.guided_decoding.json is not None:
             json_schema = self.guided_decoding.json
@@ -571,21 +571,20 @@ class SamplingParams:
             if isinstance(json_schema, dict):
                 json_schema = json.dumps(json_schema)
             return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.JSON_SCHEMA, json_schema, self.guided_decoding.guidance_start_token_id
+                tllme.GuidedDecodingParams.GuideType.JSON_SCHEMA, json_schema,
             )
         elif self.guided_decoding.regex is not None:
             return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.REGEX, self.guided_decoding.regex, self.guided_decoding.guidance_start_token_id
+                tllme.GuidedDecodingParams.GuideType.REGEX, self.guided_decoding.regex,
             )
         elif self.guided_decoding.grammar is not None:
             return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.EBNF_GRAMMAR, self.guided_decoding.grammar, self.guided_decoding.guidance_start_token_id
+                tllme.GuidedDecodingParams.GuideType.EBNF_GRAMMAR, self.guided_decoding.grammar,
             )
         elif self.guided_decoding.structural_tag is not None:
             return tllme.GuidedDecodingParams(
                 tllme.GuidedDecodingParams.GuideType.STRUCTURAL_TAG,
                 self.guided_decoding.structural_tag,
-                self.guided_decoding.guidance_start_token_id,
             )
         else:
             return None
