@@ -1128,6 +1128,51 @@ void WindowBlockManager::freeChildren(BlockPtr const& block)
     block->freeBlockAndAllDescendants();
 }
 
+void WindowBlockManager::zeroBlockMemory(BlockPtr const& block)
+{
+    auto const blockId = static_cast<size_t>(block->getBlockId());
+    auto stream = mBufferManager.getStream().get();
+    for (auto const& pool : mPools)
+    {
+        if (!pool.primaryPtr)
+        {
+            continue;
+        }
+        auto& tensor = *pool.primaryPtr;
+        if (tensor.getMemoryType() == runtime::MemoryType::kCPU)
+        {
+            // Defensive skip; primary pools are GPU/managed in practice.
+            continue;
+        }
+        auto* basePtr = static_cast<uint8_t*>(tensor.data());
+        if (basePtr == nullptr)
+        {
+            continue;
+        }
+        auto const elementSize = runtime::BufferDataType(tensor.getDataType()).getSize();
+        auto const perBlockBytes
+            = static_cast<size_t>(pool.numLayers) * pool.kvFactor * pool.blockSize * elementSize;
+        if (!pool.layerFirstLayout)
+        {
+            // Default layout: [numBlocks, numLayers, kvFactor, blockSize]
+            auto* dst = basePtr + blockId * perBlockBytes;
+            TLLM_CUDA_CHECK(cudaMemsetAsync(dst, 0, perBlockBytes, stream));
+        }
+        else
+        {
+            // Recurrent state layout: [numLayers, numBlocks, kvFactor, blockSize]
+            auto const shape = tensor.getShape();
+            auto const numBlocks = static_cast<size_t>(shape.d[1]);
+            auto const perLayerBytes = static_cast<size_t>(pool.kvFactor) * pool.blockSize * elementSize;
+            for (SizeType32 l = 0; l < pool.numLayers; ++l)
+            {
+                auto* dst = basePtr + (static_cast<size_t>(l) * numBlocks + blockId) * perLayerBytes;
+                TLLM_CUDA_CHECK(cudaMemsetAsync(dst, 0, perLayerBytes, stream));
+            }
+        }
+    }
+}
+
 BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor::RetentionPriority priority,
     std::optional<std::chrono::milliseconds> durationMs, executor::KvCacheTransferMode mode,
     std::string const& directory, bool wantPlaceholder)
@@ -1199,6 +1244,19 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
     mBlockToSequence[block->getBlockId()] = sequence.getRequestId();
     TLLM_LOG_DEBUG("%s::getFreeBlock - Block %d is now acquired by sequence %d", mLogPrefix.c_str(),
         block->getBlockId(), sequence.getRequestId());
+
+    // Zero recycled block to prevent NaN/garbage K/V from a previous tenant
+    // leaking into this sequence via whole-tile attention reads of the
+    // partial-block tail. Skipped for placeholder blocks (not real allocations).
+    // Opt-out: TRTLLM_KV_NO_ZERO_REUSED_BLOCKS=1.
+    if (!wantPlaceholder)
+    {
+        static bool const sZeroReusedBlocks = (std::getenv("TRTLLM_KV_NO_ZERO_REUSED_BLOCKS") == nullptr);
+        if (sZeroReusedBlocks)
+        {
+            zeroBlockMemory(block);
+        }
+    }
 
     return block;
 }
