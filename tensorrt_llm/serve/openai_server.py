@@ -1006,7 +1006,10 @@ class OpenAIServer(_VideoRoutesMixin):
         def format_line(name: str, value: float) -> str:
             return f'vllm:{name}{{model_name="{self.model}"}} {value}\n'
 
-        resp += format_line('gpu_cache_usage_perc', float(used_num_blocks/max_num_blocks))
+        # max_num_blocks can be 0 before the first iteration; guard against
+        # ZeroDivisionError so Prometheus scrapes don't 500.
+        gpu_cache_usage = float(used_num_blocks) / max_num_blocks if max_num_blocks else 0.0
+        resp += format_line('gpu_cache_usage_perc', gpu_cache_usage)
         resp += format_line('gpu_prefix_cache_queries_total', float(missed_blocks + reused_blocks))
         resp += format_line('gpu_prefix_cache_hits_total', float(reused_blocks))
         resp += format_line('tokens_per_block', float(tokens_per_block))
