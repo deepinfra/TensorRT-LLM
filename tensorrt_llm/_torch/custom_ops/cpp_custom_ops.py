@@ -107,9 +107,15 @@ def _register_fake():
           trigger_completion_at_end):
         return [torch.empty_like(q), torch.empty_like(k)]
 
-    @torch.library.register_fake("trtllm::deepseek_v4_q_norm")
-    def _(q: torch.Tensor, num_heads: int, head_dim: int, eps: float):
-        return torch.empty_like(q)
+    # deepseek_v4_q_norm only registers when C++ extension is rebuilt with
+    # PR #13975. Skip the fake when the op isn't present (Python-only patched
+    # image) so module import doesn't crash. Helper in attention.py has a
+    # Python fallback.
+    if hasattr(torch.ops.trtllm, "deepseek_v4_q_norm"):
+
+        @torch.library.register_fake("trtllm::deepseek_v4_q_norm")
+        def _(q: torch.Tensor, num_heads: int, head_dim: int, eps: float):
+            return torch.empty_like(q)
 
     @torch.library.register_fake("trtllm::allgather")
     def allgather(input, sizes, group):
