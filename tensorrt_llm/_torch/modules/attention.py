@@ -1730,9 +1730,15 @@ class MLA(nn.Module):
     def _deepseek_v4_q_b_layernorm(self, q: torch.Tensor) -> torch.Tensor:
         assert (q.dim() == 2
                 and q.shape[1] == self.num_heads_tp * self.qk_head_dim)
-        return torch.ops.trtllm.deepseek_v4_q_norm(
-            q, self.num_heads_tp, self.qk_head_dim,
-            float(self.q_b_layernorm.variance_epsilon))
+        cuda_op = getattr(torch.ops.trtllm, "deepseek_v4_q_norm", None)
+        if cuda_op is None:
+            # Fallback: per-head RMS via reshape (matches pre-#13975 behavior).
+            # Active when running with a Python-only patched image that hasn't
+            # rebuilt C++ extensions for the fused CUDA q-norm kernel.
+            return self.q_b_layernorm(q.view(-1,
+                                             self.qk_head_dim)).view_as(q)
+        return cuda_op(q, self.num_heads_tp, self.qk_head_dim,
+                       float(self.q_b_layernorm.variance_epsilon))
 
     def _attn_forward_gen(self, attn_backend: AttentionBackend, q: torch.Tensor,
                           k: torch.Tensor, v: torch.Tensor,
