@@ -157,7 +157,7 @@ class ModelConfig(Generic[TConfig]):
 
     # cute dsl op configs
     use_cute_dsl_blockscaling_mm: bool = False
-    use_cute_dsl_blockscaling_bmm: bool = False
+    use_cute_dsl_blockscaling_bmm: bool = True
     use_cute_dsl_bf16_bmm: bool = False
     use_cute_dsl_bf16_gemm: bool = False
 
