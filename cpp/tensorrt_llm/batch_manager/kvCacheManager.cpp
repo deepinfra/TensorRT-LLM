@@ -1994,47 +1994,6 @@ std::vector<WindowBlockManager::BatchSeqStats> WindowBlockManager::addSequenceBa
     return results;
 }
 
-SizeType32 WindowBlockManager::countReferencedReusableBlocks(
-    VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const
-{
-    // Like countReusableBlocks, but only counts blocks that have active references.
-    // Unreferenced reusable blocks sit in the eviction policy's free queues, so claiming
-    // them during allocation consumes a free block. The scheduler must not subtract these
-    // from the required count to avoid over-estimating available capacity.
-    auto blockedUniqueTokens
-        = chopVectorIntoBlocks<UniqueToken>(uniqueTokens, uniqueTokens.size(), mTokensPerBlock, false);
-    auto blockKeys = buildBlockKeys(blockedUniqueTokens, llmRequest);
-
-    SizeType32 reusableBlocks = 0;
-    std::lock_guard<std::mutex> lock(mCachedBlocksRootMutex);
-    auto searchRoot = mCachedBlocksRoot;
-
-    for (auto const& blockKey : blockKeys)
-    {
-        auto [partialMatch, numMatched, matchingBlock] = searchRoot != nullptr
-            ? searchRoot->findMatchingBlock(blockKey, false, false)
-            : std::make_tuple(false, 0, nullptr);
-
-        if (matchingBlock == nullptr)
-        {
-            // No more matching blocks found
-            break;
-        }
-
-        // Only count blocks that have references (i.e. shared with active sequences).
-        // These blocks are NOT in the free queue, so reusing them is truly "free".
-        if (matchingBlock->hasRefs())
-        {
-            ++reusableBlocks;
-        }
-        searchRoot = std::move(matchingBlock);
-    }
-
-    TLLM_LOG_DEBUG(
-        "%s::countReferencedReusableBlocks - Found %d referenced reusable blocks", mLogPrefix.c_str(), reusableBlocks);
-    return reusableBlocks;
-}
-
 bool WindowBlockManager::blockInRadixTree(BlockPtr const& block)
 {
     return !block->getUniqueTokens().empty() && block->getPrevBlock() != nullptr;
