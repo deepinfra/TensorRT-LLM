@@ -44,6 +44,12 @@ from .modeling_utils import (filter_weights, register_auto_model,
 # Vision Tower Components (from HF modeling_kimi_k25.py)
 # ============================================================================
 
+# Cap on patches processed at once through the vision-tower MLP. Bounds the
+# transient [chunk, mlp_dim] activation so a single large image (e.g. 4Kx4K
+# → ~85k patches) cannot OOM the encoder. 0 disables chunking.
+_VISION_MLP_CHUNK_SIZE = int(
+    os.environ.get("TLLM_KIMI_VISION_MLP_CHUNK", "4096"))
+
 
 class MetaInitSafeLayerNorm(nn.LayerNorm):
     """LayerNorm that skips reset_parameters for MetaInitMode compatibility."""
@@ -233,7 +239,13 @@ class MLP2(nn.Module):
         self.activation = activation
 
     def forward(self, x):
-        return self.fc1(self.activation(self.fc0(x)))
+        chunk = _VISION_MLP_CHUNK_SIZE
+        n = x.shape[0]
+        if chunk <= 0 or n <= chunk:
+            return self.fc1(self.activation(self.fc0(x)))
+        outs = [self.fc1(self.activation(self.fc0(x[i:i + chunk])))
+                for i in range(0, n, chunk)]
+        return torch.cat(outs, dim=0)
 
 
 class MoonViTEncoderLayer(nn.Module):
