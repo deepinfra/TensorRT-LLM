@@ -2863,10 +2863,15 @@ class PyExecutor:
         # Calculate timeout
         idle = (total_num_active_requests == 0) and len(waiting_queue) == 0
         if idle:
-            # In Ray path (TLLM_DISABLE_MPI=1), use a periodic heartbeat timeout so rank 0
-            # reaches the broadcast path regularly to prevent trtllm-serve timeout when idle.
+            # Always use a periodic heartbeat: rank 0 needs to reach the
+            # broadcast path regularly so subordinates in PMPI_Bcast can make
+            # progress, AND so in-flight disagg decode work driven by NIXL KV
+            # arrivals (not this queue) can still iterate.
+            # Ray path (TLLM_DISABLE_MPI=1) wakes the queue on every new
+            # request and can afford a much longer wait; MPI path cannot.
             timeout = datetime.timedelta(
-                seconds=1200) if self._disable_mpi else None
+                seconds=1200) if self._disable_mpi else datetime.timedelta(
+                    milliseconds=10)
         else:
             timeout = datetime.timedelta(0)
 
