@@ -527,6 +527,9 @@ class RequestBroadcaster:
             return payloads
 
         if not self.dist.has_pp:
+            # v1.3.1: self.dist.broadcast routes through NCCL when
+            # TLLM_USE_NCCL_CONTROL_PLANE=1 (see MPIDist in communicator.py),
+            # sidestepping the OMPI progress-engine wedge under NIXL load.
             return self.dist.broadcast(payloads, root=0)
 
         # Broadcast within first PP stage before send/recv chain to other PP stages.

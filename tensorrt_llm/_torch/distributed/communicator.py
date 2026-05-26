@@ -641,6 +641,134 @@ def safe_allgather(
     return _deserialize_recvbuf(recvbuf, lengths, displs, size)
 
 
+# v1.2.9 Option C: NCCL for ADP control-plane.
+#
+# When TLLM_USE_NCCL_CONTROL_PLANE=1, MPIDist routes broadcast/tp_broadcast/
+# tp_allgather through torch.distributed (NCCL backend) instead of MPI
+# comm.Bcast/Allgather. Background: under sustained NIXL disagg load, OMPI's
+# libevent-based progress engine starves on the epoll fd set shared with the
+# UCX worker. v1.2.3-v1.2.7 all wedged at MPI collectives regardless of
+# Bcast payload size (v1.2.6: 8-byte flag-Bcast still wedged), heartbeat
+# frequency (v1.2.3 10ms vs v1.2.4 100ms), or BTL choice (v1.2.7 TCP-only:
+# wedge moved from Bcast in _broadcast_requests to Allgather in
+# _can_queue.tp_allgather). NCCL uses a separate runtime with no shared
+# event loop, so it sidesteps the OMPI progress wedge entirely.
+import os as _os
+
+
+def _nccl_control_plane_enabled() -> bool:
+    return _os.environ.get("TLLM_USE_NCCL_CONTROL_PLANE", "0") == "1"
+
+
+class _NcclControlPlane:
+    """Lazy torch.distributed (NCCL) bootstrap from MPI for control-plane
+    collectives. Singleton; initialized on first use under MPI mode."""
+
+    _world_pg = None
+    _tp_pg = None
+    _pp_pg = None
+    _cp_pg = None
+    _initialized = False
+
+    @classmethod
+    def _bootstrap_torch_dist(cls, mapping: "Mapping"):
+        if cls._initialized:
+            return
+        import torch
+        import torch.distributed as dist
+
+        if not dist.is_initialized():
+            # MPI rank 0 picks a free port; broadcast (MASTER_ADDR, port) via
+            # mpi4py (still uses MPI, but bootstrap is one-shot so the
+            # libevent wedge can't trigger).
+            comm = mpi_comm()
+            rank = comm.Get_rank()
+            world_size = comm.Get_size()
+
+            if rank == 0:
+                import socket
+
+                addr = _os.environ.get("MASTER_ADDR")
+                if not addr:
+                    addr = socket.gethostbyname(socket.gethostname())
+                port = _os.environ.get("MASTER_PORT")
+                if not port:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.bind(("", 0))
+                    port = str(s.getsockname()[1])
+                    s.close()
+                rendezvous = (addr, port)
+            else:
+                rendezvous = None
+
+            rendezvous = comm.bcast(rendezvous, root=0)
+            addr, port = rendezvous
+            _os.environ["MASTER_ADDR"] = addr
+            _os.environ["MASTER_PORT"] = port
+
+            # Each rank's CUDA device must be set before NCCL init.
+            local_rank = mapping.rank % mapping.gpus_per_node
+            torch.cuda.set_device(local_rank)
+
+            dist.init_process_group(
+                backend="cuda:nccl,cpu:gloo",
+                init_method=f"tcp://{addr}:{port}",
+                rank=rank,
+                world_size=world_size,
+            )
+            logger.warning(
+                f"[v1.2.9 nccl-cp] torch.distributed initialized: "
+                f"rank={rank}/{world_size} master={addr}:{port} "
+                f"local_rank={local_rank}")
+
+        cls._world_pg = dist.group.WORLD
+
+        # TP subgroup. dist.new_group is collective across world — every rank
+        # must call it with the same ranks list. We compute the per-PP-rank
+        # TP groups and call new_group for each so all ranks participate.
+        if mapping.tp_size > 1:
+            tp_groups = getattr(mapping, "tp_groups", None)
+            if tp_groups is None:
+                tp_groups = [list(range(mapping.tp_size))]
+            for ranks in tp_groups:
+                pg = dist.new_group(ranks=ranks,
+                                    backend="cuda:nccl,cpu:gloo")
+                if mapping.rank in ranks:
+                    cls._tp_pg = pg
+        else:
+            cls._tp_pg = cls._world_pg
+
+        cls._initialized = True
+        logger.warning(
+            f"[v1.2.9 nccl-cp] tp_pg ready: rank={mapping.rank} "
+            f"tp_group={mapping.tp_group}")
+
+    @classmethod
+    def get_world_pg(cls, mapping: "Mapping"):
+        cls._bootstrap_torch_dist(mapping)
+        return cls._world_pg
+
+    @classmethod
+    def get_tp_pg(cls, mapping: "Mapping"):
+        cls._bootstrap_torch_dist(mapping)
+        return cls._tp_pg
+
+
+def _nccl_broadcast_object(obj, root, pg):
+    import torch.distributed as dist
+    obj_list = [obj]
+    dist.broadcast_object_list(obj_list, src=root, group=pg)
+    return obj_list[0]
+
+
+def _nccl_allgather_object(obj, pg):
+    import torch.distributed as dist
+    world_size = pg.size()
+    out = [None] * world_size
+    dist.all_gather_object(out, obj, group=pg)
+    return out
+
+
 class MPIDist(Distributed):
     tp_comm: MPI.Comm
 
@@ -664,6 +792,9 @@ class MPIDist(Distributed):
                     f"but MPI world size is only {actual_world_size}. ")
 
     def broadcast(self, obj, root=0, chunk_size: int = 4 * 1024 * 1024):
+        if _nccl_control_plane_enabled():
+            pg = _NcclControlPlane.get_world_pg(self.mapping)
+            return _nccl_broadcast_object(obj, root, pg)
         comm = mpi_comm()
         return safe_broadcast(comm, obj, root=root, chunk_size=chunk_size)
 
@@ -736,6 +867,9 @@ class MPIDist(Distributed):
         return safe_broadcast(comm, obj, root=root, chunk_size=chunk_size)
 
     def tp_allgather(self, obj, chunk_size: int = 4 * 1024 * 1024):
+        if _nccl_control_plane_enabled():
+            pg = _NcclControlPlane.get_tp_pg(self.mapping)
+            return _nccl_allgather_object(obj, pg)
         comm = self.tp_comm
         return safe_allgather(comm, obj, chunk_size=chunk_size)
 
@@ -748,6 +882,11 @@ class MPIDist(Distributed):
                      root=0,
                      chunk_size: int = 4 * 1024 * 1024,
                      **kwargs):
+        if _nccl_control_plane_enabled():
+            pg = _NcclControlPlane.get_tp_pg(self.mapping)
+            # tp-local root is what callers pass; NCCL broadcast_object_list
+            # also takes the group-relative rank, which matches MPI semantics.
+            return _nccl_broadcast_object(obj, root, pg)
         comm = self.tp_comm
         return safe_broadcast(comm, obj, root=root, chunk_size=chunk_size)
 
