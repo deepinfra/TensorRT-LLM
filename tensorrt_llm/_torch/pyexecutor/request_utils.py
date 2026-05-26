@@ -525,6 +525,32 @@ class RequestBroadcaster:
             return payloads
 
         if not self.dist.has_pp:
+            # v1.2.6 Option B': empty-payload short-circuit via flag Bcast.
+            # Every rank ALWAYS executes the flag Bcast below, so there is no
+            # divergence risk (v1.2.5's early-return was rejected because it
+            # let rank 0 lap subordinates into a downstream Allgather).
+            #
+            # The flag is a single int64; the Bcast is cheap (~8 bytes payload).
+            # When the flag is 0, all ranks return ([], None) without doing
+            # the chunked safe_broadcast (which always does at least 1 header
+            # Bcast + 1 chunk Bcast, even for trivially-empty pickled payloads
+            # of ~10-30 bytes). This trades 2 Bcasts/iter for 1 in the idle
+            # case while keeping the iteration's collective sequence identical
+            # across ranks.
+            import numpy as np
+            from mpi4py import MPI
+            from tensorrt_llm._utils import mpi_comm
+            comm = mpi_comm()
+            flag = np.zeros(1, dtype=np.int64)
+            if self.dist.rank == 0:
+                flag[0] = 0 if (not new_requests and py_request_objects is None) else 1
+            comm.Bcast([flag, MPI.INT64_T], root=0)
+            if flag[0] == 0:
+                # The _bcast_empty counter (incremented on rank 0 by
+                # _fetch_and_enqueue_requests) IS the short-circuit count —
+                # every empty attempt takes this path. No separate counter
+                # needed here.
+                return ([], None)
             return self.dist.broadcast(payloads, root=0)
 
         # Broadcast within first PP stage before send/recv chain to other PP stages.

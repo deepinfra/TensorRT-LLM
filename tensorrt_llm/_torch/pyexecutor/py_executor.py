@@ -2863,46 +2863,18 @@ class PyExecutor:
         # Calculate timeout
         idle = (total_num_active_requests == 0) and len(waiting_queue) == 0
         if idle:
-            # Heartbeat for the idle path. The MPI value is the rank-0 queue
-            # poll timeout under Option B (see below). Ray path keeps its 1200s
-            # because Ray wakes the queue on every new request.
+            # v1.2.6: heartbeat on idle is 10 ms (best-known from v1.2.3).
+            # We do NOT skip the broadcast from this function — v1.2.5 tried
+            # that and lapped rank 0 past subordinates into a downstream
+            # Allgather, deadlocking at startup. The empty-payload short-
+            # circuit now lives inside _broadcast_requests (see
+            # request_utils.py), where every rank executes the same MPI
+            # Bcast call sequence.
             timeout = datetime.timedelta(
                 seconds=1200) if self._disable_mpi else datetime.timedelta(
                     milliseconds=10)
         else:
             timeout = datetime.timedelta(0)
-
-        # ----------------------------------------------------------------------
-        # v1.2.5 Option B: skip the per-iteration broadcast when all ranks are
-        # idle. `idle` is computed from already-synchronized state
-        # (total_num_active_requests is from adp_router.gather_all_rank_states
-        # — an MPI Allgather — under ADP; waiting_queue is fed only via this
-        # broadcast so it stays consistent across ranks). All ranks therefore
-        # reach the same skip decision without a coordination broadcast.
-        #
-        # Trade-off: HTTP requests arriving on rank 0 during a pure-idle window
-        # are deferred to request_accumulated and drained on the next non-idle
-        # iteration. In disagg-decode workloads new work primarily arrives via
-        # NIXL KV transfer status (not the HTTP queue), so this is the
-        # dominant case. We also still poll the queue on rank 0 so requests
-        # don't sit indefinitely if non-disagg traffic arrives.
-        # ----------------------------------------------------------------------
-        if idle and self.dist.world_size > 1:
-            if self.dist.rank == 0:
-                with self.hang_detector.pause():
-                    new_requests_from_queue = (
-                        self.executor_request_queue.get_from_request_queue(
-                            timeout))
-                if new_requests_from_queue:
-                    # Defer to the next non-idle iteration. Engine will exit
-                    # idle when NIXL KV arrivals (or any other path) populate
-                    # active_requests, at which point _fetch_and_enqueue_requests
-                    # takes the non-idle path below and drains the accumulator.
-                    self.request_accumulated.extend(new_requests_from_queue)
-                self._bcast_skipped_idle = getattr(self,
-                                                   '_bcast_skipped_idle', 0) + 1
-                self._maybe_log_bcast_counters()
-            return
 
         # Fetch requests from rank 0
         new_requests = []
@@ -2943,14 +2915,22 @@ class PyExecutor:
         waiting_queue.add_requests(new_requests)
 
     def _maybe_log_bcast_counters(self) -> None:
-        """Log Option-B broadcast counters from rank 0 every 5 seconds.
+        """Log Option-B' broadcast counters from rank 0 every 5 seconds.
 
         Helps diagnose where the engine is spending broadcasts when ADP +
         disagg-decode is active. Counters tracked:
-        - _bcast_attempted: number of full chunked broadcasts called (non-idle).
-        - _bcast_empty: subset of attempts where rank-0 had no new requests.
-        - _bcast_nonempty: subset of attempts where rank-0 had >=1 new request.
-        - _bcast_skipped_idle: full broadcasts skipped via Option B (idle path).
+        - _bcast_attempted: number of times _fetch_and_enqueue_requests called
+          the broadcaster (i.e. iterations that reached _broadcast_requests).
+        - _bcast_empty: subset of attempts where rank-0 had no new requests
+          (= count of iterations short-circuited by the v1.2.6 flag-Bcast
+          path inside _broadcast_requests; the chunked payload Bcast is
+          skipped on every rank for these).
+        - _bcast_nonempty: subset where rank-0 had >=1 new request and the
+          chunked payload Bcast ran.
+
+        Note: every rank still executes _broadcast_requests on every iteration,
+        and the flag Bcast inside it runs on every rank — only the chunked
+        payload Bcast is skipped when the flag is 0. No rank-divergence risk.
         """
         if self.dist.rank != 0:
             return
@@ -2963,10 +2943,9 @@ class PyExecutor:
         attempted = getattr(self, '_bcast_attempted', 0)
         empty = getattr(self, '_bcast_empty', 0)
         nonempty = getattr(self, '_bcast_nonempty', 0)
-        skipped = getattr(self, '_bcast_skipped_idle', 0)
         logger.info(
-            f"[v1.2.5 bcast counters] attempted={attempted} "
-            f"empty={empty} nonempty={nonempty} skipped_idle={skipped}")
+            f"[v1.2.6 bcast counters] attempted={attempted} "
+            f"empty={empty} nonempty={nonempty}")
 
     def _pop_from_waiting_queue(
         self,
