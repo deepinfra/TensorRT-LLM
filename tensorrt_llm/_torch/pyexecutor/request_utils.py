@@ -530,13 +530,21 @@ class RequestBroadcaster:
             # divergence risk (v1.2.5's early-return was rejected because it
             # let rank 0 lap subordinates into a downstream Allgather).
             #
-            # The flag is a single int64; the Bcast is cheap (~8 bytes payload).
-            # When the flag is 0, all ranks return ([], None) without doing
-            # the chunked safe_broadcast (which always does at least 1 header
-            # Bcast + 1 chunk Bcast, even for trivially-empty pickled payloads
-            # of ~10-30 bytes). This trades 2 Bcasts/iter for 1 in the idle
-            # case while keeping the iteration's collective sequence identical
-            # across ranks.
+            # v1.2.9 Option C: when TLLM_USE_NCCL_CONTROL_PLANE=1, route both
+            # the 8-byte flag and the payload through self.dist.broadcast,
+            # which now uses NCCL. Skips the OMPI progress engine entirely
+            # — the v1.2.6/v1.2.7 wedge was inside MPI's libevent-based
+            # progress regardless of payload size, so even an 8-byte MPI
+            # Bcast is unsafe under sustained NIXL load.
+            import os as _os
+            if _os.environ.get("TLLM_USE_NCCL_CONTROL_PLANE", "0") == "1":
+                flag_val = 0 if (not new_requests
+                                 and py_request_objects is None) else 1
+                flag_val = self.dist.broadcast(flag_val, root=0)
+                if flag_val == 0:
+                    return ([], None)
+                return self.dist.broadcast(payloads, root=0)
+
             import numpy as np
             from mpi4py import MPI
             from tensorrt_llm._utils import mpi_comm
