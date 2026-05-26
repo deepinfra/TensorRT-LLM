@@ -2943,9 +2943,17 @@ class PyExecutor:
         attempted = getattr(self, '_bcast_attempted', 0)
         empty = getattr(self, '_bcast_empty', 0)
         nonempty = getattr(self, '_bcast_nonempty', 0)
-        logger.info(
-            f"[v1.2.6 bcast counters] attempted={attempted} "
+        # v1.2.7: bumped from logger.info to logger.warning so the counter
+        # line survives the dynamo runtime's default log filter. Also use
+        # print(..., flush=True) as a belt-and-suspenders for log scrapers
+        # that filter on .info -> .warning transitions.
+        logger.warning(
+            f"[v1.2.7 bcast counters] attempted={attempted} "
             f"empty={empty} nonempty={nonempty}")
+        print(
+            f"[v1.2.7 bcast counters] attempted={attempted} "
+            f"empty={empty} nonempty={nonempty}",
+            flush=True)
 
     def _pop_from_waiting_queue(
         self,
