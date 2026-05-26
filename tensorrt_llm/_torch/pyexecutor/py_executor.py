@@ -2871,7 +2871,7 @@ class PyExecutor:
             # request and can afford a much longer wait; MPI path cannot.
             timeout = datetime.timedelta(
                 seconds=1200) if self._disable_mpi else datetime.timedelta(
-                    milliseconds=10)
+                    milliseconds=100)
         else:
             timeout = datetime.timedelta(0)
 
