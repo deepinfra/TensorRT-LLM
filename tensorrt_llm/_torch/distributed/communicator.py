@@ -670,12 +670,25 @@ class _NcclControlPlane:
     _cp_pg = None
     _initialized = False
 
+    # v1.3.3: unmissable instrumentation. logger.warning alone was lost in the
+    # v1.3.1 test (env=1 confirmed but no nccl-cp lines reached pod logs).
+    # print(flush=True) goes to stdout directly, bypasses TRT-LLM logger
+    # handler config, and gives us a checkpoint trail so we can see *exactly*
+    # how far the bootstrap got if anything wedges.
+    _first_broadcast_logged = False
+    _first_tp_broadcast_logged = False
+    _first_tp_allgather_logged = False
+
     @classmethod
     def _bootstrap_torch_dist(cls, mapping: "Mapping"):
         if cls._initialized:
             return
         import torch
         import torch.distributed as dist
+
+        print(f"[nccl-cp v1.3.3] bootstrap BEGIN mapping.rank={mapping.rank} "
+              f"tp_size={mapping.tp_size} pp_size={mapping.pp_size}",
+              flush=True)
 
         if not dist.is_initialized():
             # MPI rank 0 picks a free port; broadcast (MASTER_ADDR, port) via
@@ -684,6 +697,8 @@ class _NcclControlPlane:
             comm = mpi_comm()
             rank = comm.Get_rank()
             world_size = comm.Get_size()
+            print(f"[nccl-cp v1.3.3] mpi rank={rank}/{world_size} "
+                  f"about to bcast rendezvous", flush=True)
 
             if rank == 0:
                 import socket
@@ -703,12 +718,16 @@ class _NcclControlPlane:
 
             rendezvous = comm.bcast(rendezvous, root=0)
             addr, port = rendezvous
+            print(f"[nccl-cp v1.3.3] rank={rank} rendezvous={addr}:{port} "
+                  f"AFTER comm.bcast", flush=True)
             _os.environ["MASTER_ADDR"] = addr
             _os.environ["MASTER_PORT"] = port
 
             # Each rank's CUDA device must be set before NCCL init.
             local_rank = mapping.rank % mapping.gpus_per_node
             torch.cuda.set_device(local_rank)
+            print(f"[nccl-cp v1.3.3] rank={rank} local_rank={local_rank} "
+                  f"BEFORE init_process_group", flush=True)
 
             dist.init_process_group(
                 backend="cuda:nccl,cpu:gloo",
@@ -716,10 +735,11 @@ class _NcclControlPlane:
                 rank=rank,
                 world_size=world_size,
             )
-            logger.warning(
-                f"[v1.2.9 nccl-cp] torch.distributed initialized: "
-                f"rank={rank}/{world_size} master={addr}:{port} "
-                f"local_rank={local_rank}")
+            msg = (f"[nccl-cp v1.3.3] torch.distributed initialized: "
+                   f"rank={rank}/{world_size} master={addr}:{port} "
+                   f"local_rank={local_rank}")
+            print(msg, flush=True)
+            logger.warning(msg)
 
         cls._world_pg = dist.group.WORLD
 
@@ -730,6 +750,9 @@ class _NcclControlPlane:
             tp_groups = getattr(mapping, "tp_groups", None)
             if tp_groups is None:
                 tp_groups = [list(range(mapping.tp_size))]
+            print(f"[nccl-cp v1.3.3] rank={mapping.rank} creating "
+                  f"{len(tp_groups)} tp subgroup(s) via dist.new_group",
+                  flush=True)
             for ranks in tp_groups:
                 pg = dist.new_group(ranks=ranks,
                                     backend="cuda:nccl,cpu:gloo")
@@ -739,9 +762,10 @@ class _NcclControlPlane:
             cls._tp_pg = cls._world_pg
 
         cls._initialized = True
-        logger.warning(
-            f"[v1.2.9 nccl-cp] tp_pg ready: rank={mapping.rank} "
-            f"tp_group={mapping.tp_group}")
+        msg2 = (f"[nccl-cp v1.3.3] tp_pg ready: rank={mapping.rank} "
+                f"tp_group={mapping.tp_group}")
+        print(msg2, flush=True)
+        logger.warning(msg2)
 
     @classmethod
     def get_world_pg(cls, mapping: "Mapping"):
@@ -793,6 +817,10 @@ class MPIDist(Distributed):
 
     def broadcast(self, obj, root=0, chunk_size: int = 4 * 1024 * 1024):
         if _nccl_control_plane_enabled():
+            if not _NcclControlPlane._first_broadcast_logged:
+                _NcclControlPlane._first_broadcast_logged = True
+                print(f"[nccl-cp v1.3.3] MPIDist.broadcast FIRST dispatch "
+                      f"rank={self.mapping.rank}", flush=True)
             pg = _NcclControlPlane.get_world_pg(self.mapping)
             return _nccl_broadcast_object(obj, root, pg)
         comm = mpi_comm()
@@ -868,6 +896,10 @@ class MPIDist(Distributed):
 
     def tp_allgather(self, obj, chunk_size: int = 4 * 1024 * 1024):
         if _nccl_control_plane_enabled():
+            if not _NcclControlPlane._first_tp_allgather_logged:
+                _NcclControlPlane._first_tp_allgather_logged = True
+                print(f"[nccl-cp v1.3.3] MPIDist.tp_allgather FIRST dispatch "
+                      f"rank={self.mapping.rank}", flush=True)
             pg = _NcclControlPlane.get_tp_pg(self.mapping)
             return _nccl_allgather_object(obj, pg)
         comm = self.tp_comm
@@ -883,6 +915,10 @@ class MPIDist(Distributed):
                      chunk_size: int = 4 * 1024 * 1024,
                      **kwargs):
         if _nccl_control_plane_enabled():
+            if not _NcclControlPlane._first_tp_broadcast_logged:
+                _NcclControlPlane._first_tp_broadcast_logged = True
+                print(f"[nccl-cp v1.3.3] MPIDist.tp_broadcast FIRST dispatch "
+                      f"rank={self.mapping.rank}", flush=True)
             pg = _NcclControlPlane.get_tp_pg(self.mapping)
             # tp-local root is what callers pass; NCCL broadcast_object_list
             # also takes the group-relative rank, which matches MPI semantics.
