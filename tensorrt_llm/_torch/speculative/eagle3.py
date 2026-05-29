@@ -332,8 +332,8 @@ class Eagle3SpecMetadata(SpecMetadata):
                 break
 
     def get_hidden_states(self):
-        hidden_states = self.eagle3_resource_manager.hidden_states[
-            self.hidden_states_read_indices[:self.num_tokens], :]
+        _read_idx = self.hidden_states_read_indices[:self.num_tokens]
+        hidden_states = self.eagle3_resource_manager.hidden_states[_read_idx, :]
         if not self.is_first_draft:
             hidden_states = hidden_states[:, :self.hidden_size]
         return hidden_states
@@ -639,6 +639,7 @@ class Eagle3OneModelWorker(SpecWorkerBase):
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
             'next_new_tokens': next_new_tokens,
+            'logits_finite': getattr(self, 'logits_finite', None),
         }
 
     def _forward_draft_loop(self, inputs, attn_metadata, spec_metadata,

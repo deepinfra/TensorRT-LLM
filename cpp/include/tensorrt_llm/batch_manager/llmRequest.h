@@ -1175,8 +1175,20 @@ public:
                 // make sure to end at block boundary after current chunk
                 auto const flooredEndPosition
                     = (prepopulatedPromptLen + chunkSize) / kvTokensPerBlock * kvTokensPerBlock;
-                chunkSize = flooredEndPosition - prepopulatedPromptLen;
-                TLLM_CHECK(chunkSize <= getContextChunkSize());
+                if (flooredEndPosition > prepopulatedPromptLen)
+                {
+                    chunkSize = flooredEndPosition - prepopulatedPromptLen;
+                    TLLM_CHECK(chunkSize <= getContextChunkSize());
+                }
+                else
+                {
+                    // Chunk too small to reach the next block boundary from the
+                    // non-aligned prepopulated position.  Extend to the next
+                    // boundary (capped at prompt end to avoid overrun).
+                    auto const nextBoundary
+                        = ((prepopulatedPromptLen / kvTokensPerBlock) + 1) * kvTokensPerBlock;
+                    chunkSize = std::min(nextBoundary - prepopulatedPromptLen, promptLen - prepopulatedPromptLen);
+                }
             }
             contextCurrentPosition = prepopulatedPromptLen;
             setContextChunkSize(chunkSize);
