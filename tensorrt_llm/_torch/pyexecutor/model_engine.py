@@ -2986,6 +2986,17 @@ class PyTorchModelEngine(ModelEngine):
             begin_compute = request.context_current_position
             end_compute = begin_compute + request.context_chunk_size
             prompt_tokens = all_prompt_tokens[begin_compute:end_compute]
+            if request.context_chunk_size == 0:
+                logger.error(
+                    f"[forward_step] context request with chunk_size=0: "
+                    f"req_id={request.py_request_id}, "
+                    f"prompt_len={request.prompt_len}, "
+                    f"ctx_pos={request.context_current_position}, "
+                    f"prepop={request.prepopulated_prompt_len}, "
+                    f"state={request.state}, "
+                    f"is_first_chunk={request.is_first_context_chunk}, "
+                    f"remaining={request.context_remaining_length}"
+                )
             position_ids.extend(
                 range(begin_compute, begin_compute + len(prompt_tokens)))
 
@@ -3106,8 +3117,10 @@ class PyTorchModelEngine(ModelEngine):
 
             request.py_batch_idx = request.py_seq_slot
 
-        if len(multimodal_params_list) > 0:
-            # discard the text token indices as it only includes context tokens at this moment
+        if len(multimodal_params_list) > 0 and len(scheduled_requests.context_requests) > 0:
+            # Only compute mm indices when there are context requests with
+            # multimodal data. For generation-only batches this is a no-op,
+            # saving a host-device sync from torch.where().
             _, mm_token_indices = self._prepare_multimodal_indices(input_ids)
         else:
             mm_token_indices = None

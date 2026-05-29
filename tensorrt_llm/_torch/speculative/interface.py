@@ -908,7 +908,8 @@ class SpecWorkerBase(nn.Module, ABC):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
-            'next_new_tokens': next_new_tokens
+            'next_new_tokens': next_new_tokens,
+            'logits_finite': None,
         }
 
     def skip_drafting(
@@ -956,7 +957,8 @@ class SpecWorkerBase(nn.Module, ABC):
             'new_tokens': accepted_tokens,
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
-            'next_new_tokens': next_new_tokens
+            'next_new_tokens': next_new_tokens,
+            'logits_finite': getattr(self, 'logits_finite', None),
         }
 
     def set_guided_decoder(self,
@@ -1601,6 +1603,23 @@ class SpecWorkerBase(nn.Module, ABC):
         Returns:
             sampled_tokens: [num_tokens] - Sampled token ids
         """
+        # Terminate the engine on non-finite target logits. All spec-decode
+        # paths (Eagle3OneModelWorker, DraftTargetOneModelWorker, PARD,
+        # MTP-strict-non-thop, plus skip_drafting fallback) funnel target
+        # sampling through this method. Spec-decode uses deterministic top-1
+        # for the target token; argmax(NaN) returns 0 = PAD on CUDA, silently
+        # emitting [PAD][PAD]... instead of crashing. Detect at the source so
+        # spec deployments fail fast on FP8 KV poisoning.
+        #
+        # Compute the boolean as a 0-d GPU tensor without .item() so this is
+        # safe inside CUDA graph capture and adds no host sync. The Worker's
+        # forward propagates it into the sampler output dict; the actual host
+        # check happens in SpecSamplerBase.update_requests where there's
+        # already a sync. See mtp.MTPWorker.sample_and_accept_draft_tokens
+        # for the analogous check on the MTP-relaxed and MTP-strict-thop
+        # paths that bypass this method.
+        self.logits_finite = torch.isfinite(logits).all()
+
         if not spec_metadata.is_all_greedy_sample:
             # Use logits.shape[0] directly: for PARD under CUDA graph capture
             # runtime_draft_len may reflect the PARD-max while the captured

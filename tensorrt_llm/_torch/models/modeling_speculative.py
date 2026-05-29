@@ -1748,6 +1748,11 @@ class SpecDecOneEngineForCausalLM(DecoderModelForCausalLM[TModel, TConfig],
                 use_separate_draft_kv_cache=self.use_separate_draft_kv_cache)
             if self.spec_worker is not None:
                 self.epilogue.append(self.spec_worker)
+
+            if self.draft_config is not None and model_config.spec_config.eagle3_model_arch == "llama3":
+                for key, value in self.draft_config.extra_attrs.items():
+                    if key in ('attn_layers', 'mla_layers') and key in model_config.extra_attrs:
+                        model_config.extra_attrs[key].update(value)
         self.layer_idx = -1
 
     def forward(
