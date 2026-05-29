@@ -200,6 +200,7 @@ class SAWorker(SpecWorkerBase):
             "new_tokens_lens": num_accepted_tokens,
             "next_draft_tokens": next_draft_tokens,
             "next_new_tokens": next_new_tokens,
+            "logits_finite": getattr(self, 'logits_finite', None),
         }
 
     def _sample_and_accept_draft_tokens(
