@@ -69,10 +69,14 @@ class GuidedDecodingParams:
     grammar: Optional[str] = None
     json_object: bool = False
     structural_tag: Optional[str] = None
+    guidance_start_token_id: Optional[int] = None
 
     def _validate(self):
+        exclude_fields = set(["guidance_start_token_id"])
         num_guides = 0
         for _field in fields(self):
+            if _field.name in exclude_fields:
+                continue
             num_guides += bool(getattr(self, _field.name))
         if num_guides > 1:
             raise ValueError(f"Only one guide can be used for a request, but got {num_guides}.")
@@ -340,9 +344,8 @@ class SamplingParams:
     truncate_prompt_tokens: Optional[int] = None
     skip_special_tokens: bool = True
     spaces_between_special_tokens: bool = True
-    # Currently, _stream_interval is only used to pass llm.args.stream_interval to tokenizer.
-    # TODO: make this a per-request parameter.
-    _stream_interval: Optional[int] = field(default=None, init=False, repr=False)
+    stream_interval: Optional[int] = None
+    stream_interval_ms: Optional[int] = None
 
     def __post_init__(self):
         if self.pad_id is None:
@@ -366,6 +369,14 @@ class SamplingParams:
         For instance, while the greedy decoding with n > 1 is capable in the
         Executor class of C++ runtime, the LLM API disallows such combination.
         """
+        if self.stream_interval is not None and self.stream_interval <= 0:
+            raise ValueError(
+                f"require stream_interval > 0, got stream_interval={self.stream_interval}"
+            )
+        if self.stream_interval_ms is not None and self.stream_interval_ms <= 0:
+            raise ValueError(
+                f"require stream_interval_ms > 0, got stream_interval_ms={self.stream_interval_ms}"
+            )
         if self.top_p is not None and (self.top_p < 0 or self.top_p > 1):
             raise ValueError(f"require 0 <= top_p <= 1, got top_p={self.top_p}")
         if self.top_k is not None and self.top_k < 0:
@@ -613,7 +624,9 @@ class SamplingParams:
             return None
 
         if self.guided_decoding.json_object:
-            return tllme.GuidedDecodingParams(tllme.GuidedDecodingParams.GuideType.JSON)
+            return tllme.GuidedDecodingParams(
+                tllme.GuidedDecodingParams.GuideType.JSON, None, self.guided_decoding.guidance_start_token_id,
+            )
         elif self.guided_decoding.json is not None:
             json_schema = self.guided_decoding.json
             if isinstance(json_schema, BaseModel):
@@ -621,20 +634,21 @@ class SamplingParams:
             if isinstance(json_schema, dict):
                 json_schema = json.dumps(json_schema)
             return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.JSON_SCHEMA, json_schema
+                tllme.GuidedDecodingParams.GuideType.JSON_SCHEMA, json_schema, self.guided_decoding.guidance_start_token_id
             )
         elif self.guided_decoding.regex is not None:
             return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.REGEX, self.guided_decoding.regex
+                tllme.GuidedDecodingParams.GuideType.REGEX, self.guided_decoding.regex, self.guided_decoding.guidance_start_token_id
             )
         elif self.guided_decoding.grammar is not None:
             return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.EBNF_GRAMMAR, self.guided_decoding.grammar
+                tllme.GuidedDecodingParams.GuideType.EBNF_GRAMMAR, self.guided_decoding.grammar, self.guided_decoding.guidance_start_token_id
             )
         elif self.guided_decoding.structural_tag is not None:
             return tllme.GuidedDecodingParams(
                 tllme.GuidedDecodingParams.GuideType.STRUCTURAL_TAG,
                 self.guided_decoding.structural_tag,
+                self.guided_decoding.guidance_start_token_id,
             )
         else:
             return None

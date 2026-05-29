@@ -85,6 +85,14 @@ from .scheduler import (RequestScheduler, ScheduledRequests,
                         SerializableSchedulerOutput, WaitingQueue,
                         create_waiting_queue)
 from .scheduler.adp_router import ADPRouter
+from collections import defaultdict
+import array
+import json
+
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
+
+prom_metrics = defaultdict(float)
+prom_metrics_file = None
 
 if TYPE_CHECKING:
     from ray.actor import ActorHandle
@@ -111,7 +119,6 @@ class PPCommTag(IntEnum):
     SCHEDULE_RESULT = 20001
     EXECUTED_BATCH_NUM = 20002
     SAMPLE_STATE = 20003
-
 
 @functools.cache
 def _load_iteration_indexes(env_var: str):
@@ -394,6 +401,7 @@ class PyExecutor:
         self.enable_iter_perf_stats = self.llm_args.enable_iter_perf_stats
         self.enable_iter_req_stats = self.llm_args.enable_iter_req_stats
         self.stream_interval = self.llm_args.stream_interval
+        self.stream_interval_ms = self.llm_args.stream_interval_ms
         self.perf_manager = PerfMetricsManager(
             enabled=getattr(self.llm_args, 'return_perf_metrics', False))
         self.attention_dp_enable_balance = (
@@ -1232,6 +1240,7 @@ class PyExecutor:
                 torch.cuda.cudart().cudaProfilerStop()
                 calibrator.stop()
                 enabled = False
+            last_start_time = start_time
 
             # Capture per-loop timing whenever stats or the iter log are
             # enabled. The reading of the OTHER parity's event pair (the
@@ -1314,6 +1323,33 @@ class PyExecutor:
                 if start_event_2 is None:
                     start_event_2 = torch.cuda.Event(enable_timing=True)
                 start_event_2.record()
+
+            if last_start_time is not None and self.dist.rank == 0:
+                iter_states = self.model_engine.iter_states
+                total_running = iter_states['num_ctx_requests'] + iter_states['num_generation_tokens'] / (1 + self.model_engine.max_draft_len)
+                prom_metrics["num_requests_running"] = total_running
+                prom_metrics["num_requests_swapped"] = total_running - len(self.active_requests)
+                prom_metrics["iteration_tokens_total_sum"] += iter_states['num_ctx_tokens'] + iter_states['num_generation_tokens']
+                prom_metrics["iteration_tokens_total_count"] += 1
+                prom_metrics["time_per_output_token_seconds_sum"] += (start_time - last_start_time)
+                prom_metrics["time_per_output_token_seconds_count"] += 1
+                prom_metrics["prompt_tokens_total"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_sum"] += iter_states['num_ctx_tokens']
+                prom_metrics["request_prompt_tokens_total_count"] += 1
+                prom_metrics["generation_tokens_total"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_sum"] += iter_states['num_generation_tokens']
+                prom_metrics["request_generation_tokens_total_count"] += 1
+                global prom_metrics_file
+                try:
+                    if prom_metrics_file is None:
+                        prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                                    os.O_RDWR|os.O_CREAT)
+                    os.pwrite(prom_metrics_file, (
+                        json.dumps(list(prom_metrics.keys())).encode('UTF-8') +
+                        b'\0' +
+                        array.array('d',prom_metrics.values()).tobytes()), 0)
+                except:
+                    traceback.print_exc()
 
         try:
             yield profile_step
@@ -5428,18 +5464,38 @@ class PyExecutor:
                 request.update_perf_metrics(self.iter_counter)
 
             request_done = False
-            should_emit = (request.py_decoding_iter == 1 or request.is_finished
-                           or request.py_decoding_iter % self.stream_interval
-                           == 0)
+            request.py_last_stream_emit_iter += 1
+            now = get_steady_clock_now_in_seconds()
+
+            # Resolve effective intervals (per-request > engine > default)
+            token_interval = request.py_stream_interval or self.stream_interval
+            time_interval_ms = request.py_stream_interval_ms or self.stream_interval_ms or 0
+
+            # Time interval takes priority; fall back to token interval
+            if time_interval_ms > 0:
+                interval_triggered = (
+                    request.py_last_stream_emit_time is not None
+                    and (now - request.py_last_stream_emit_time) * 1000
+                    >= time_interval_ms)
+            else:
+                interval_triggered = request.py_last_stream_emit_iter >= token_interval
+
+            should_emit = (request.py_decoding_iter == 1
+                           or request.is_finished or interval_triggered)
             # The early-emit prototype issues the (non-terminal) iter-1
             # response from `_emit_first_token_responses`; suppress it here.
             if (not emit_first_iter and request.py_decoding_iter == 1
                     and not request.is_finished):
                 should_emit = False
             if should_emit:
+<<<<<<< HEAD
                 if request.return_perf_metrics:
                     # Response creation may finalize and copy scalar ctx GPU totals.
                     self.perf_manager.compute_batch_gpu_times([request])
+=======
+                request.py_last_stream_emit_iter = 0
+                request.py_last_stream_emit_time = now
+>>>>>>> af2d2d70c ([None][feat] OpenAI serving-layer DeepInfra extensions)
                 response = request.create_response(False, self.dist.rank)
                 if response:
                     request_done = request.is_finished
