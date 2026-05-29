@@ -504,9 +504,7 @@ class PyResult:
 
     @property
     def cum_log_probs(self) -> list[float] | None:
-        if not self._log_probs or not hasattr(self._log_probs, 'cum_log_probs'):
-            return None
-        return self._log_probs.cum_log_probs
+        return self._log_probs and getattr(self._log_probs, 'cum_log_probs', None)
 
     @property
     def mm_embedding_handles(self) -> List[Dict[str, Any]] | None:
@@ -685,6 +683,10 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         self.py_num_accepted_draft_tokens_indices = []
         self.py_rewind_draft_token_separate_adjustment = 0
         self.py_decoding_iter = 0
+        self.py_stream_interval = None
+        self.py_stream_interval_ms = None
+        self.py_last_stream_emit_time: Optional[float] = None
+        self.py_last_stream_emit_iter = 0
         self.is_attention_dp_dummy = False
         self.is_cuda_graph_dummy = False
         self.py_kv_transfer_start_time = None
@@ -1068,6 +1070,10 @@ def executor_request_to_llm_request(
     llm_request.py_original_end_id = getattr(executor_request,
                                              "py_original_end_id",
                                              llm_request.py_end_id)
+    llm_request.py_stream_interval = getattr(executor_request,
+                                             "py_stream_interval", None)
+    llm_request.py_stream_interval_ms = getattr(executor_request,
+                                                "py_stream_interval_ms", None)
     llm_request.py_disaggregated_params = getattr(executor_request,
                                                   "py_disaggregated_params",
                                                   None)

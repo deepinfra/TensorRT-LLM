@@ -41,6 +41,241 @@ def test_invalid_sampling_params():
         SamplingParams(max_tokens=4, n=4, best_of=3, use_beam_search=True)
 
 
+def test_stream_interval_validation():
+    # Valid values
+    sp = SamplingParams(stream_interval=1)
+    assert sp.stream_interval == 1
+    sp = SamplingParams(stream_interval=10)
+    assert sp.stream_interval == 10
+    sp = SamplingParams(stream_interval=None)
+    assert sp.stream_interval is None
+
+    # Invalid values
+    with pytest.raises(ValueError, match="stream_interval"):
+        SamplingParams(stream_interval=0)
+    with pytest.raises(ValueError, match="stream_interval"):
+        SamplingParams(stream_interval=-1)
+
+
+def test_stream_interval_openai_protocol():
+    from pydantic import ValidationError
+
+    from tensorrt_llm.serve.openai_protocol import (
+        ChatCompletionRequest,
+        CompletionRequest,
+        ResponsesRequest,
+    )
+
+    # CompletionRequest: valid stream_interval passes through
+    req = CompletionRequest(model="m", prompt="hi", stream_interval=5)
+    sp = req.to_sampling_params()
+    assert sp.stream_interval == 5
+
+    # CompletionRequest: None leaves stream_interval unset
+    req = CompletionRequest(model="m", prompt="hi")
+    sp = req.to_sampling_params()
+    assert sp.stream_interval is None
+
+    # CompletionRequest: invalid stream_interval rejected at construction
+    with pytest.raises(ValidationError, match="stream_interval"):
+        CompletionRequest(model="m", prompt="hi", stream_interval=-1)
+    with pytest.raises(ValidationError, match="stream_interval"):
+        CompletionRequest(model="m", prompt="hi", stream_interval=0)
+
+    # ChatCompletionRequest: valid stream_interval passes through
+    req = ChatCompletionRequest(model="m",
+                                messages=[{
+                                    "role": "user",
+                                    "content": "hi"
+                                }],
+                                stream_interval=10)
+    sp = req.to_sampling_params()
+    assert sp.stream_interval == 10
+
+    # ChatCompletionRequest: invalid stream_interval rejected at construction
+    with pytest.raises(ValidationError, match="stream_interval"):
+        ChatCompletionRequest(model="m",
+                              messages=[{
+                                  "role": "user",
+                                  "content": "hi"
+                              }],
+                              stream_interval=0)
+
+    # ResponsesRequest: valid stream_interval passes through
+    req = ResponsesRequest(model="m", input="hi", stream_interval=5)
+    sp = req.to_sampling_params()
+    assert sp.stream_interval == 5
+
+    # ResponsesRequest: None leaves stream_interval unset
+    req = ResponsesRequest(model="m", input="hi")
+    sp = req.to_sampling_params()
+    assert sp.stream_interval is None
+
+    # ResponsesRequest: invalid stream_interval rejected at construction
+    with pytest.raises(ValidationError, match="stream_interval"):
+        ResponsesRequest(model="m", input="hi", stream_interval=-1)
+
+
+def test_stream_interval_ms_validation():
+    # Valid values
+    sp = SamplingParams(stream_interval_ms=100)
+    assert sp.stream_interval_ms == 100
+    sp = SamplingParams(stream_interval_ms=1)
+    assert sp.stream_interval_ms == 1
+    sp = SamplingParams(stream_interval_ms=None)
+    assert sp.stream_interval_ms is None
+
+    # Both can be set simultaneously
+    sp = SamplingParams(stream_interval=5, stream_interval_ms=100)
+    assert sp.stream_interval == 5
+    assert sp.stream_interval_ms == 100
+
+    # Invalid values
+    with pytest.raises(ValueError, match="stream_interval_ms"):
+        SamplingParams(stream_interval_ms=0)
+    with pytest.raises(ValueError, match="stream_interval_ms"):
+        SamplingParams(stream_interval_ms=-1)
+
+
+def test_stream_interval_ms_openai_protocol():
+    from pydantic import ValidationError
+
+    from tensorrt_llm.serve.openai_protocol import (
+        ChatCompletionRequest,
+        CompletionRequest,
+        ResponsesRequest,
+    )
+
+    # CompletionRequest: valid stream_interval_ms passes through
+    req = CompletionRequest(model="m", prompt="hi", stream_interval_ms=100)
+    sp = req.to_sampling_params()
+    assert sp.stream_interval_ms == 100
+
+    # CompletionRequest: None leaves stream_interval_ms unset
+    req = CompletionRequest(model="m", prompt="hi")
+    sp = req.to_sampling_params()
+    assert sp.stream_interval_ms is None
+
+    # CompletionRequest: invalid stream_interval_ms rejected at construction
+    with pytest.raises(ValidationError, match="stream_interval_ms"):
+        CompletionRequest(model="m", prompt="hi", stream_interval_ms=-1)
+    with pytest.raises(ValidationError, match="stream_interval_ms"):
+        CompletionRequest(model="m", prompt="hi", stream_interval_ms=0)
+
+    # ChatCompletionRequest: valid stream_interval_ms passes through
+    req = ChatCompletionRequest(model="m",
+                                messages=[{
+                                    "role": "user",
+                                    "content": "hi"
+                                }],
+                                stream_interval_ms=200)
+    sp = req.to_sampling_params()
+    assert sp.stream_interval_ms == 200
+
+    # ChatCompletionRequest: invalid stream_interval_ms rejected at construction
+    with pytest.raises(ValidationError, match="stream_interval_ms"):
+        ChatCompletionRequest(model="m",
+                              messages=[{
+                                  "role": "user",
+                                  "content": "hi"
+                              }],
+                              stream_interval_ms=0)
+
+    # ResponsesRequest: valid stream_interval_ms passes through
+    req = ResponsesRequest(model="m", input="hi", stream_interval_ms=50)
+    sp = req.to_sampling_params()
+    assert sp.stream_interval_ms == 50
+
+    # ResponsesRequest: None leaves stream_interval_ms unset
+    req = ResponsesRequest(model="m", input="hi")
+    sp = req.to_sampling_params()
+    assert sp.stream_interval_ms is None
+
+    # ResponsesRequest: invalid stream_interval_ms rejected at construction
+    with pytest.raises(ValidationError, match="stream_interval_ms"):
+        ResponsesRequest(model="m", input="hi", stream_interval_ms=-1)
+
+    # Both can be set together
+    req = CompletionRequest(model="m",
+                            prompt="hi",
+                            stream_interval=5,
+                            stream_interval_ms=100)
+    sp = req.to_sampling_params()
+    assert sp.stream_interval == 5
+    assert sp.stream_interval_ms == 100
+
+
+@pytest.mark.skipif(torch.cuda.device_count() < 2 or WORLD_SIZE != 2,
+                    reason="Must run on 2 MPI ranks with at least 2 GPUs")
+def test_sync_generation_tp_main_node_only(llama_7b_tp2_path: Path):
+    tokenizer = TransformersTokenizer.from_pretrained(llama_7b_tp2_path)
+    prompt = "deep learning"
+    prompt_token_ids = tokenizer.encode(prompt)
+    sampling_params = SamplingParams(max_tokens=4)
+
+    with GenerationExecutor.create(llama_7b_tp2_path) as executor:
+
+        executor.block_subordinates()
+        # from now on, only rank0 lives in the with statement
+        # other nodes wait at the "end" of the with statement
+
+        result = executor.generate(prompt_token_ids,
+                                   sampling_params=sampling_params)
+        assert tokenizer.decode(
+            result.outputs[0].token_ids) == "<s> deep learning, neural network,"
+
+
+@pytest.mark.skipif(torch.cuda.device_count() < 2 or WORLD_SIZE != 1,
+                    reason="Must run on 1 MPI rank with at least 2 GPUs")
+def _test_sync_generation_tp_inner(llama_7b_tp2_path: Path):
+    tokenizer = TransformersTokenizer.from_pretrained(llama_7b_tp2_path)
+    prompt = "deep learning"
+    prompt_token_ids = tokenizer.encode(prompt)
+    tp_size = 2
+    sampling_params = SamplingParams(max_tokens=4)
+
+    executor = GenerationExecutor.create(llama_7b_tp2_path,
+                                         model_world_size=tp_size)
+
+    async def async_stats_task():
+        # asyncio event loop must be created before first generation in order to
+        # use async APIs.
+        result = executor.generate(prompt_token_ids,
+                                   sampling_params=sampling_params)
+        assert tokenizer.decode(
+            result.outputs[0].token_ids) == ", neural network,"
+
+        try:
+            stats_result = executor.aget_stats(timeout=2)
+            # aget_stats now returns IterationResult, iterate to get stats
+            async for stats_str in stats_result:
+                stats = json.loads(stats_str) if isinstance(stats_str,
+                                                            str) else stats_str
+                assert stats["iter"] >= 0
+                assert stats["cpuMemUsage"] > 0
+                assert stats["gpuMemUsage"] > 0
+                break  # Just check first result
+        except AsyncQueue.EventLoopShutdownError:
+            pass
+
+    asyncio.run(async_stats_task())
+
+    # Poll for stats since RPC calls return immediately
+    import time
+    stats_list = []
+    for _ in range(10):
+        stats_list = executor.get_stats(timeout=0.5)
+        if stats_list:
+            break
+        time.sleep(0.1)
+
+    assert len(stats_list) > 0
+    stats = json.loads(stats_list[0]) if isinstance(stats_list[0],
+                                                    str) else stats_list[0]
+    assert stats["iter"] == 1
+    executor.shutdown()
+
+
 def test_FusedIpcQueue():
     producer_queue = FusedIpcQueue(is_server=True, fuse_message=False)
     consumer_queue = FusedIpcQueue(is_server=False,
