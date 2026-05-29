@@ -16,6 +16,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional, Sequence, Set
 
+import threading
+import traceback
+from datetime import datetime
+
 import click
 import torch
 import uvloop
@@ -39,6 +43,7 @@ from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
                                               parse_metadata_server_config_file,
                                               validate_config_bool)
 from tensorrt_llm.llmapi.llm_args import MultimodalConfig, TorchLlmArgs
+from tensorrt_llm.llmapi.llm_args import CudaGraphConfig, AttentionDpConfig
 from tensorrt_llm.llmapi.llm_utils import update_llm_args_with_extra_dict
 from tensorrt_llm.llmapi.mpi_session import find_free_ipc_addr, split_mpi_env
 from tensorrt_llm.llmapi.reasoning_parser import (ReasoningParserFactory,
@@ -82,6 +87,63 @@ def _apply_fastapi_middlewares(app, middlewares: Sequence[str]) -> None:
         else:
             raise ValueError(f"Invalid middleware {middleware}. "
                              "Must be a class or an async function.")
+
+
+def print_stack_trace(signum, frame):
+    """Signal handler for SIGUSR1 that prints stack traces of all threads."""
+    current_pid = os.getpid()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"SIGUSR1 received - Stack trace dump at {datetime.now()}")
+    logger.info(f"Process PID: {current_pid}")
+    logger.info(f"{'='*80}")
+
+    # Print stack trace of current thread
+    logger.info(f"\nMain thread stack trace (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Capture the stack trace as a string and log it
+    import io
+    string_io = io.StringIO()
+    traceback.print_stack(frame, file=string_io)
+    logger.info(string_io.getvalue())
+
+    # Print stack traces of all threads
+    logger.info(f"\nAll threads stack traces (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Sort threads by name for consistent output
+    thread_frames = list(sys._current_frames().items())
+    threads_info = []
+
+    for thread_id, frame in thread_frames:
+        thread = None
+        for t in threading.enumerate():
+            if t.ident == thread_id:
+                thread = t
+                break
+
+        thread_name = thread.name if thread else f"Thread-{thread_id}"
+        thread_daemon = thread.daemon if thread else "Unknown"
+        thread_alive = thread.is_alive() if thread else "Unknown"
+
+        threads_info.append((thread_name, thread_id, thread_daemon, thread_alive, frame))
+
+    # Sort by thread name for consistent output
+    threads_info.sort(key=lambda x: x[0])
+
+    for thread_name, thread_id, thread_daemon, thread_alive, frame in threads_info:
+        logger.info(f"\nThread: {thread_name} (ID: {thread_id}, PID: {current_pid})")
+        logger.info(f"  Daemon: {thread_daemon}, Alive: {thread_alive}")
+        logger.info("-" * 20)
+
+        # Capture each thread's stack trace as a string and log it
+        string_io = io.StringIO()
+        traceback.print_stack(frame, file=string_io)
+        logger.info(string_io.getvalue())
+
+    logger.info(f"\n{'='*80}")
+    logger.info(f"End of stack trace dump for PID: {current_pid}")
+    logger.info(f"{'='*80}\n")
 
 
 def _signal_handler_cleanup_child(signum, frame):
@@ -299,6 +361,8 @@ def get_llm_args(
         agent_percentage,
         "agent_types":
         agent_types,
+        "cuda_graph_config":
+        CudaGraphConfig(batch_sizes=list(range(1, max_batch_size + 1))),
     }
 
     llm_args = {
@@ -531,6 +595,10 @@ def launch_server(
         num_media_load_workers: int = 8,
         multi_frontend_enabled: bool = True):
 
+    # Install the SIGUSR1 signal handler for debugging
+    signal.signal(signal.SIGUSR1, print_stack_trace)
+    logger.info("SIGUSR1 signal handler installed. Send 'kill -USR1 <pid>' to get stack traces.")
+
     backend = llm_args["backend"]
     model = served_model_name or llm_args["model"]
 
@@ -551,7 +619,8 @@ def launch_server(
                                    socket.SOCK_STREAM)
     address_family = socket.AF_INET6 if all(
         [info[0] == socket.AF_INET6 for info in addr_info]) else socket.AF_INET
-    with socket.socket(address_family, socket.SOCK_STREAM) as s:
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         # If disagg cluster config is provided and port is not specified, try to find a free port, otherwise try to bind to the specified port
         assert port > 0 or disagg_cluster_config is not None, "Port must be specified if disagg cluster config is not provided"
         if multi_frontend.is_launcher or multi_frontend.is_attached_frontend:
@@ -575,7 +644,6 @@ def launch_server(
             llm = PyTorchLLM(**llm_args)
         elif backend == '_autodeploy':
             from tensorrt_llm._torch.auto_deploy import LLM as AutoDeployLLM
-
             # AutoDeploy does not support build_config
             llm_args.pop("build_config", None)
             llm = AutoDeployLLM(**llm_args)
@@ -598,6 +666,7 @@ def launch_server(
                 generator=llm,
                 model=model,
                 tool_parser=tool_parser,
+                served_model_name=served_model_name,
                 server_role=server_role,
                 metadata_server_cfg=metadata_server_cfg,
                 disagg_cluster_config=disagg_cluster_config,
@@ -1116,9 +1185,10 @@ def launch_visual_gen_server(
     "extra_llm_api_options",
     type=str,
     default=None,
-    help="Path to a YAML configuration file. Explicit CLI flags take precedence "
-    "over values in this file. Can be specified as either --config or "
-    "--extra_llm_api_options.",
+    help="Path to a YAML configuration file, or an inline JSON string that "
+    "overwrites the parameters specified by trtllm-serve. Explicit CLI flags "
+    "take precedence over values in this file. Can be specified as either "
+    "--config or --extra_llm_api_options.",
     status="prototype")
 @stability_option("--reasoning_parser",
                   type=click.Choice(["auto"] +
@@ -1230,6 +1300,8 @@ def launch_visual_gen_server(
     status="prototype")
 @stability_option(
     "--served_model_name",
+    "--served-model-name",
+    "served_model_name",
     type=str,
     default=None,
     help="The model name used in the API. If not specified, the model path is "
@@ -1346,6 +1418,7 @@ def serve(model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
 
     explicit_cli_keys = collect_explicit_cli_keys(
         exclude=("extra_llm_api_options", "config"))
+    assert max_seq_len is not None, "max_seq_len must be specified"
 
     def _serve_llm():
         nonlocal server_role, allow_request_chat_template
@@ -1385,6 +1458,7 @@ def serve(model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
 
         llm_args_extra_dict = {}
         if extra_llm_api_options is not None:
+<<<<<<< HEAD
             with open(extra_llm_api_options, 'r') as f:
                 llm_args_extra_dict = yaml.safe_load(f) or {}
         extra_allow_request_chat_template = _pop_bool_config_option(
@@ -1395,6 +1469,21 @@ def serve(model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
             llm_args, llm_args_extra_dict, explicit_cli_keys=explicit_cli_keys)
 
         # CLI --no-telemetry always wins over YAML config
+=======
+            # DeepInfra prod passes inline JSON to --extra_llm_api_options;
+            # upstream also supports a path to a YAML/JSON config file via
+            # --config. Accept both: an existing file is loaded as YAML, an
+            # inline string is parsed as JSON.
+            if os.path.isfile(extra_llm_api_options):
+                with open(extra_llm_api_options, 'r') as f:
+                    llm_args_extra_dict = yaml.safe_load(f)
+            else:
+                llm_args_extra_dict = json.loads(extra_llm_api_options)
+        llm_args = update_llm_args_with_extra_dict(
+            llm_args, llm_args_extra_dict, explicit_cli_keys=explicit_cli_keys)
+
+        # CLI --no-telemetry always wins over config
+>>>>>>> af2d2d70c ([None][feat] OpenAI serving-layer DeepInfra extensions)
         if not telemetry:
             llm_args["telemetry_config"] = llm_args[
                 "telemetry_config"].model_copy(update={"disabled": True})
