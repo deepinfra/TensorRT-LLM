@@ -298,6 +298,7 @@ class OpenAIServer(_VideoRoutesMixin):
                     logger.info(
                         "Started background iteration stats collector task")
 
+            self.kv_event_processor_task = asyncio.create_task(self.kv_event_processor())
             # terminate rank0 worker
             yield
 
@@ -317,6 +318,9 @@ class OpenAIServer(_VideoRoutesMixin):
                 await self.disagg_cluster_worker.deregister_worker()
             if self.resource_governor is not None:
                 self.resource_governor.close()
+
+            if self.kv_event_processor_task is not None:
+                self.kv_event_processor_task.cancel()
             self.generator.shutdown()
 
         self.app = FastAPI(lifespan=lifespan)
@@ -970,7 +974,7 @@ class OpenAIServer(_VideoRoutesMixin):
             metrics_dict["perf_metrics"] = metrics_json
         return JSONResponse(content=list(perf_metrics))
 
-    async def get_kv_cache_events(self) -> JSONResponse:
+    async def get_kv_cache_events_json(self) -> JSONResponse:
         events = []
         try:
             async for event in self.generator.get_kv_cache_events_async(0):
