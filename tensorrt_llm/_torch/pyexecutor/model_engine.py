@@ -3365,6 +3365,17 @@ class PyTorchModelEngine(ModelEngine):
             begin_compute = request.context_current_position
             end_compute = begin_compute + request.context_chunk_size
             prompt_tokens = all_prompt_tokens[begin_compute:end_compute]
+            if request.context_chunk_size == 0:
+                logger.error(
+                    f"[forward_step] context request with chunk_size=0: "
+                    f"req_id={request.py_request_id}, "
+                    f"prompt_len={request.prompt_len}, "
+                    f"ctx_pos={request.context_current_position}, "
+                    f"prepop={request.prepopulated_prompt_len}, "
+                    f"state={request.state}, "
+                    f"is_first_chunk={request.is_first_context_chunk}, "
+                    f"remaining={request.context_remaining_length}"
+                )
             position_ids.extend(
                 range(begin_compute, begin_compute + len(prompt_tokens)))
 

@@ -1270,6 +1270,106 @@ void WindowBlockManager::releaseSubtree(BlockPtr const& block)
     }
 }
 
+void WindowBlockManager::zeroBlockMemory(BlockPtr const& block)
+{
+    // Secondary (host-offloaded) blocks aren't read by GPU attention kernels —
+    // they get onboarded back into a primary slot before any read, so the
+    // primary slot is what we need to zero.
+    if (!block->isPrimary())
+    {
+        return;
+    }
+    // ``getBlockId()`` is a GLOBAL label across (primary + secondary) blocks
+    // in this WindowBlockManager — NOT a slot index into ``primaryPtr``. Using
+    // it directly walks off the end of the tensor for ~half of all recycled
+    // blocks (every secondary slot that ever got promoted). The correct slot
+    // index is ``getMemoryPoolBlockIndex()``, which always points at the
+    // block's CURRENT pool position.
+    auto const slotIdx = static_cast<size_t>(block->getMemoryPoolBlockIndex());
+    auto stream = mBufferManager.getStream().get();
+    // Skip pools where pointer arithmetic wouldn't address the right region —
+    // block-scale and indexer-K-cache pools have different element semantics
+    // (FP4 packed as INT8, etc.). Zeroing the main KV pools is what breaks
+    // NaN propagation; the scale pools follow.
+    for (auto const& pool : mPools)
+    {
+        if (!pool.primaryPtr)
+        {
+            continue;
+        }
+        if (pool.containsBlockScales || pool.containsIndexerKCache)
+        {
+            continue;
+        }
+        auto& tensor = *pool.primaryPtr;
+        if (tensor.getMemoryType() == runtime::MemoryType::kCPU)
+        {
+            // Defensive skip; primary pools are GPU/managed in practice.
+            continue;
+        }
+        auto* basePtr = static_cast<uint8_t*>(tensor.data());
+        if (basePtr == nullptr)
+        {
+            continue;
+        }
+        auto const shape = tensor.getShape();
+        // Validate that pool dims match expectations before pointer arithmetic.
+        // Layout: !layerFirst → {numBlocks, numLayers, kvFactor, blockSize},
+        //         layerFirst  → {numLayers, numBlocks, kvFactor, blockSize}.
+        if (shape.nbDims != 4)
+        {
+            continue;
+        }
+        auto const elementSize = runtime::BufferDataType(tensor.getDataType()).getSize();
+        auto const totalElts = static_cast<size_t>(shape.d[0]) * shape.d[1] * shape.d[2] * shape.d[3];
+        auto const totalBytes = totalElts * elementSize;
+        auto const perBlockBytes
+            = static_cast<size_t>(pool.numLayers) * pool.kvFactor * pool.blockSize * elementSize;
+        if (perBlockBytes == 0)
+        {
+            continue;
+        }
+        if (!pool.layerFirstLayout)
+        {
+            auto const offset = slotIdx * perBlockBytes;
+            if (offset + perBlockBytes > totalBytes)
+            {
+                TLLM_LOG_WARNING(
+                    "%s::zeroBlockMemory: slot %zu off+per=%zu exceeds totalBytes %zu; skipping pool",
+                    mLogPrefix.c_str(), slotIdx, offset + perBlockBytes, totalBytes);
+                continue;
+            }
+            auto* dst = basePtr + offset;
+            auto err = cudaMemsetAsync(dst, 0, perBlockBytes, stream);
+            if (err != cudaSuccess)
+            {
+                TLLM_LOG_WARNING("%s::zeroBlockMemory cudaMemsetAsync failed: %s; disabling for this pool",
+                    mLogPrefix.c_str(), cudaGetErrorString(err));
+                continue;
+            }
+        }
+        else
+        {
+            auto const numBlocks = static_cast<size_t>(shape.d[1]);
+            auto const perLayerBytes = static_cast<size_t>(pool.kvFactor) * pool.blockSize * elementSize;
+            for (SizeType32 l = 0; l < pool.numLayers; ++l)
+            {
+                auto const offset = (static_cast<size_t>(l) * numBlocks + slotIdx) * perLayerBytes;
+                if (offset + perLayerBytes > totalBytes)
+                {
+                    break;
+                }
+                auto* dst = basePtr + offset;
+                auto err = cudaMemsetAsync(dst, 0, perLayerBytes, stream);
+                if (err != cudaSuccess)
+                {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor::RetentionPriority priority,
     std::optional<std::chrono::milliseconds> durationMs, executor::KvCacheTransferMode mode,
     std::string const& directory, bool wantPlaceholder)
@@ -1340,6 +1440,19 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
     mEvictionPolicy->claimBlock(block, priority, durationMs);
     TLLM_LOG_DEBUG("%s::getFreeBlock - Block %d is now acquired by sequence %d", mLogPrefix.c_str(),
         block->getBlockId(), sequence.getRequestId());
+
+    // Zero recycled block to prevent NaN/garbage K/V from a previous tenant
+    // leaking into this sequence via whole-tile attention reads of the
+    // partial-block tail. Skipped for placeholder blocks (not real allocations).
+    // Opt-out: TRTLLM_KV_NO_ZERO_REUSED_BLOCKS=1.
+    if (!wantPlaceholder)
+    {
+        static bool const sZeroReusedBlocks = (std::getenv("TRTLLM_KV_NO_ZERO_REUSED_BLOCKS") == nullptr);
+        if (sZeroReusedBlocks)
+        {
+            zeroBlockMemory(block);
+        }
+    }
 
     return block;
 }
@@ -3442,7 +3555,11 @@ SizeType32 KVCacheManager::getNeededBlocksOneStep(LlmRequest const& req, bool tw
             = tc::ceilDiv(numUnSharedTokens, getTokensPerBlock()) * req.mSamplingConfig.beamWidth;
         auto numRequiredBlocks = numSharedBlocks + numUnSharedBlocks;
 
-        // Subtract reusable blocks if block reuse is enabled and we're not using variable window attention
+        // Subtract only referenced reusable blocks (blocks shared with active sequences).
+        // Unreferenced reusable blocks are in the eviction policy's free queues, so claiming
+        // them during allocation still consumes a free block. Subtracting all reusable blocks
+        // (including unreferenced) would double-count them against the free pool, causing the
+        // MAX_UTILIZATION scheduler to over-estimate available capacity.
         if (mEnableBlockReuse && !mBlockManager.isVariableWindow() && !isCrossKv()
             && !req.isDisaggGenerationInitState())
         {
@@ -3566,9 +3683,14 @@ SizeType32 KVCacheManager::getRemainingBlocksToCompletion(
         }
     }
 
-    // Only subtract reusable blocks that are already allocated (have active refs). See the
-    // comment in getNeededBlocksOneStep for the full rationale — free reusable blocks must
-    // not be subtracted because they are already counted in the eviction policy's free count.
+    // Calculate reusable blocks to subtract from context blocks (for new context requests)
+    // Only apply reuse accounting if:
+    // 1. Block reuse is enabled
+    // 2. Not using variable window attention
+    // 3. Request is in context init state and first context chunk
+    // 4. No blocks have been allocated yet for this sequence (otherwise reuse already applied during allocation)
+    // Use analyzePrefixReuse to avoid double-counting unreferenced blocks that are
+    // also in the free pool (same fix as getNeededBlocksOneStep).
     SizeType32 numReusableContextBlocks = 0;
     if (mEnableBlockReuse && !mBlockManager.isVariableWindow() && req.isContextInitState() && req.isFirstContextChunk()
         && numAllocBlocksPerBeam == 0)
