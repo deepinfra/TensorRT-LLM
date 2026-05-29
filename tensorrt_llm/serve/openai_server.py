@@ -822,6 +822,8 @@ class OpenAIServer(_VideoRoutesMixin):
                 await self.embedding_batcher.start()
                 logger.info("Started encode dynamic batcher")
 
+            self.kv_event_processor_task = asyncio.create_task(self.kv_event_processor())
+            # terminate rank0 worker
             yield
 
             await self._perf_metrics_writer.close()
@@ -845,6 +847,9 @@ class OpenAIServer(_VideoRoutesMixin):
                 await self.disagg_cluster_worker.deregister_worker()
             if self.resource_governor is not None:
                 self.resource_governor.close()
+
+            if self.kv_event_processor_task is not None:
+                self.kv_event_processor_task.cancel()
             self.generator.shutdown()
             # A stats read still in flight fails fast now that the executor is
             # down; the /metrics handler already treats that as no stats.
@@ -1911,7 +1916,7 @@ class OpenAIServer(_VideoRoutesMixin):
             "transmit_ts": transmit_ts
         })
 
-    async def get_kv_cache_events(self) -> JSONResponse:
+    async def get_kv_cache_events_json(self) -> JSONResponse:
         events = []
         try:
             async for event in self.generator.get_kv_cache_events_async(0):

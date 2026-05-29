@@ -491,6 +491,8 @@ class BaseWorker(GenerationExecutor):
                 request.sampling_params.logprobs_simple_format)
             executor_request.py_return_routed_experts = (
                 request.sampling_params.return_routed_experts)
+            executor_request.py_stream_interval = request.sampling_params.stream_interval
+            executor_request.py_stream_interval_ms = request.sampling_params.stream_interval_ms
 
             # here we add executor_request.py_disaggregated_params= request.disaggregated_params for python cache transceiver
             if request.disaggregated_params is not None:

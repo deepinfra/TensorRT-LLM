@@ -32,6 +32,9 @@ __all__ = [
 @dataclass(kw_only=True)
 class PostprocArgs:
     first_iteration: bool = True
+    last_text_len: int = 0
+    last_logprobs_len: int = 0
+    last_token_ids_len: int = 0
     num_prompt_tokens: Optional[int] = None
     # Subtracted from num_prompt_tokens when reporting usage. Lets servers
     # exclude generation-prompt stub tokens the vendor accounting treats as
