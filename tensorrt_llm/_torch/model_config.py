@@ -529,12 +529,17 @@ class ModelConfig(Generic[TConfig]):
         # ``canonicalize_quant_algo`` is applied again here (and per layer
         # below) because the ``quant_cfg.json`` overlay merged in for
         # MIXED_PRECISION bypasses ``read_modelopt_quant_config``.
+        # DeepInfra: resolve QuantAlgo by member *name* (upper-cased) instead of
+        # by value so both "FP8" and "fp8" spellings in hf_quant_config.json work
+        # regardless of how the StrEnum backend derives auto() values.
+        raw_quant_algo = json_quant_configs.get('quant_algo', None)
         quant_config.quant_algo = (
-            QuantAlgo(canonicalize_quant_algo(json_quant_configs['quant_algo']))
-            if json_quant_configs.get('quant_algo') is not None else None)
+            QuantAlgo[str(canonicalize_quant_algo(raw_quant_algo)).upper()]
+            if raw_quant_algo is not None else None)
+        raw_kv_algo = json_quant_configs.get('kv_cache_quant_algo', None)
         quant_config.kv_cache_quant_algo = (
-            QuantAlgo(json_quant_configs['kv_cache_quant_algo']) if
-            json_quant_configs.get('kv_cache_quant_algo') is not None else None)
+            QuantAlgo[raw_kv_algo.upper()]
+            if raw_kv_algo is not None else None)
         quant_config.group_size = json_quant_configs.get('group_size', None)
         quant_config.exclude_modules = json_quant_configs.get(
             'exclude_modules', None)
@@ -558,17 +563,18 @@ class ModelConfig(Generic[TConfig]):
                 )
             json_quant_configs.update(json_extended_quant_configs)
             # kv_cache_quant_algo is global regardless of MIXED_PRECISION
-            kv_cache_quant_algo = (QuantAlgo(
-                json_quant_configs['kv_cache_quant_algo']) if
-                                   json_quant_configs.get('kv_cache_quant_algo')
-                                   is not None else None)
+            raw_kv_algo_mp = json_quant_configs.get(
+                'kv_cache_quant_algo', None)
+            kv_cache_quant_algo = (QuantAlgo[raw_kv_algo_mp.upper()]
+                                   if raw_kv_algo_mp is not None else None)
             mixed_quant_configs = json_quant_configs.get(
                 'quantized_layers', None)
             if (kv_quant_lhs := json_extended_quant_configs.get(
                     "kv_cache_quant_algo", None)) is not None and (
                         kv_quant_rhs :=
                         quant_config.kv_cache_quant_algo) is not None:
-                if kv_quant_lhs != kv_quant_rhs:
+                kv_quant_lhs_norm = QuantAlgo[kv_quant_lhs.upper()]
+                if kv_quant_lhs_norm != kv_quant_rhs:
                     raise RuntimeError(
                         f"The kvcache config in 'quant_cfg.json', {kv_quant_lhs},"
                         f"is different from 'hf_quant_config.json', {kv_quant_rhs}!"
@@ -583,8 +589,10 @@ class ModelConfig(Generic[TConfig]):
                 layer_cfg = mixed_quant_configs[layer]
                 config = QuantConfig()
                 config.kv_cache_quant_algo = kv_cache_quant_algo
-                config.quant_algo = QuantAlgo(
-                    canonicalize_quant_algo(layer_cfg['quant_algo']))
+                raw_layer_algo = layer_cfg.get('quant_algo', None)
+                config.quant_algo = (
+                    QuantAlgo[str(canonicalize_quant_algo(raw_layer_algo)).upper()]
+                    if raw_layer_algo is not None else None)
                 config.group_size = layer_cfg.get('group_size', None)
                 # AWQ-specific extras emitted by modelopt per-layer.
                 if 'has_zero_point' in layer_cfg:
