@@ -1309,6 +1309,13 @@ private:
     //! \brief Calls KVCacheBlock::freeLeafBlock to remove block from search tree.
     void freeLeafBlock(BlockPtr const& block);
 
+    //! \brief Zero the primary-pool memory backing a single block across all pools.
+    //! Used to wipe stale K/V from a recycled block before a new sequence writes
+    //! its own data. Prevents NaN/garbage from a previous tenant's K/V (e.g.,
+    //! from FP8 quant of overflow values) leaking into a new request via
+    //! whole-tile attention reads of the partial-block tail.
+    void zeroBlockMemory(BlockPtr const& block);
+
     //! \brief For FP4 quantization. Creates pool objects for FP4 block scalars.
     void createBlockScalePools(SizeType32 blockSize);
 

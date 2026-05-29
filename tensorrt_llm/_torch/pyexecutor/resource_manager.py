@@ -902,6 +902,8 @@ class KVCacheManager(BaseResourceManager):
         # Warmup baseline for cumulative counters (set by snapshot_warmup_baseline)
         self._warmup_reused_blocks = 0
         self._warmup_missed_blocks = 0
+        # Track active sequences for debugging emplaceDone crashes
+        self._active_sequences: set = set()
 
         self.impl.allocate_pools(False)
         self.kv_cache_pool_pointers = self.impl.get_block_pool_pointers()
@@ -1022,6 +1024,7 @@ class KVCacheManager(BaseResourceManager):
                             (req.py_request_id, req.prompt_len, req_beam_width))
                         batch_llm_requests.append(req)
                         batch_ctx_requests.append(req)
+                        self._active_sequences.add(req.py_request_id)
 
             if batch_request_infos:
                 self.impl.add_sequence_batch(batch_request_infos,
@@ -1140,10 +1143,12 @@ class KVCacheManager(BaseResourceManager):
             if prepare_resource:
                 batch_request_infos.append((req_id, token_num, beam_width))
                 batch_llm_requests.append(req)
+                self._active_sequences.add(req_id)
                 if draft_kv_cache_manager is not None:
                     draft_batch_request_infos.append(
                         (req_id, token_num, beam_width))
                     draft_batch_llm_requests.append(req)
+                    draft_kv_cache_manager._active_sequences.add(req_id)
 
             if use_mrope:
                 _populate_dummy_mrope_config(req, token_num, is_gen)
@@ -1241,6 +1246,7 @@ class KVCacheManager(BaseResourceManager):
             self.impl.store_context_blocks(request)
 
     def free_resources(self, request: LlmRequest, pin_on_release: bool = False):
+        self._active_sequences.discard(request.py_request_id)
         return self.impl.remove_sequence(request.py_request_id, request,
                                          pin_on_release)
 
@@ -3084,6 +3090,63 @@ class KVCacheManagerV2(BaseResourceManager):
             self._prepare_draft_resources(scheduled_batch)
             return
 
+        with request_context(self.is_draft, scheduled_batch):
+            context_batch = scheduled_batch.context_requests
+            generation_batch = scheduled_batch.generation_requests
+            # allocate KV Cache
+            for req in context_batch:
+                beam_width = req.sampling_config.beam_width
+                if 'cp_type' in self.mapping.cp_config and CpType.STAR == self.mapping.cp_config[
+                        'cp_type']:
+                    raise RuntimeError(
+                        "Star attention is not supported for kv cache manager v2"
+                    )
+                else:
+                    if req.is_first_context_chunk and self._kv_connector_should_add_sequence(
+                            req):
+                        # Last token cannot be recovered, so we don't include it in the input tokens to look up for the block that can be reused.
+                        kv_cache = self._create_kv_cache(
+                            req.py_request_id, req.lora_task_id,
+                            req.get_tokens(DEFAULT_BEAM_INDEX)[:-1]
+                            if self.enable_block_reuse else None)
+                        assert beam_width == 1, "Currently, KVCacheManagerV2 only supports beam width 1"
+                        if not self.enable_block_reuse:
+                            assert kv_cache.num_committed_tokens == 0
+                            kv_cache.stop_committing()
+                        else:
+                            req.context_current_position = kv_cache.num_committed_tokens
+                            chunk_size = req.context_chunk_size
+                            if req.context_current_position + req.context_chunk_size < req.prompt_len:
+                                floored_end_position = (
+                                    req.context_current_position +
+                                    req.context_chunk_size
+                                ) // self.tokens_per_block * self.tokens_per_block
+                                if floored_end_position > req.context_current_position:
+                                    chunk_size = floored_end_position - req.context_current_position
+                                else:
+                                    # Chunk too small to reach the next block
+                                    # boundary.  Extend to next boundary
+                                    # (capped at prompt end).
+                                    next_boundary = (
+                                        (req.context_current_position // self.tokens_per_block) + 1
+                                    ) * self.tokens_per_block
+                                    chunk_size = min(
+                                        next_boundary - req.context_current_position,
+                                        req.prompt_len - req.context_current_position)
+
+                            req.context_chunk_size = min(
+                                chunk_size,
+                                req.prompt_len - req.context_current_position)
+
+                        success = kv_cache.resume(self._stream.cuda_stream)
+                        assert success
+
+                        success = kv_cache.resize(req.prompt_len)
+                        if not success:
+                            raise ValueError(
+                                f"Failed to resize capacity of KV cache for request {req.py_request_id} to {req.prompt_len} tokens for context update"
+                            )
+
     def _prepare_draft_resources(self, scheduled_batch: ScheduledRequests):
         """Create/resize KV caches in the draft V2 manager for scheduled requests.
 
@@ -3812,9 +3875,54 @@ class ResourceManager:
 
     @nvtx_range("prepare_resources")
     def prepare_resources(self, scheduled_batch: ScheduledRequests):
-        for _, resource_manager in self.resource_managers.items():
+        # mContextChunkSize is a single shared field in the C++ LlmRequest.
+        # DRAFT_KV_CACHE_MANAGER runs BEFORE KV_CACHE_MANAGER (because
+        # KV_CACHE_MANAGER is moved to end in _util.py).  The draft's
+        # addSequence -> setPrepopulatedPromptLen can clobber chunk_size
+        # set by the scheduler.  Save before DRAFT, restore after.
+        has_draft_kv = ResourceManagerType.DRAFT_KV_CACHE_MANAGER in self.resource_managers
+        saved_chunk_sizes = None
+        for rm_type, resource_manager in self.resource_managers.items():
             if hasattr(resource_manager, "prepare_resources"):
+                # Save chunk sizes before the draft KV cache manager clobbers them
+                if has_draft_kv and rm_type == ResourceManagerType.DRAFT_KV_CACHE_MANAGER:
+                    saved_chunk_sizes = [
+                        req.context_chunk_size
+                        for req in scheduled_batch.context_requests
+                    ]
+
                 resource_manager.prepare_resources(scheduled_batch)
+
+                # Log draft KV cache free blocks after prepare
+                if rm_type == ResourceManagerType.DRAFT_KV_CACHE_MANAGER and resource_manager is not None:
+                    try:
+                        draft_free = resource_manager.get_num_free_blocks()
+                        draft_active = len(resource_manager._active_sequences)
+                        if not hasattr(self, '_draft_kv_log_counter'):
+                            self._draft_kv_log_counter = 0
+                            self._draft_kv_total_blocks = draft_free + draft_active  # approximate
+                        self._draft_kv_log_counter += 1
+                        if self._draft_kv_log_counter % 100 == 1 or draft_free < 100:
+                            logger.info(
+                                f"[draft_kv] iter={self._draft_kv_log_counter}, "
+                                f"free_blocks={draft_free}, "
+                                f"active_sequences={draft_active}")
+                    except Exception:
+                        pass
+
+                # Restore chunk sizes after the draft KV cache manager
+                if rm_type == ResourceManagerType.DRAFT_KV_CACHE_MANAGER and saved_chunk_sizes is not None:
+                    for req, saved_size in zip(
+                            scheduled_batch.context_requests,
+                            saved_chunk_sizes):
+                        cur_size = req.context_chunk_size
+                        if cur_size != saved_size:
+                            logger.warning(
+                                f"[prepare_resources] RESTORE chunk_size after draft KV: "
+                                f"req_id={req.py_request_id}, "
+                                f"draft_chunk_size={cur_size} -> restored={saved_size}"
+                            )
+                        req.context_chunk_size = saved_size
 
     @nvtx_range("update_resources")
     def update_resources(

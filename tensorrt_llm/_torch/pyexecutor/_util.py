@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import math
 import os
 from typing import Dict, List, Optional, Union
 
@@ -855,9 +856,9 @@ class KvCacheCreator:
         return get_num_spec_layers(self._speculative_config)
 
     def _create_one_model_draft_kv_cache_manager(
-        self,
-        estimating_kv_cache: bool = False,
-        kv_cache_config_override: Optional[KvCacheConfig] = None,
+            self,
+            estimating_kv_cache: bool = False,
+            target_kv_cache_manager: Optional[KVCacheManager] = None,
     ) -> Optional[KVCacheManager]:
         """
         Create a KV cache manager for draft model layers in one-model mode
@@ -906,12 +907,53 @@ class KvCacheCreator:
         # the sparse_attention_config. Get it from effective_draft_config which
         # falls back to the target model's config for MTP mode.
         sparse_attn_config = effective_draft_config.sparse_attention_config
-        draft_kv_config = kv_cache_config_override if kv_cache_config_override is not None else self._kv_cache_config
+
+        # The scheduler only accounts for target KV cache capacity when
+        # scheduling, so the draft must have enough blocks for all sequences
+        # the scheduler admits.  When target uses MLA (compressed KV) but draft
+        # uses standard MHA (e.g., Eagle3 with Llama-style attention), the
+        # draft's per-token cost can be comparable to the target's despite
+        # having far fewer layers.  Relying on leftover GPU memory
+        # (free_gpu_memory_fraction of what remains after target allocation)
+        # can leave the draft undersized.  Size the draft 10% larger than the
+        # target's block count: per-step growth is identical between pools, but
+        # asymmetric prefix reuse (target hits cached blocks, draft typically
+        # doesn't) lets draft drift below target's free count over time. The
+        # 10% buffer absorbs that drift without needing a runtime admission
+        # check that re-budgets every scheduling step.
+        draft_kv_cache_config = self._kv_cache_config.model_copy(update={'host_cache_size': 0})
+        if target_kv_cache_manager is not None:
+            target_blocks = target_kv_cache_manager.blocks_in_primary_pool
+            min_draft_blocks = math.ceil(target_blocks * 1.1)
+            min_draft_tokens = min_draft_blocks * self._tokens_per_block
+
+            free_mem, _ = torch.cuda.mem_get_info()
+            logger.info(
+                f"Draft KV cache sizing: "
+                f"gpu_free_mem={free_mem / (1 << 30):.2f}GiB, "
+                f"target_blocks={target_blocks}, "
+                f"min_draft_blocks={min_draft_blocks}, "
+                f"min_draft_tokens={min_draft_tokens}, "
+                f"current_max_tokens={self._kv_cache_config.max_tokens}, "
+                f"free_gpu_memory_fraction={self._kv_cache_config.free_gpu_memory_fraction}")
+
+            current_max = self._kv_cache_config.max_tokens
+            if current_max is None or current_max < min_draft_tokens:
+                draft_kv_cache_config = draft_kv_cache_config.model_copy(
+                    update={
+                        'max_tokens': min_draft_tokens,
+                        'free_gpu_memory_fraction': None,
+                    })
+                logger.info(
+                    f"Draft KV cache: adjusting max_tokens "
+                    f"{current_max} -> {min_draft_tokens} "
+                    f"({min_draft_blocks} blocks = 1.1 * target's {target_blocks})")
+
         return _create_kv_cache_manager(
             model_engine=None,
             kv_cache_manager_cls=draft_kv_cache_manager_cls,
             mapping=self._mapping,
-            kv_cache_config=draft_kv_config,
+            kv_cache_config=draft_kv_cache_config,
             tokens_per_block=self._tokens_per_block,
             max_seq_len=self._max_seq_len,
             max_batch_size=self._max_batch_size,
@@ -1055,7 +1097,7 @@ class KvCacheCreator:
         elif self._should_create_separate_draft_kv_cache():
             draft_kv_cache_manager = self._create_one_model_draft_kv_cache_manager(
                 estimating_kv_cache,
-                kv_cache_config_override=draft_kv_cache_config)
+                target_kv_cache_manager=kv_cache_manager)
 
         resources[ResourceManagerType.KV_CACHE_MANAGER] = kv_cache_manager
         resources[
