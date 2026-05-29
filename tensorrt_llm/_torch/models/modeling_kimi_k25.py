@@ -91,6 +91,50 @@ logger = logging.getLogger(__name__)
 
 DISAGG = os.getenv("TLLM_MULTIMODAL_DISAGGREGATED", "0") == "1"
 
+# DeepInfra (engine-containers): transformers 5.x put ``kimi_k25`` on
+# ``tokenization_auto.MODELS_WITH_INCORRECT_HUB_TOKENIZER_CLASS``, which
+# force-disables the auto_map remote tokenizer and falls back to
+# TikTokenConverter inside TokenizersBackend. That converter ignores
+# ``tokenizer_config.json``'s explicit ``added_tokens_decoder`` ids and packs
+# all special tokens contiguously starting at vocab_size, shifting
+# ``<|media_pad|>`` from 163605 to 163602 and ``</think>`` from 163607 to 163604.
+# Every downstream component (input processor, xgrammar grammar, model
+# placeholder expansion, detokenizer) then disagrees with the model's canonical
+# vocab and the engine crashes or emits ``[UNK]`` for reasoning markers.
+# Removing kimi_k25 from the denylist restores the custom TikTokenTokenizer with
+# the correct, gapped id mapping. (rc19 dropped DI's lazy slow-tokenizer shim as
+# redundant, but the denylist fix is still needed for correct ids; the discard is
+# a harmless no-op if upstream later resolves the denylist entry.)
+try:
+    from transformers.models.auto import tokenization_auto as _kimi_tok_auto
+    _kimi_tok_auto.MODELS_WITH_INCORRECT_HUB_TOKENIZER_CLASS.discard("kimi_k25")
+except (ImportError, AttributeError):  # transformers <5 or future refactor
+    pass
+
+
+# DeepInfra (engine-containers): the checkpoint's dynamic-module
+# ``tokenization_kimi.py`` emits a ``logger.warning('Calling super().encode with
+# {...}')`` on every encode called with extra kwargs (e.g.
+# ``add_special_tokens=False``). Under prod traffic that's thousands of lines per
+# second. Install a Filter on the root logger that drops only this one message.
+class _SilenceKimiTokenizerCallingSuper(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            return "Calling super().encode" not in record.getMessage()
+        except Exception:
+            return True
+
+
+if not any(isinstance(f, _SilenceKimiTokenizerCallingSuper)
+           for f in logging.getLogger().filters):
+    logging.getLogger().addFilter(_SilenceKimiTokenizerCallingSuper())
+
+# DeepInfra (engine-containers): cap on rows processed at once through the
+# vision-tower MLP. Bounds the transient ``[chunk, mlp_dim]`` activation so a
+# single large image (e.g. 4K×4K → ~85k patches) cannot OOM the encoder. 0
+# disables chunking.
+_VISION_MLP_CHUNK_SIZE = int(os.environ.get("TLLM_KIMI_VISION_MLP_CHUNK", "4096"))
+
 
 def _has_meta_tensors(module: nn.Module) -> bool:
     return any(getattr(param, "is_meta", False) for param in module.parameters()) or any(
@@ -488,7 +532,12 @@ class Rope2D(nn.Module):
 
 
 class VisionMLP(MLP):
-    """TRT-LLM MLP wrapper for each MoonViT3d encoder layer."""
+    """TRT-LLM MLP wrapper for each MoonViT3d encoder layer.
+
+    Chunks rows through the up/down projections to bound the transient
+    ``[chunk, mlp_dim]`` activation. A 4K×4K image (~85k patches) with
+    mlp_dim=4304 in bf16 would otherwise allocate ~700MB per layer.
+    """
 
     def __init__(
         self, model_config: ModelConfig, layer_idx: int, hidden_dim: int, mlp_dim: int
@@ -502,6 +551,17 @@ class VisionMLP(MLP):
             config=model_config,
             layer_idx=layer_idx,
             overridden_tp_size=1 if model_config.mapping.enable_attention_dp else None,
+        )
+
+    def forward(self, x: torch.Tensor, lora_params=None) -> torch.Tensor:
+        # DeepInfra (engine-containers): chunk rows to bound peak activation.
+        chunk = _VISION_MLP_CHUNK_SIZE
+        if chunk <= 0 or lora_params is not None or x.shape[0] <= chunk:
+            return super().forward(x, lora_params=lora_params)
+        return torch.cat(
+            [super(VisionMLP, self).forward(x[i:i + chunk])
+             for i in range(0, x.shape[0], chunk)],
+            dim=0,
         )
 
 
@@ -906,9 +966,18 @@ class KimiK25VisionModel(nn.Module):
             proj_prefix,
         )
 
-        # Move to GPU and cast to model dtype to match pixel_values.
+        # Move to GPU and cast to model dtype to match pixel_values. Keep
+        # LayerNorm parameters in float32: TRT-LLM's LayerNorm.forward upcasts
+        # hidden_states to float32 before calling F.layer_norm, so if
+        # weight/bias get cast to bf16 here the kernel fails at the first vision
+        # request with "expected scalar type Float but found BFloat16".
+        # DeepInfra (engine-containers): verified against the real checkpoint —
+        # fires on the very first multimodal request.
         device = torch.cuda.current_device()
         self.to(device=device, dtype=self.model_dtype)
+        for module in self.modules():
+            if isinstance(module, LayerNorm):
+                module.to(dtype=torch.float32)
 
     def _extract_features(
         self,
@@ -1201,6 +1270,22 @@ class KimiK25InputProcessor(BaseMultimodalInputProcessor, BaseMultimodalDummyInp
         if not images and not videos:
             token_ids = self._tokenizer(text_prompt, return_tensors="pt").input_ids[0]
             return token_ids.to(torch.int32).tolist(), {}
+
+        # DeepInfra (engine-containers): the ``data.image`` flow can deliver
+        # images without the HF placeholder block in ``text_prompt`` (the OpenAI
+        # image_url path via MultimodalPlaceholderMetadata, or our /v1/completions
+        # ``data.image`` shim). Other paths (chat template applied at the API
+        # gateway, or the HF processor itself) already include the placeholder(s).
+        # Top up only the deficit instead of unconditionally prepending — adding
+        # placeholders when they're already there yields
+        # ``mm placeholder tokens (N) > media items in grid_thws (M)``.
+        pad_token_str = "<|media_pad|>"
+        auto_ph = "<|media_begin|><|media_pad|><|media_end|>"
+        if images and text_prompt is not None:
+            existing_pads = text_prompt.count(pad_token_str)
+            deficit = len(images) - existing_pads
+            if deficit > 0:
+                text_prompt = (auto_ph * deficit) + text_prompt
 
         # Build the ``medias`` list expected by KimiK25Processor.
         # The HF processor accepts either ``messages`` (chat format) or
@@ -1613,6 +1698,20 @@ class KimiK25ForConditionalGeneration(PreTrainedModel):
     def vocab_size_padded(self) -> int:
         return self.llm.vocab_size_padded
 
+    # DeepInfra (engine-containers): rc19 forwards draft_config/draft_model/
+    # model/lm_head/vocab_size_padded/load_draft_weights, but the spec-decode
+    # worker/config and guided-decoder hooks are read on the top-level model too.
+    @property
+    def spec_worker(self):
+        return getattr(self.llm, "spec_worker", None)
+
+    @property
+    def spec_config(self):
+        return getattr(self.llm, "spec_config", None)
+
+    def set_guided_decoder(self, *args, **kwargs):
+        return self.llm.set_guided_decoder(*args, **kwargs)
+
     def load_draft_weights(self, *args, **kwargs):
         return self.llm.load_draft_weights(*args, **kwargs)
 
@@ -1701,6 +1800,12 @@ class KimiK25ForConditionalGeneration(PreTrainedModel):
                         device=input_ids.device,
                     )
 
+        # DeepInfra (engine-containers): save the pre-fuse input_ids. When
+        # fuse_input_embeds returns (None, inputs_embeds) for the multimodal
+        # case, the Eagle3 drafter still needs token ids to feed its own
+        # embedding layer.
+        original_input_ids = input_ids
+
         input_ids, inputs_embeds = fuse_input_embeds(
             self.llm.model.embed_tokens,
             input_ids,
@@ -1708,6 +1813,9 @@ class KimiK25ForConditionalGeneration(PreTrainedModel):
             mm_token_ids=mm_token_ids,
             **fuse_kwargs,
         )
+
+        if inputs_embeds is not None and input_ids is None and original_input_ids is not None:
+            input_ids = original_input_ids
 
         return self.llm.forward(
             attn_metadata,
