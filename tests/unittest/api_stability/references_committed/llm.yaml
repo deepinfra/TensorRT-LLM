@@ -90,6 +90,9 @@ methods:
       stream_interval:
         annotation: int
         default: 1
+      stream_interval_ms:
+        annotation: int
+        default: 0
 
       kwargs:
         annotation: Any

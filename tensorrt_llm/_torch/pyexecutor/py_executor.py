@@ -100,6 +100,14 @@ from .hang_diagnostics import create_executor_hang_diagnostics
 from .kv_cache.kv_cache_manager_v2 import KVCacheManagerV2
 from .kv_cache.mamba_cache_manager import (BaseMambaCacheManager,
                                            MixedMambaHybridCacheManager)
+from collections import defaultdict
+import array
+import json
+
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
+
+prom_metrics = defaultdict(float)
+prom_metrics_file = None
 from .kv_cache_load import KvLoadTracker, aggregate_load
 from .kv_cache_stats import append_kv_cache_iteration_stats
 from .llm_request import (ATTENTION_DP_DUMMY_REQUEST_ID, ExecutorRequest,
@@ -608,6 +616,7 @@ class PyExecutor:
         self._pending_num_new_active_requests = 0
         self._pending_num_completed_requests = 0
         self.stream_interval = self.llm_args.stream_interval
+        self.stream_interval_ms = self.llm_args.stream_interval_ms
         self.perf_manager = PerfMetricsManager(
             enabled=getattr(self.llm_args, 'return_perf_metrics', False))
         self.attention_dp_enable_balance = (
@@ -2266,7 +2275,52 @@ class PyExecutor:
         call site is unchanged.
         """
         with self._profile_manager.profile_step() as step:
-            yield step
+            last_start_time = None
+
+            def _step(*args, **kwargs):
+                # DeepInfra: per-iteration Prometheus snapshot to /dev/shm,
+                # read by openai_server's /metrics handler.
+                nonlocal last_start_time
+                ret = step(*args, **kwargs)
+                start_time = time.time()
+                if last_start_time is not None and self.dist.rank == 0:
+                    self._write_prom_metrics(start_time - last_start_time)
+                last_start_time = start_time
+                return ret
+
+            yield _step
+
+    def _write_prom_metrics(self, iter_time: float) -> None:
+        global prom_metrics_file
+        try:
+            iter_states = self.model_engine.iter_states
+            num_ctx_requests = iter_states.get('num_ctx_requests', 0)
+            num_ctx_tokens = iter_states.get('num_ctx_tokens', 0)
+            num_gen_tokens = iter_states.get('num_generation_tokens', 0)
+            total_running = num_ctx_requests + num_gen_tokens / (
+                1 + self.model_engine.max_draft_len)
+            prom_metrics["num_requests_running"] = total_running
+            prom_metrics["num_requests_swapped"] = total_running - len(
+                self.active_requests)
+            prom_metrics["iteration_tokens_total_sum"] += num_ctx_tokens + num_gen_tokens
+            prom_metrics["iteration_tokens_total_count"] += 1
+            prom_metrics["time_per_output_token_seconds_sum"] += iter_time
+            prom_metrics["time_per_output_token_seconds_count"] += 1
+            prom_metrics["prompt_tokens_total"] += num_ctx_tokens
+            prom_metrics["request_prompt_tokens_total_sum"] += num_ctx_tokens
+            prom_metrics["request_prompt_tokens_total_count"] += 1
+            prom_metrics["generation_tokens_total"] += num_gen_tokens
+            prom_metrics["request_generation_tokens_total_sum"] += num_gen_tokens
+            prom_metrics["request_generation_tokens_total_count"] += 1
+            if prom_metrics_file is None:
+                prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                            os.O_RDWR | os.O_CREAT)
+            os.pwrite(prom_metrics_file,
+                      (json.dumps(list(prom_metrics.keys())).encode('UTF-8') +
+                       b'\0' +
+                       array.array('d', prom_metrics.values()).tobytes()), 0)
+        except Exception:
+            traceback.print_exc()
 
     def start_profile(self,
                       output_dir: Optional[str] = None,
@@ -9524,9 +9578,24 @@ class PyExecutor:
                                         "route_capture", None)
                 if route_capture is not None:
                     route_capture.attach_routes(request)  # R3: append routes
-            should_emit = (request.py_decoding_iter == 1 or request.is_finished
-                           or request.py_decoding_iter % self.stream_interval
-                           == 0)
+            request.py_last_stream_emit_iter += 1
+            now = get_steady_clock_now_in_seconds()
+
+            # Resolve effective intervals (per-request > engine > default)
+            token_interval = request.py_stream_interval or self.stream_interval
+            time_interval_ms = request.py_stream_interval_ms or self.stream_interval_ms or 0
+
+            # Time interval takes priority; fall back to token interval
+            if time_interval_ms > 0:
+                interval_triggered = (
+                    request.py_last_stream_emit_time is not None
+                    and (now - request.py_last_stream_emit_time) * 1000
+                    >= time_interval_ms)
+            else:
+                interval_triggered = request.py_last_stream_emit_iter >= token_interval
+
+            should_emit = (request.py_decoding_iter == 1
+                           or request.is_finished or interval_triggered)
             # The early-emit prototype issues the (non-terminal) iter-1
             # response from `_emit_first_token_responses`; suppress it here.
             if (not emit_first_iter and request.py_decoding_iter == 1
@@ -9537,6 +9606,8 @@ class PyExecutor:
                     # Response creation may finalize and copy scalar ctx GPU totals.
                     self.perf_manager.compute_batch_gpu_times(
                         [request], gpu_times_cache=gpu_times_cache)
+                request.py_last_stream_emit_iter = 0
+                request.py_last_stream_emit_time = now
                 response = request.create_response()
                 if response:
                     request_done = request.is_finished

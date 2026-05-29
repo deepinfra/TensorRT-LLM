@@ -34,6 +34,10 @@ from types import FrameType
 from typing import (TYPE_CHECKING, Any, Dict, Iterator, NoReturn, Optional,
                     Sequence, Set)
 
+import threading
+import traceback
+from datetime import datetime
+
 import click
 import torch
 import uvloop
@@ -61,6 +65,7 @@ from tensorrt_llm.llmapi.disagg_utils import (
     parse_metadata_server_config_file, validate_config_bool,
     validate_internal_request_auth_key)
 from tensorrt_llm.llmapi.llm_args import (SERVE_CLI_CONFIG_FIELDS,
+                                          CudaGraphConfig,
                                           KvCacheConnectorConfig, SleepConfig,
                                           TorchLlmArgs, build_cli_config)
 from tensorrt_llm.llmapi.llm_utils import update_llm_args_with_extra_dict
@@ -103,6 +108,63 @@ def _terminate_visual_gen_startup(signum: int,
                                   frame: Optional[FrameType]) -> NoReturn:
     del frame
     raise _VisualGenStartupTermination(signum)
+
+
+def print_stack_trace(signum, frame):
+    """Signal handler for SIGUSR1 that prints stack traces of all threads."""
+    current_pid = os.getpid()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"SIGUSR1 received - Stack trace dump at {datetime.now()}")
+    logger.info(f"Process PID: {current_pid}")
+    logger.info(f"{'='*80}")
+
+    # Print stack trace of current thread
+    logger.info(f"\nMain thread stack trace (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Capture the stack trace as a string and log it
+    import io
+    string_io = io.StringIO()
+    traceback.print_stack(frame, file=string_io)
+    logger.info(string_io.getvalue())
+
+    # Print stack traces of all threads
+    logger.info(f"\nAll threads stack traces (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Sort threads by name for consistent output
+    thread_frames = list(sys._current_frames().items())
+    threads_info = []
+
+    for thread_id, frame in thread_frames:
+        thread = None
+        for t in threading.enumerate():
+            if t.ident == thread_id:
+                thread = t
+                break
+
+        thread_name = thread.name if thread else f"Thread-{thread_id}"
+        thread_daemon = thread.daemon if thread else "Unknown"
+        thread_alive = thread.is_alive() if thread else "Unknown"
+
+        threads_info.append((thread_name, thread_id, thread_daemon, thread_alive, frame))
+
+    # Sort by thread name for consistent output
+    threads_info.sort(key=lambda x: x[0])
+
+    for thread_name, thread_id, thread_daemon, thread_alive, frame in threads_info:
+        logger.info(f"\nThread: {thread_name} (ID: {thread_id}, PID: {current_pid})")
+        logger.info(f"  Daemon: {thread_daemon}, Alive: {thread_alive}")
+        logger.info("-" * 20)
+
+        # Capture each thread's stack trace as a string and log it
+        string_io = io.StringIO()
+        traceback.print_stack(frame, file=string_io)
+        logger.info(string_io.getvalue())
+
+    logger.info(f"\n{'='*80}")
+    logger.info(f"End of stack trace dump for PID: {current_pid}")
+    logger.info(f"{'='*80}\n")
 
 
 def _report_observed_child_failure(return_code: int, component: str,
@@ -371,6 +433,8 @@ def get_llm_args(
         agent_percentage,
         "agent_types":
         agent_types,
+        "cuda_graph_config":
+        CudaGraphConfig(batch_sizes=list(range(1, max_batch_size + 1))),
     }
 
     llm_args = {
@@ -544,6 +608,10 @@ def launch_server(
         os.environ[
             DisaggLauncherEnvs.TLLM_DISAGG_ROLE] = server_role.name.lower()
 
+    # Install the SIGUSR1 signal handler for debugging
+    signal.signal(signal.SIGUSR1, print_stack_trace)
+    logger.info("SIGUSR1 signal handler installed. Send 'kill -USR1 <pid>' to get stack traces.")
+
     backend = llm_args["backend"]
     model = served_model_name or llm_args["model"]
 
@@ -578,7 +646,7 @@ def launch_server(
                                    socket.SOCK_STREAM)
     address_family = socket.AF_INET6 if all(
         [info[0] == socket.AF_INET6 for info in addr_info]) else socket.AF_INET
-    with socket.socket(address_family, socket.SOCK_STREAM) as s:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         # port == 0 lets the kernel pick the port; the caller then needs a way
         # to learn it, either by service discovery or by report_addr.
         assert port > 0 or disagg_cluster_config is not None or report_addr, (
@@ -619,7 +687,6 @@ def launch_server(
                 raise click.BadParameter(
                     f"{backend} is not a known backend, check help for available options.",
                     param_hint="backend")
-
             # The finally below is the cleanup boundary for the attached
             # frontends: it must cover everything from their spawn through
             # server construction, middleware registration, and runtime, or a
@@ -642,6 +709,7 @@ def launch_server(
                     multimodal_server_config=multimodal_server_config,
                     chat_template=chat_template,
                     allow_request_chat_template=allow_request_chat_template,
+                    served_model_name=served_model_name,
                     input_processor_workers=num_input_processor_workers,
                     media_load_workers=num_media_load_workers,
                     internal_disagg_auth_key=internal_disagg_auth_key,
@@ -1390,14 +1458,20 @@ def serve(
 
     explicit_cli_keys = collect_explicit_cli_keys(
         exclude=("extra_llm_api_options", "config", "config_overrides"))
+    assert max_seq_len is not None, "max_seq_len must be specified"
 
     is_visual_gen = (enable_visual_gen or visual_gen_args is not None
                      or get_is_diffusion_only_model(model))
     # Honor YAML telemetry opt-out before --set parsing can raise an error.
     raw_llm_args_extra_dict = {}
     if not is_visual_gen and extra_llm_api_options is not None:
-        with open(extra_llm_api_options, 'r') as f:
-            raw_llm_args_extra_dict = yaml.safe_load(f)
+        # DeepInfra prod passes inline JSON to --extra_llm_api_options;
+        # an existing file is loaded as YAML, an inline string as JSON.
+        if os.path.isfile(extra_llm_api_options):
+            with open(extra_llm_api_options, 'r') as f:
+                raw_llm_args_extra_dict = yaml.safe_load(f)
+        else:
+            raw_llm_args_extra_dict = json.loads(extra_llm_api_options)
         if raw_llm_args_extra_dict is None:
             raw_llm_args_extra_dict = {}
         elif not isinstance(raw_llm_args_extra_dict, dict):
