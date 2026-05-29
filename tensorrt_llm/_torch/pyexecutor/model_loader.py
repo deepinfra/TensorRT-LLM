@@ -34,8 +34,8 @@ from ..virtual_memory import RestoreMode
 from ..virtual_memory import scope as virtual_memory_scope
 
 _KV_CACHE_MAP = {
-    "fp8": QuantAlgo.FP8.value,
-    "nvfp4": QuantAlgo.NVFP4.value,
+    "fp8": QuantAlgo.FP8,
+    "nvfp4": QuantAlgo.NVFP4,
     "auto": "auto"
 }
 _VALID_KV_CACHE_DTYPES = ("fp8", "nvfp4", "auto")
@@ -68,6 +68,10 @@ def validate_and_set_kv_cache_quant(model_config: ModelConfig,
     )
     # Quantization from hf_quant_config.json
     kv_cache_quant = model_config.quant_config.kv_cache_quant_algo
+    logger.info(
+        f'[DEBUG validate_and_set_kv_cache_quant] kv_cache_quant={kv_cache_quant!r}, '
+        f'type={type(kv_cache_quant)}, pyt_kv_cache_dtype={pyt_kv_cache_dtype!r}'
+    )
     # PyTorch configuration quantization
     valid_pyt_quant = bool(pyt_kv_cache_dtype in _VALID_KV_CACHE_DTYPES)
     mapped_pyt_quant = _KV_CACHE_MAP.get(pyt_kv_cache_dtype, None)
@@ -95,6 +99,11 @@ def validate_and_set_kv_cache_quant(model_config: ModelConfig,
                        f'"{pyt_kv_cache_dtype}".')
 
     # Apply explicit override from kv_cache_config.dtype.
+    logger.info(
+        f'[DEBUG validate_and_set_kv_cache_quant] Setting kv_cache_quant_algo to {mapped_pyt_quant!r} '
+        f'(type={type(mapped_pyt_quant)}), '
+        f'quant_mode already cached={"quant_mode" in model_config.quant_config.__dict__}'
+    )
     model_config.quant_config.kv_cache_quant_algo = mapped_pyt_quant
 
 

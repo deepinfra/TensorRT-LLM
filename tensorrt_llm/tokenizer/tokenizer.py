@@ -453,7 +453,28 @@ class TransformersTokenizer(TokenizerBase):
             last_new_tokens + pending_tokens,
             skip_special_tokens=skip_special_tokens,
             spaces_between_special_tokens=spaces_between_special_tokens)
-        if not flush and (len(curr_new_text.rstrip()) <= len(
+        # Safety cap: if pending_tokens grows beyond this, the UTF-8 tail is
+        # never completing (e.g. stream of lone continuation bytes / invalid
+        # start bytes). Force-flush with 'replace' to escape the O(N^2)
+        # accumulation on every subsequent step.
+        _PENDING_FORCE_FLUSH = 32
+        force_flush = len(pending_tokens) >= _PENDING_FORCE_FLUSH
+        if force_flush and not flush:
+            tail = curr_new_text[-16:]
+            last_rstripped_len = len(last_new_text.rstrip())
+            curr_rstripped_len = len(curr_new_text.rstrip())
+            if curr_new_text.endswith("\ufffd"):
+                cause = "invalid UTF-8 at tail"
+            elif curr_rstripped_len <= last_rstripped_len:
+                cause = (f"rstrip-len stuck ({last_rstripped_len}->{curr_rstripped_len}) "
+                        f"— model likely looping on whitespace")
+            else:
+                cause = "unknown"
+            logger.warning(
+                f"trtllm_decode_incrementally: pending_tokens={len(pending_tokens)} "
+                f"stuck. Cause: {cause}. tail={tail!r}. Force-flushing.")
+
+        if not (flush or force_flush) and (len(curr_new_text.rstrip()) <= len(
                 last_new_text.rstrip()) or curr_new_text.endswith("�")):
             return prev_text, {
                 'last_new_tokens': last_new_tokens,

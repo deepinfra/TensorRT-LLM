@@ -451,6 +451,10 @@ class ADEngine(ModelEngine):
         self.llm_args.print_iter_log = reporting_info.print_log
         self.llm_args.enable_iter_perf_stats = reporting_info.enable_iter_perf_stats
         self.llm_args.enable_iter_req_stats = reporting_info.enable_iter_req_stats
+        # Upstream sets stream_interval / attention_dp_config / batch_wait_*
+        # below; stream_interval_ms (our time-based emission) is not, so default
+        # it here.
+        self.llm_args.stream_interval_ms = 0
         self.llm_args.max_num_tokens = cache_seq_interface.info.max_num_tokens
         self.llm_args.max_seq_len = cache_seq_interface.info.max_seq_len
         self.iter_counter = 0
