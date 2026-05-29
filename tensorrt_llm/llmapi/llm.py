@@ -669,6 +669,21 @@ class BaseLLM:
         if _postproc_params:
             _postproc_params.postproc_args.num_prompt_tokens = len(
                 prompt_token_ids)
+
+        # check if prompt token ids are more than the context size
+        max_seq_len = int(self.args.max_seq_len)
+        prompt_len = len(prompt_token_ids)
+        if prompt_len >= max_seq_len:
+            raise ValueError(
+                f"Requested input length {prompt_len} exceeds maximum input length {max_seq_len - 1}"
+            )
+
+        # clamp the max-tokens sampling param to be min(max-tokens, max_seq_len - prompt_len)
+        max_tokens = sampling_params.max_tokens
+        if max_tokens is not None:
+            max_tokens = min(max_tokens, max_seq_len - prompt_len)
+            sampling_params.max_tokens = max_tokens
+
         result = self._executor.generate_async(
             prompt_token_ids,
             query_token_ids=query_token_ids,
@@ -1308,9 +1323,13 @@ class BaseLLM:
                 sampling_params.return_generation_logits = True
                 sampling_params._generation_logits_auto_enabled = True
 
-        if sampling_params._stream_interval is None:
-            sampling_params._stream_interval = getattr(self.args,
-                                                       "stream_interval", 1)
+        if sampling_params.stream_interval is None:
+            sampling_params.stream_interval = getattr(self.args,
+                                                      "stream_interval", 1)
+        if sampling_params.stream_interval_ms is None:
+            engine_val = getattr(self.args, "stream_interval_ms", 0)
+            if engine_val > 0:
+                sampling_params.stream_interval_ms = engine_val
         sampling_params.return_perf_metrics = sampling_params.return_perf_metrics or self.args.return_perf_metrics
         return sampling_params
 

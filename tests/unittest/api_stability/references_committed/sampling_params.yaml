@@ -123,6 +123,12 @@ methods:
       spaces_between_special_tokens:
         annotation: bool
         default: true
+      stream_interval:
+        annotation: Optional[int]
+        default: null
+      stream_interval_ms:
+        annotation: Optional[int]
+        default: null
       # Returning controls
       logprobs:
         annotation: Optional[int]

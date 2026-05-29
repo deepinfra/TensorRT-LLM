@@ -4882,9 +4882,18 @@ class TorchLlmArgs(BaseLlmArgs):
     # TODO: make this a per-request parameter
     stream_interval: PositiveInt = Field(
         default=1,
+        ge=1,
         description=
         "The iteration interval to create responses under the streaming mode. "
         "Set this to a larger value when the batch size is large, which helps reduce the streaming overhead."
+    )
+    stream_interval_ms: int = Field(
+        default=0,
+        ge=0,
+        description=
+        "The time interval in milliseconds to create responses under the streaming mode. "
+        "Set to 0 to disable time-based streaming throttle. "
+        "When stream_interval_ms is set (> 0), it takes priority over stream_interval.",
     )
 
     force_dynamic_quantization: bool = Field(
