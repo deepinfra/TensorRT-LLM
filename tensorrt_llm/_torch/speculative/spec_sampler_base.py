@@ -19,6 +19,8 @@ This module provides a common base class for MTPSampler, SASampler, and
 Eagle3OneModelSampler.
 """
 
+import os
+import sys
 from dataclasses import dataclass
 from typing import Optional
 
@@ -47,6 +49,7 @@ class SampleStateTensorsSpec(SampleStateTensors):
 
     new_tokens_lens: torch.Tensor
     next_draft_tokens: torch.Tensor
+    logits_finite: Optional[torch.Tensor] = None
 
 
 @dataclass(kw_only=True)
@@ -168,7 +171,10 @@ class SpecSamplerBase(Sampler[SampleStateSpec], AsyncWorkerMixin):
                 request.py_request_id,
             )
         if request.py_return_log_probs:
-            logger.warning(
+            # Downgraded from WARNING to DEBUG: under prod traffic where most
+            # requests opt into logprobs, this fired thousands of times per
+            # second. The skip behavior is intentional and not actionable.
+            logger.debug(
                 "return_log_probs not supported with speculative decoding, skipping for request %s",
                 request.py_request_id,
             )
@@ -191,6 +197,29 @@ class SpecSamplerBase(Sampler[SampleStateSpec], AsyncWorkerMixin):
         assert isinstance(state, SampleStateSpec)
 
         state.sampler_event.synchronize()
+
+        # Piggyback NaN check: the bool was computed inside the captured
+        # forward graph (no host sync) and async-copied to host alongside
+        # new_tokens. The synchronize() above is the natural sync point;
+        # checking here is free. argmax(NaN) on the spec-decode top-1 path
+        # silently emits PAD, so we terminate the engine instead of letting
+        # the request return [PAD][PAD]... See SpecWorkerBase._sample_tokens_for_batch.
+        if (state.host.logits_finite is not None
+                and not bool(state.host.logits_finite.item())):
+            msg = ("non-finite target logits in spec-decode sampler — "
+                   "likely FP8 KV cache poisoning")
+            # Default behavior remains fail-fast (engine restart by supervisor).
+            # Set TRTLLM_NAN_GUARD_NONFATAL=1 to log+continue instead: useful
+            # when KV-recycle zeroing is disabled (e.g. rc15 pool-layout
+            # mismatch) and transient NaNs would otherwise crashloop the engine.
+            if os.environ.get("TRTLLM_NAN_GUARD_NONFATAL", "0") == "1":
+                logger.error("WARN (non-fatal): " + msg + " — continuing")
+            else:
+                logger.error("FATAL: " + msg + ". Terminating engine.")
+                sys.stderr.write("FATAL: " + msg + ". Terminating engine.\n")
+                sys.stderr.flush()
+                os._exit(1)
+
         new_tokens = state.host.new_tokens.tolist()
         new_tokens_lens_list = state.host.new_tokens_lens.tolist()
         next_draft_tokens_list = state.host.next_draft_tokens.tolist()
@@ -287,10 +316,19 @@ class SpecSamplerBase(Sampler[SampleStateSpec], AsyncWorkerMixin):
             next_draft_tokens=self.store.next_draft_tokens,
         )
 
+        # Piggyback NaN-on-target-logits check on the existing async D2H copy.
+        # The bool was computed (no sync) inside _sample_tokens_for_batch and
+        # propagated through the worker output dict. update_requests checks
+        # the host value at the natural sync point.
+        o_logits_finite = outputs.get("logits_finite")
+        host_logits_finite = (self._copy_to_host(o_logits_finite)
+                              if o_logits_finite is not None else None)
+
         host_tensors = SampleStateTensorsSpec(
             new_tokens=self._copy_to_host(self.store.new_tokens),
             new_tokens_lens=self._copy_to_host(self.store.new_tokens_lens),
             next_draft_tokens=self._copy_to_host(self.store.next_draft_tokens),
+            logits_finite=host_logits_finite,
         )
         sampler_event = self._record_sampler_event()
 
