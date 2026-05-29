@@ -537,6 +537,28 @@ class PyExecutor:
         torch.cuda.current_stream().wait_stream(self.execution_stream)
         self.is_warmup = False
 
+        # Zero primary KV cache pools after warmup, before traffic.
+        # cudaMalloc returns uninitialized memory; with FP8 KV cache the raw
+        # bytes can decode to NaN. FlashAttention-style kernels bulk-load full
+        # block tiles before masking, so a tile containing unwritten positions
+        # can propagate NaN through softmax even when those positions are
+        # masked in the final reduction.
+        for kvm in (self.kv_cache_manager,
+                    getattr(self.resource_manager, "resource_managers", {}).get(
+                        ResourceManagerType.DRAFT_KV_CACHE_MANAGER, None)):
+            if kvm is None or not hasattr(kvm, "impl"):
+                continue
+            try:
+                kvm.impl.get_unique_primary_pool().fill_(0.0)
+            except Exception:
+                num_layers = getattr(kvm, "num_layers", None) or 256
+                for layer_idx in range(num_layers):
+                    try:
+                        kvm.impl.get_primary_pool_data(layer_idx).fill_(0.0)
+                    except Exception:
+                        break
+        torch.cuda.synchronize()
+
         # Snapshot some cumulative KV cache counters so that stats reported to
         # users exclude blocks reused and missed during warmup dummy requests.
         if hasattr(self.kv_cache_manager, 'snapshot_warmup_baseline'):
