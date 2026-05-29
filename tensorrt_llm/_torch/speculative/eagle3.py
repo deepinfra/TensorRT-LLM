@@ -360,8 +360,8 @@ class Eagle3SpecMetadata(SpecMetadata):
                 break
 
     def get_hidden_states(self):
-        hidden_states = self.eagle3_resource_manager.hidden_states[
-            self.hidden_states_read_indices[:self.num_tokens], :]
+        _read_idx = self.hidden_states_read_indices[:self.num_tokens]
+        hidden_states = self.eagle3_resource_manager.hidden_states[_read_idx, :]
         if not self.is_first_draft:
             hidden_states = hidden_states[:, :self.hidden_size]
         return hidden_states
@@ -712,6 +712,13 @@ class Eagle3OneModelWorker(SpecWorkerBase):
 
         self._execute_guided_decoder_if_present(logits)
 
+        # Stash a 0-d boolean for the NaN check on target logits, mirroring
+        # MTPWorker.sample_and_accept_draft_tokens (which runs after the guided
+        # decoder). Propagated through the forward output dict so
+        # SpecSamplerBase.update_requests can check it on its natural host sync —
+        # safe under CUDA graph capture.
+        self.logits_finite = torch.isfinite(logits).all()
+
         # Sample and accept tokens. ``input_ids`` is required by the relaxed-
         # acceptance path (scans for thinking-phase tokens); ignored otherwise.
         accepted_tokens, num_accepted_tokens = self.sample_and_accept_draft_tokens(
@@ -790,6 +797,7 @@ class Eagle3OneModelWorker(SpecWorkerBase):
             'new_tokens_lens': num_accepted_tokens,
             'next_draft_tokens': next_draft_tokens,
             'next_new_tokens': next_new_tokens,
+            'logits_finite': getattr(self, 'logits_finite', None),
         }
 
     def _forward_draft_loop(self, inputs, attn_metadata, spec_metadata,

@@ -354,6 +354,7 @@ class PARDWorker(SpecWorkerBase):
             "new_tokens_lens": num_accepted_tokens,
             "next_draft_tokens": next_draft_tokens,
             "next_new_tokens": next_new_tokens,
+            "logits_finite": getattr(self, 'logits_finite', None),
         }
 
     def _reshape_draft_tokens_for_accept(self, spec_metadata, num_gens, device):
