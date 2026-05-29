@@ -145,17 +145,17 @@ def _logit_bias_to_embedding_bias(
 
 
 class OpenAIBaseModel(BaseModel):
-    # OpenAI API does not allow extra fields & allow to initialize by both alias and field name
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # OpenAI & allow to initialize by both alias and field name
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class StreamOptions(OpenAIBaseModel):
     include_usage: Optional[bool] = True
     continuous_usage_stats: Optional[bool] = False
 
-
 class PromptTokensDetails(OpenAIBaseModel):
     cached_tokens: int = 0
+    cache_write_tokens: int | None = Field(default=None, description="number of input tokens used to create cache entry")
 
 
 class UsageInfo(OpenAIBaseModel):
@@ -163,7 +163,6 @@ class UsageInfo(OpenAIBaseModel):
     total_tokens: int = 0
     completion_tokens: Optional[int] = 0
     prompt_tokens_details: Optional[PromptTokensDetails] = None
-
 
 class ModelCard(OpenAIBaseModel):
     id: str
@@ -223,7 +222,7 @@ class ResponseFormat(OpenAIBaseModel):
     regex: Optional[str] = None
     ebnf: Optional[str] = None
     format: Optional[xgrammar.structural_tag.Format] = None
-
+    guidance_start_token_id: Optional[int] = None
 
 class DisaggregatedParams(OpenAIBaseModel):
     request_type: str
@@ -303,7 +302,6 @@ class CompletionResponseChoice(OpenAIBaseModel):
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
 
-
 class CompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{str(uuid.uuid4().hex)}")
     object: str = "text_completion"
@@ -314,7 +312,6 @@ class CompletionResponse(OpenAIBaseModel):
     # Add prompt_tokens_ids to the response to remove the tokenization
     # in the generation server in disaggreated serving
     prompt_token_ids: Optional[Union[List[List[int]], List[int]]] = None
-
 
 class CompletionResponseStreamChoice(OpenAIBaseModel):
     index: int
@@ -331,7 +328,6 @@ class CompletionResponseStreamChoice(OpenAIBaseModel):
     )
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
 
-
 class CompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"cmpl-{str(uuid.uuid4().hex)}")
     object: str = "text_completion"
@@ -339,7 +335,7 @@ class CompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
-
+    prompt_token_ids: Optional[List[int]] = None
 
 class EmbeddingRequest(OpenAIBaseModel):
     # OpenAI-compatible embeddings request.
@@ -420,7 +416,8 @@ def _response_format_to_guided_decoding_params(
                 f"response_format.schema is required for response_format.type == {response_format.type!r}, but got None."
             )
         guided_decoding_params = GuidedDecodingParams(
-            json=response_format.schema)
+            json=response_format.schema,
+            guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "json_schema":
         if response_format.json_schema is None:
             raise ValueError(
@@ -431,27 +428,34 @@ def _response_format_to_guided_decoding_params(
         json_schema = response_format.json_schema
         if isinstance(json_schema, dict) and "schema" in json_schema:
             json_schema = json_schema["schema"]
-        guided_decoding_params = GuidedDecodingParams(json=json_schema)
+        guided_decoding_params = GuidedDecodingParams(
+            json=json_schema,
+            guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "json_object":
-        guided_decoding_params = GuidedDecodingParams(json_object=True)
+        guided_decoding_params = GuidedDecodingParams(
+            json_object=True,
+            guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "regex":
         if response_format.regex is None:
             raise ValueError(
                 f"response_format.regex is required for response_format.type == {response_format.type!r}, but got None."
             )
         guided_decoding_params = GuidedDecodingParams(
-            regex=response_format.regex)
+            regex=response_format.regex,
+            guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "ebnf":
         if response_format.ebnf is None:
             raise ValueError(
                 f"response_format.ebnf is required for response_format.type == {response_format.type!r}, but got None."
             )
         guided_decoding_params = GuidedDecodingParams(
-            grammar=response_format.ebnf)
+            grammar=response_format.ebnf,
+            guidance_start_token_id=response_format.guidance_start_token_id)
     elif response_format.type == "structural_tag":
         guided_decoding_params = GuidedDecodingParams(
             structural_tag=response_format.model_dump_json(by_alias=True,
-                                                           exclude_none=True))
+                                                           exclude_none=True),
+            guidance_start_token_id=response_format.guidance_start_token_id)
     else:
         raise ValueError(f"Unsupported response format: {response_format.type}")
 
@@ -542,6 +546,7 @@ class CompletionRequest(OpenAIBaseModel):
     # https://platform.openai.com/docs/api-reference/completions/create
     model: str
     prompt: Union[List[int], List[List[int]], str, List[str]]
+    prompt_token_ids: Optional[List[int]] = None
     best_of: Optional[int] = None
     echo: Optional[bool] = False
     frequency_penalty: Optional[float] = 0.0
@@ -577,12 +582,13 @@ class CompletionRequest(OpenAIBaseModel):
     include_stop_str_in_output: bool = False
     ignore_eos: bool = False
     min_tokens: int = 0
-    skip_special_tokens: bool = True
+    skip_special_tokens: bool = False
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     return_context_logits: bool = False
     detokenize: bool = True
     thinking_token_budget: Optional[int] = None
+    return_token_ids: bool = False
     # doc: end-completion-sampling-params
 
     # doc: begin-completion-extra-params
@@ -617,6 +623,20 @@ class CompletionRequest(OpenAIBaseModel):
         default=None,
         description=("Parameters for multi-turn conversation routing"),
     )
+    stream_interval: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
+    stream_interval_ms: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The time interval in milliseconds to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
 
     # doc: end-completion-extra-params
 
@@ -643,7 +663,7 @@ class CompletionRequest(OpenAIBaseModel):
             max_tokens=self.max_tokens,
             n=self.n,
             presence_penalty=self.presence_penalty,
-            seed=self.seed,
+            seed=to_unsigned(self.seed, 64) if self.seed is not None else None,
             stop=self.stop,
             temperature=(self.temperature
                          if self.temperature is not None else 1.0),
@@ -677,6 +697,8 @@ class CompletionRequest(OpenAIBaseModel):
 
             # completion-extra-params
             add_special_tokens=self.add_special_tokens,
+            stream_interval=self.stream_interval,
+            stream_interval_ms=self.stream_interval_ms,
         )
         if return_log_probs:
             sampling_params._return_log_probs = True
@@ -815,7 +837,6 @@ class ChatCompletionResponseChoice(OpenAIBaseModel):
     disaggregated_params: Optional[DisaggregatedParams] = Field(default=None)
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
 
-
 class ChatCompletionResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")
     object: Literal["chat.completion"] = "chat.completion"
@@ -829,7 +850,6 @@ class ChatCompletionResponse(OpenAIBaseModel):
     # base64 int32 buffer alternative to prompt_token_ids; set by the context
     # worker so the orchestrator can relay a string instead of the int list.
     prompt_token_ids_b64: Optional[str] = None
-
 
 class DeltaMessage(OpenAIBaseModel):
     role: Optional[str] = None
@@ -848,7 +868,6 @@ class ChatCompletionResponseStreamChoice(OpenAIBaseModel):
     stop_reason: Optional[Union[int, str]] = None
     avg_decoded_tokens_per_iter: Optional[float] = Field(default=None)
 
-
 class ChatCompletionStreamResponse(OpenAIBaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{str(uuid.uuid4().hex)}")
     object: Literal["chat.completion.chunk"] = "chat.completion.chunk"
@@ -856,6 +875,7 @@ class ChatCompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    prompt_token_ids: Optional[List[int]] = None
 
 
 class FunctionDefinition(OpenAIBaseModel):
@@ -937,10 +957,11 @@ class ChatCompletionRequest(OpenAIBaseModel):
     include_stop_str_in_output: bool = False
     ignore_eos: bool = False
     min_tokens: int = 0
-    skip_special_tokens: bool = True
+    skip_special_tokens: bool = False
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
     lora_request: Optional[LoRARequest] = None
+    return_token_ids: bool = False
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
@@ -1026,6 +1047,20 @@ class ChatCompletionRequest(OpenAIBaseModel):
          "when the engine runs with scheduler_config.waiting_queue_policy=priority. "
          "If unset, the engine default (0.5) is used."),
     )
+    stream_interval: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
+    stream_interval_ms: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The time interval in milliseconds to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
 
     agent_hierarchy: Optional[AgentHierarchy] = Field(
         default=None, description="Agent hierarchy ")
@@ -1062,7 +1097,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             max_tokens=self.max_completion_tokens,
             n=self.n,
             presence_penalty=self.presence_penalty,
-            seed=self.seed,
+            seed=to_unsigned(self.seed, 64) if self.seed is not None else None,
             stop=self.stop,
             temperature=(self.temperature
                          if self.temperature is not None else 1.0),
@@ -1095,6 +1130,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
 
             # chat-completion-extra-params
             add_special_tokens=self.add_special_tokens,
+            stream_interval=self.stream_interval,
+            stream_interval_ms=self.stream_interval_ms,
         )
         if return_log_probs:
             sampling_params._return_log_probs = True
@@ -1152,6 +1189,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
                 )
         return v
 
+def to_unsigned(x: int, bits: int) -> int:
+    return x & (2 ** bits - 1)
 
 class KVCacheTruncateRequest(OpenAIBaseModel):
     model: str
@@ -1238,6 +1277,20 @@ class ResponsesRequest(OpenAIBaseModel):
     top_p: Optional[float] = None
     truncation: Optional[Literal["auto", "disabled"]] = "disabled"
     user: Optional[str] = None
+    stream_interval: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The iteration interval to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
+    stream_interval_ms: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "The time interval in milliseconds to create responses under the streaming mode. "
+            "If not set, the engine-level default is used."),
+    )
 
     request_id: str = Field(
         default_factory=lambda: f"resp_{str(uuid.uuid4().hex)}",
@@ -1284,6 +1337,8 @@ class ResponsesRequest(OpenAIBaseModel):
             stop_token_ids=stop_token_ids,
             guided_decoding=guided_decoding,
             thinking_token_budget=self.thinking_token_budget,
+            stream_interval=self.stream_interval,
+            stream_interval_ms=self.stream_interval_ms,
         )
         _record_sampling_params_request_fields(self, sampling_params)
         return sampling_params
