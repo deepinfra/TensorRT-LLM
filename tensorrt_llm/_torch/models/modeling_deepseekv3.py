@@ -1802,9 +1802,9 @@ class DeepseekV3Model(DecoderModel):
         spec_metadata: Optional[SpecMetadata] = None,
         **kwargs,
     ) -> torch.Tensor:
-        if (input_ids is None) ^ (inputs_embeds is not None):
+        if input_ids is None and inputs_embeds is None:
             raise ValueError(
-                "You cannot specify both input_ids and inputs_embeds at the same time, and must specify either one"
+                "You must specify either input_ids or inputs_embeds"
             )
 
         if inputs_embeds is None:
