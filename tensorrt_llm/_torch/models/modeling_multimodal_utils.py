@@ -487,6 +487,12 @@ def fuse_input_embeds(
             vocab_size=embedding_layer.num_embeddings,
             mm_token_ids=mm_token_ids)
     if mm_token_indices.shape[0] != mm_embed.shape[0]:
+        if mm_token_indices.shape[0] == 0:
+            # No multimodal tokens in this chunk (e.g., during chunked prefill
+            # when image tokens were in a previous chunk). Fall back to text-only.
+            if extra_embeds is not None and len(extra_embeds) > 0:
+                return input_ids, None, extra_embeds
+            return input_ids, None
         raise ValueError(
             f"Multimodal token count mismatch: found {len(mm_token_indices)} image tokens in input_ids "
             f"but received {mm_embed.shape[0]} image embeddings.")
