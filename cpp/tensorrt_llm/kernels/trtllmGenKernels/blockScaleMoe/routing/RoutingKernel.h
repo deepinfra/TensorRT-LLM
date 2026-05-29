@@ -383,6 +383,62 @@ void run(Data const& data, void* stream);
 template <typename DataType>
 void runPostTopKPipeline(DataType const& data, uint32_t numThreadsHist, void* stream);
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+namespace routingMiniMax
+{
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+struct Data : public DataBase
+{
+    tg::Dtype mDtypeExpW{tg::Dtype::Fp32};
+
+    // Used by KernelParams::setKernelParams
+    void const* mPtrRoutingBias{nullptr};
+
+    // Used by KernelParams::setKernelParams
+    bool mNormTopkProb{true};
+};
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+// MiniMax doesn't use MaxNumTopExperts internally, but the LAUNCH_PDL_ROUTING /
+// LAUNCH_ESC dispatch macro passes 5 template args so we must accept and forward it
+// to KernelParamsBase.
+template <typename InputT_, typename OutputT_, int MaxNumExperts_, int MaxNumTopExperts_, bool DoSoftmaxBeforeTopK_>
+struct KernelParams : public KernelParamsBase<InputT_, OutputT_, MaxNumExperts_, MaxNumTopExperts_>
+{
+    using InputT = InputT_;
+    using OutputT = OutputT_;
+
+    static constexpr bool DoSoftmaxBeforeTopK = DoSoftmaxBeforeTopK_;
+
+    PackedScoreIdx<OutputT>* mPtrTopKPacked = nullptr;
+
+    OutputT const* mPtrRoutingBias = nullptr;
+
+    int32_t mTopK = 0;
+
+    bool mNormTopkProb = true;
+
+    static KernelParams setKernelParams(Data const& data)
+    {
+        KernelParams params;
+        params.setBaseParams(data);
+
+        params.mPtrTopKPacked = (PackedScoreIdx<OutputT>*) data.mPtrTopKPacked;
+        params.mPtrRoutingBias = static_cast<OutputT const*>(data.mPtrRoutingBias);
+        params.mNormTopkProb = data.mNormTopkProb;
+        params.mTopK = data.mTopK;
+        return params;
+    }
+};
+
+void run(Data const& data, void* stream);
+
+} // namespace routingMiniMax
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace routing
 } // namespace moe::dev
