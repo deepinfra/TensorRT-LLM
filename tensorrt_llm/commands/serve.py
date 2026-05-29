@@ -13,6 +13,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Literal, Mapping, Optional, Sequence
 
+import threading
+import traceback
+from datetime import datetime
+
 import click
 import torch
 import yaml
@@ -36,6 +40,7 @@ from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
                                               parse_disagg_config_file,
                                               parse_metadata_server_config_file)
 from tensorrt_llm.llmapi.llm_args import TorchLlmArgs, TrtLlmArgs
+from tensorrt_llm.llmapi.llm_args import CudaGraphConfig, AttentionDpConfig
 from tensorrt_llm.llmapi.llm_utils import update_llm_args_with_extra_dict
 from tensorrt_llm.llmapi.mpi_session import find_free_ipc_addr
 from tensorrt_llm.llmapi.reasoning_parser import (ReasoningParserFactory,
@@ -81,6 +86,63 @@ def help_info_with_stability_tag(
                                     "deprecated"]) -> str:
     """Append stability info to help string."""
     return f":tag:`{tag}` {help_str}"
+
+
+def print_stack_trace(signum, frame):
+    """Signal handler for SIGUSR1 that prints stack traces of all threads."""
+    current_pid = os.getpid()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"SIGUSR1 received - Stack trace dump at {datetime.now()}")
+    logger.info(f"Process PID: {current_pid}")
+    logger.info(f"{'='*80}")
+
+    # Print stack trace of current thread
+    logger.info(f"\nMain thread stack trace (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Capture the stack trace as a string and log it
+    import io
+    string_io = io.StringIO()
+    traceback.print_stack(frame, file=string_io)
+    logger.info(string_io.getvalue())
+
+    # Print stack traces of all threads
+    logger.info(f"\nAll threads stack traces (PID: {current_pid}):")
+    logger.info("-" * 40)
+
+    # Sort threads by name for consistent output
+    thread_frames = list(sys._current_frames().items())
+    threads_info = []
+
+    for thread_id, frame in thread_frames:
+        thread = None
+        for t in threading.enumerate():
+            if t.ident == thread_id:
+                thread = t
+                break
+
+        thread_name = thread.name if thread else f"Thread-{thread_id}"
+        thread_daemon = thread.daemon if thread else "Unknown"
+        thread_alive = thread.is_alive() if thread else "Unknown"
+
+        threads_info.append((thread_name, thread_id, thread_daemon, thread_alive, frame))
+
+    # Sort by thread name for consistent output
+    threads_info.sort(key=lambda x: x[0])
+
+    for thread_name, thread_id, thread_daemon, thread_alive, frame in threads_info:
+        logger.info(f"\nThread: {thread_name} (ID: {thread_id}, PID: {current_pid})")
+        logger.info(f"  Daemon: {thread_daemon}, Alive: {thread_alive}")
+        logger.info("-" * 20)
+
+        # Capture each thread's stack trace as a string and log it
+        string_io = io.StringIO()
+        traceback.print_stack(frame, file=string_io)
+        logger.info(string_io.getvalue())
+
+    logger.info(f"\n{'='*80}")
+    logger.info(f"End of stack trace dump for PID: {current_pid}")
+    logger.info(f"{'='*80}\n")
 
 
 def _signal_handler_cleanup_child(signum, frame):
@@ -286,6 +348,8 @@ def get_llm_args(
         agent_percentage,
         "agent_types":
         agent_types,
+        "cuda_graph_config":
+        CudaGraphConfig(batch_sizes=list(range(1, max_batch_size + 1))),
     }
 
     llm_args = {
@@ -310,13 +374,18 @@ def launch_server(
         multimodal_server_config: Optional[MultimodalServerConfig] = None,
         served_model_name: Optional[str] = None):
 
+    # Install the SIGUSR1 signal handler for debugging
+    signal.signal(signal.SIGUSR1, print_stack_trace)
+    logger.info("SIGUSR1 signal handler installed. Send 'kill -USR1 <pid>' to get stack traces.")
+
     backend = llm_args["backend"]
     model = served_model_name or llm_args["model"]
     addr_info = socket.getaddrinfo(host, port, socket.AF_UNSPEC,
                                    socket.SOCK_STREAM)
     address_family = socket.AF_INET6 if all(
         [info[0] == socket.AF_INET6 for info in addr_info]) else socket.AF_INET
-    with socket.socket(address_family, socket.SOCK_STREAM) as s:
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         # If disagg cluster config is provided and port is not specified, try to find a free port, otherwise try to bind to the specified port
         assert port > 0 or disagg_cluster_config is not None, "Port must be specified if disagg cluster config is not provided"
         try:
@@ -325,13 +394,11 @@ def launch_server(
                 port = s.getsockname()[1]
         except OSError as e:
             raise RuntimeError(f"Failed to bind socket to {host}:{port}: {e}")
-
         if backend == 'pytorch':
             llm_args.pop("build_config", None)
             llm = PyTorchLLM(**llm_args)
         elif backend == '_autodeploy':
             from tensorrt_llm._torch.auto_deploy import LLM as AutoDeployLLM
-
             # AutoDeploy does not support build_config
             llm_args.pop("build_config", None)
             llm = AutoDeployLLM(**llm_args)
@@ -346,6 +413,7 @@ def launch_server(
         server = OpenAIServer(generator=llm,
                               model=model,
                               tool_parser=tool_parser,
+                              served_model_name=served_model_name,
                               server_role=server_role,
                               metadata_server_cfg=metadata_server_cfg,
                               disagg_cluster_config=disagg_cluster_config,
@@ -717,8 +785,7 @@ class ChoiceWithAlias(click.Choice):
     type=str,
     default=None,
     help=help_info_with_stability_tag(
-        "Path to a YAML file that overwrites the parameters specified by trtllm-serve. "
-        "Can be specified as either --config or --extra_llm_api_options.",
+        "JSON that overwrites the parameters specified by trtllm-serve.",
         "prototype"))
 @click.option(
     "--reasoning_parser",
@@ -825,7 +892,7 @@ class ChoiceWithAlias(click.Choice):
     help="Run gRPC server instead of OpenAI HTTP server. "
     "gRPC server accepts pre-tokenized requests and returns raw token IDs.")
 @click.option(
-    "--served_model_name",
+    "--served-model-name",
     type=str,
     default=None,
     help=help_info_with_stability_tag(
@@ -929,6 +996,8 @@ def serve(
                 f"Failed to import custom module from {custom_module_dir}: {e}")
             raise e
 
+    assert max_seq_len is not None, "max_seq_len must be specified"
+
     def _serve_llm():
         nonlocal server_role
         llm_args, _ = get_llm_args(
@@ -964,8 +1033,7 @@ def serve(
 
         llm_args_extra_dict = {}
         if extra_llm_api_options is not None:
-            with open(extra_llm_api_options, 'r') as f:
-                llm_args_extra_dict = yaml.safe_load(f)
+            llm_args_extra_dict = json.loads(extra_llm_api_options)
         llm_args = update_llm_args_with_extra_dict(llm_args,
                                                    llm_args_extra_dict)
 
