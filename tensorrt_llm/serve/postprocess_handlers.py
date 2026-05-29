@@ -5,6 +5,8 @@ from tensorrt_llm.serve.responses_utils import ResponsesStreamingProcessor
 from tensorrt_llm.serve.responses_utils import \
     create_response_non_store as responses_api_create_response_non_store
 
+from tensorrt_llm.executor.result import TokenLogprobs
+
 from .._utils import nvtx_range_debug
 from ..executor import (DetokenizedGenerationResultBase, GenerationResult,
                         GenerationResultBase)
@@ -80,37 +82,36 @@ class ChatPostprocArgs(PostprocArgs):
             chat_template_kwargs=request.chat_template_kwargs,
         )
 
-
-def create_logprobs(token_ids: List[int], tokenizer: TransformersTokenizer,
-                    logprobs: List[float] | TokenLogprobs,
+def create_logprobs(token_ids: List[int],
+                    tokenizer: TransformersTokenizer,
+                    logprobs: TokenLogprobs,
                     top_logprobs: bool) -> ChatCompletionLogProbs:
-    assert len(token_ids) == len(logprobs), \
-            "token_ids and logprobs have different lengths"
     content: List[ChatCompletionLogProbsContent] = []
-    for token_id, logprob in zip(token_ids, logprobs):
-        logprob: float | dict[int, Logprob]
+    for logprob in logprobs:
+        token_id, lp = list(logprob.items())[0]
         token = tokenizer.decode(token_id)
-        chat_logprob = ChatCompletionLogProbsContent(
+        # returning multiple logprobs is not supported
+        first_logprob = ChatCompletionLogProbsContent(
             token=token,
-            bytes=list(token.encode("utf-8", errors="replace")),
-        )
-        if isinstance(logprob, dict):
-            if token_id in logprob:
-                chat_logprob.logprob = max(logprob[token_id].logprob, -9999.0)
-                if top_logprobs:
-                    chat_logprob.top_logprobs = [
-                        ChatCompletionLogProbsContent(
-                            token=(tk := tokenizer.decode(tid)),
-                            logprob=max(logprob.logprob, -9999.0),
-                            bytes=list(tk.encode("utf-8", errors="replace")))
-                        for tid, logprob in logprob.items()
-                    ]
-        else:
-            chat_logprob.logprob = max(logprob, -9999.0)
-        content.append(chat_logprob)
+            logprob=max(lp.logprob, -9999.0),
+            bytes=list(token.encode("utf-8", errors="replace")))
+        content.append(first_logprob)
     chat_logprobs = ChatCompletionLogProbs(content=content)
     return chat_logprobs
 
+def create_logprobs_completion(token_ids: List[int],
+                    tokenizer: TransformersTokenizer,
+                    logprobs: TokenLogprobs) -> CompletionLogProbs:
+    token_logprobs: List[Optional[float]] = []
+    tokens: List[str] = []
+    for logprob in logprobs:
+        token_id, lp = list(logprob.items())[0]
+        token = tokenizer.decode(token_id)
+        # returning multiple logprobs is not supported
+        token_logprobs.append(max(lp.logprob, -9999.0))
+        tokens.append(token)
+    completion_logprobs = CompletionLogProbs(token_logprobs=token_logprobs,tokens=tokens)
+    return completion_logprobs
 
 def apply_reasoning_parser(args: ChatPostprocArgs,
                            output_index: int,
@@ -176,8 +177,9 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
 
     def yield_first_chat(num_tokens: int,
                          idx: int,
+                         rsp: GenerationResultBase,
                          role: str | None = None,
-                         content: str | None = None):
+                         content: str | None = None) -> ChatCompletionStreamResponse:
         choice_data = ChatCompletionResponseStreamChoice(index=idx,
                                                          delta=DeltaMessage(
                                                              role=role,
@@ -193,10 +195,9 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
                 prompt_tokens_details=PromptTokensDetails(
                     cached_tokens=rsp.cached_tokens),
             )
-        data = chunk.model_dump_json(exclude_none=True)
-        return data
+        return chunk
 
-    res: List[str] = []
+    res: List[ChatCompletionStreamResponse] = []
     finish_reason_sent = [False] * args.num_choices
     prompt_tokens = args.num_prompt_tokens
     if stream_option := args.stream_options:
@@ -208,11 +209,11 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
     if args.first_iteration:
         for i in range(args.num_choices):
             res.append(
-                f"data: {yield_first_chat(prompt_tokens, i, role=args.role)} \n\n"
+                yield_first_chat(prompt_tokens, i, rsp, role=args.role)
             )
             if args.echo and args.last_message_content:
                 res.append(
-                    f"data: {yield_first_chat(prompt_tokens, i, content=args.last_message_content)} \n\n"
+                    yield_first_chat(prompt_tokens, i, rsp, content=args.last_message_content)
                 )
         args.first_iteration = False
 
@@ -223,7 +224,10 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
             continue
 
         has_token_delta = bool(output.token_ids_diff)
-        delta_text = output.text_diff
+        delta_text, args.last_text_len = output.text_diff_safe(args.last_text_len)
+        if (delta_text == '' and not output.finish_reason
+                and not output.stop_reason and not has_token_delta):
+            continue
 
         delta_text, reasoning_delta_text = apply_reasoning_parser(
             args,
@@ -308,7 +312,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
                                     prompt_tokens_details=PromptTokensDetails(
                                         cached_tokens=rsp.cached_tokens))
         data = chunk.model_dump_json(exclude_none=True)
-        res.append(f"data: {data}\n\n")
+        res.append(chunk)
 
     if include_usage and rsp._done:
         completion_tokens = sum(output.length for output in rsp.outputs)
@@ -323,8 +327,7 @@ def chat_stream_post_processor(rsp: GenerationResultBase,
         final_usage_chunk = ChatCompletionStreamResponse(choices=[],
                                                          model=args.model,
                                                          usage=final_usage)
-        final_usage_data = final_usage_chunk.model_dump_json()
-        res.append(f"data: {final_usage_data}\n\n")
+        res.append(final_usage_chunk)
     return res
 
 
@@ -428,39 +431,6 @@ class CompletionPostprocArgs(PostprocArgs):
         )
 
 
-def create_completion_logprobs(token_ids: List[int],
-                               tokenizer: TransformersTokenizer,
-                               logprobs: List[float] | TokenLogprobs,
-                               initial_offset: int = 0) -> CompletionLogProbs:
-    assert len(token_ids) == len(logprobs), \
-            "token_ids and logprobs have different lengths"
-    text_offset = []
-    token_logprobs = []
-    top_logprobs_list = []
-    tokens = []
-    for token_id, logprob in zip(token_ids, logprobs):
-        if isinstance(logprob, dict):
-            token_logprobs.append(max(logprob[token_id].logprob, -9999.0))
-            top_logprobs_list.append({
-                tokenizer.decode(tid):
-                max(lp.logprob, -9999.0)
-                for tid, lp in logprob.items()
-            })
-        else:
-            token_logprobs.append(max(logprob, -9999.0))
-
-        token = tokenizer.decode(token_id)
-        if len(text_offset) == 0:
-            text_offset.append(initial_offset)
-        else:
-            text_offset.append(text_offset[-1] + len(token))
-        tokens.append(token)
-    return CompletionLogProbs(text_offset=text_offset,
-                              token_logprobs=token_logprobs,
-                              tokens=tokens,
-                              top_logprobs=top_logprobs_list)
-
-
 @nvtx_range_debug("completion_stream_post_processor")
 def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
                                      args: CompletionPostprocArgs) -> List[str]:
@@ -474,9 +444,15 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
         include_continuous_usage = False
 
     for output in rsp.outputs:
-        delta_text = output.text_diff
+        delta_text, args.last_text_len = output.text_diff_safe(args.last_text_len)
+        token_ids, args.last_token_ids_len = output.token_ids_diff_safe(args.last_token_ids_len)
         if args.echo and args.first_iteration:
             delta_text = args.prompt + delta_text
+        if delta_text == '' and not output.finish_reason and not output.stop_reason:
+            if token_ids and not args.detokenize:
+                pass
+            else:
+                continue
         choice = CompletionResponseStreamChoice(
             index=args.prompt_idx * args.num_choices + output.index,
             text=delta_text if args.detokenize else "",
@@ -488,11 +464,8 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
                                                 None),
         )
         if args.return_logprobs:
-            logprobs = output.logprobs_diff
-            token_ids = output.token_ids_diff
-            choice.logprobs = create_completion_logprobs(
-                token_ids, args.tokenizer, logprobs, output._last_text_len)
-
+            logprobs, args.last_logprobs_len = output.logprobs_diff_safe(args.last_logprobs_len)
+            choice.logprobs = create_logprobs_completion(token_ids, args.tokenizer, logprobs)
         chunk = CompletionStreamResponse(model=args.model, choices=[choice])
         if include_continuous_usage:
             chunk.usage = UsageInfo(prompt_tokens=prompt_tokens,
@@ -501,7 +474,7 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
                                     prompt_tokens_details=PromptTokensDetails(
                                         cached_tokens=rsp.cached_tokens))
         data = chunk.model_dump_json(exclude_unset=False)
-        res.append(f"data: {data}\n\n")
+        res.append(chunk)
 
     if include_usage and rsp._done:
         completion_tokens = sum(output.length for output in rsp.outputs)
@@ -513,11 +486,10 @@ def completion_stream_post_processor(rsp: DetokenizedGenerationResultBase,
                 cached_tokens=rsp.cached_tokens),
         )
 
-        final_usage_chunk = ChatCompletionStreamResponse(choices=[],
+        final_usage_chunk = CompletionStreamResponse(choices=[],
                                                          model=args.model,
                                                          usage=final_usage)
-        final_usage_data = final_usage_chunk.model_dump_json()
-        res.append(f"data: {final_usage_data}\n\n")
+        res.append(final_usage_chunk)
     args.first_iteration = False
     return res
 
@@ -549,11 +521,7 @@ def completion_response_post_processor(
                                                 None),
         )
         if args.return_logprobs:
-            logprobs = output.logprobs
-            token_ids = output.token_ids
-            choice.logprobs = create_completion_logprobs(
-                token_ids, args.tokenizer, logprobs)
-
+            choice.logprobs = create_logprobs_completion(output.token_ids, args.tokenizer, output.logprobs)
         completion_tokens += output.length
         choices.append(choice)
 
