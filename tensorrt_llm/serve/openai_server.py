@@ -288,7 +288,8 @@ class OpenAIServer(_VideoRoutesMixin):
                  metadata_server_cfg: MetadataServerConfig,
                  disagg_cluster_config: Optional[DisaggClusterConfig] = None,
                  multimodal_server_config: Optional[MultimodalServerConfig] = None,
-                 chat_template: Optional[str] = None):
+                 chat_template: Optional[str] = None,
+                 kv_events_zmq_endpoint: Optional[str] = None):
         self.generator = generator
         self._is_visual_gen = isinstance(generator, VisualGen)
         self.tool_parser = tool_parser
@@ -306,6 +307,16 @@ class OpenAIServer(_VideoRoutesMixin):
         self.kv_map:dict[int, KVHash] = {}
         self.kv_listeners: List[asyncio.Queue] = []
         self.kv_event_processor_task: Optional[asyncio.Task] = None
+        # Optional read-only ZMQ tee of raw KV-cache events (with token_ids).
+        # Stays None (fully disabled) unless an endpoint is provided.
+        self.zmq = None
+        if kv_events_zmq_endpoint:
+            from tensorrt_llm.serve.kv_zmq_publisher import KvZmqPublisher
+            block_size = self.generator.args.kv_cache_config.tokens_per_block
+            self.zmq = KvZmqPublisher(kv_events_zmq_endpoint, block_size)
+            logger.info(
+                f"KV-events ZMQ tee enabled on {kv_events_zmq_endpoint} "
+                f"(block_size={block_size})")
         try:
             self.processor = AutoProcessor.from_pretrained(hf_tokenizer_path, trust_remote_code=trust_remote_code)
         except Exception:
@@ -441,6 +452,8 @@ class OpenAIServer(_VideoRoutesMixin):
 
             if self.kv_event_processor_task is not None:
                 self.kv_event_processor_task.cancel()
+            if self.zmq is not None:
+                self.zmq.shutdown()
             self.generator.shutdown()
 
         self.app = FastAPI(lifespan=lifespan)
@@ -1335,6 +1348,14 @@ class OpenAIServer(_VideoRoutesMixin):
             events.mark_undone()
 
             async for event in events:
+                # Read-only tee to ZMQ, before the KVHash conversion below
+                # drops the token_ids. Guarded and isolated so it can never
+                # disturb the production SSE path.
+                if self.zmq is not None:
+                    try:
+                        self.zmq.handle(event)
+                    except Exception as e:
+                        logger.warning(f"KV ZMQ tee failed (event dropped): {e}")
                 try:
                     data = event['data']
                     event_id = event['event_id']
