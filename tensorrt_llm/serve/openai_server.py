@@ -1653,6 +1653,7 @@ class OpenAIServer(_VideoRoutesMixin):
                 cache_salt=request.cache_salt,
                 trace_headers=trace_headers,
                 scheduling_params=scheduling_params,
+                priority=request.priority if request.priority is not None else 0.5,
             )
             if not self.postproc_worker_enabled:
                 postproc_args.tokenizer = self.tokenizer
@@ -1995,7 +1996,8 @@ class OpenAIServer(_VideoRoutesMixin):
                     streaming=request.stream,
                     lora_request=request.lora_request,
                     disaggregated_params=disaggregated_params,
-                    trace_headers=trace_headers
+                    trace_headers=trace_headers,
+                    priority=request.priority if request.priority is not None else 0.5,
                 )
                 if not self.postproc_worker_enabled:
                     postproc_args.tokenizer = self.tokenizer
