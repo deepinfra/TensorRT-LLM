@@ -1978,6 +1978,7 @@ class OpenAIServer(_VideoRoutesMixin):
                 cache_salt=request.cache_salt,
                 trace_headers=trace_headers,
                 scheduling_params=scheduling_params,
+                priority=request.priority if request.priority is not None else 0.5,
             )
             if not self.postproc_worker_enabled:
                 postproc_args.tokenizer = self.tokenizer
@@ -2348,7 +2349,9 @@ class OpenAIServer(_VideoRoutesMixin):
                     lora_request=request.lora_request,
                     disaggregated_params=disaggregated_params,
                     conversation_params=conversation_params,
-                    trace_headers=trace_headers)
+                    trace_headers=trace_headers,
+                    priority=request.priority
+                    if request.priority is not None else 0.5)
                 asyncio.create_task(
                     self.await_disconnected(raw_request, promise))
                 if not self.postproc_worker_enabled:
