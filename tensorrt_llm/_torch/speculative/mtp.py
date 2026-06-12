@@ -522,6 +522,8 @@ class MTPWorker(SpecWorkerBase):
             'next_draft_tokens': next_draft_tokens,
             'next_new_tokens': next_new_tokens,
             'logits_finite': getattr(self, 'logits_finite', None),
+            'logits_nan_count': getattr(self, 'logits_nan_count', None),
+            'logits_inf_count': getattr(self, 'logits_inf_count', None),
         }
 
     def skip_forward(
@@ -556,6 +558,8 @@ class MTPWorker(SpecWorkerBase):
             'next_draft_tokens': next_draft_tokens,
             'next_new_tokens': next_new_tokens,
             'logits_finite': None,
+            'logits_nan_count': None,
+            'logits_inf_count': None,
         }
 
     def update_mtp_hidden_states(
@@ -798,13 +802,20 @@ class MTPWorker(SpecWorkerBase):
         if logits.dim() == 1:
             logits = logits.unsqueeze(0)
 
-        # Stash a 0-d boolean for the NaN check on target logits. The MTP-relaxed
-        # path uses torch.argmax and the MTP-strict-thop path uses a C++ op; both
-        # are deterministic top-1, and argmax(NaN) returns 0 = PAD on CUDA. We
-        # propagate this bool through the worker forward output dict so the
-        # natural sync in SpecSamplerBase.update_requests can check it without
-        # an extra host sync — safe under CUDA graph capture.
-        self.logits_finite = torch.isfinite(logits).all()
+        # Stash a 0-d boolean per-row-sampleability check on target logits.
+        # The MTP-relaxed path uses torch.argmax and the MTP-strict-thop path
+        # uses a C++ op; both are deterministic top-1, and argmax over an
+        # all-NaN row deterministically returns 0 (PAD) on CUDA. We crash
+        # only when at least one row is fully unsampleable (no finite value).
+        # -inf values from guided-decoding masks are legitimate; rows with
+        # a mix of -inf and finite still have a sampleable max and must not
+        # trip this guard.
+        self.logits_finite = torch.isfinite(logits).any(dim=-1).all()
+        # Counts for the failure diagnostic; only inspected on the crash
+        # path. Cheap GPU reductions, no host sync, no fresh allocations
+        # (safe inside CUDA graph capture).
+        self.logits_nan_count = torch.isnan(logits).sum()
+        self.logits_inf_count = torch.isinf(logits).sum()
 
         # The return buffer
         if self.spec_config.use_relaxed_acceptance_for_thinking or not self.is_thop:
