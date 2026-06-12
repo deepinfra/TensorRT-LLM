@@ -3098,63 +3098,6 @@ class KVCacheManagerV2(BaseResourceManager):
             self._prepare_draft_resources(scheduled_batch)
             return
 
-        with request_context(self.is_draft, scheduled_batch):
-            context_batch = scheduled_batch.context_requests
-            generation_batch = scheduled_batch.generation_requests
-            # allocate KV Cache
-            for req in context_batch:
-                beam_width = req.sampling_config.beam_width
-                if 'cp_type' in self.mapping.cp_config and CpType.STAR == self.mapping.cp_config[
-                        'cp_type']:
-                    raise RuntimeError(
-                        "Star attention is not supported for kv cache manager v2"
-                    )
-                else:
-                    if req.is_first_context_chunk and self._kv_connector_should_add_sequence(
-                            req):
-                        # Last token cannot be recovered, so we don't include it in the input tokens to look up for the block that can be reused.
-                        kv_cache = self._create_kv_cache(
-                            req.py_request_id, req.lora_task_id,
-                            req.get_tokens(DEFAULT_BEAM_INDEX)[:-1]
-                            if self.enable_block_reuse else None)
-                        assert beam_width == 1, "Currently, KVCacheManagerV2 only supports beam width 1"
-                        if not self.enable_block_reuse:
-                            assert kv_cache.num_committed_tokens == 0
-                            kv_cache.stop_committing()
-                        else:
-                            req.context_current_position = kv_cache.num_committed_tokens
-                            chunk_size = req.context_chunk_size
-                            if req.context_current_position + req.context_chunk_size < req.prompt_len:
-                                floored_end_position = (
-                                    req.context_current_position +
-                                    req.context_chunk_size
-                                ) // self.tokens_per_block * self.tokens_per_block
-                                if floored_end_position > req.context_current_position:
-                                    chunk_size = floored_end_position - req.context_current_position
-                                else:
-                                    # Chunk too small to reach the next block
-                                    # boundary.  Extend to next boundary
-                                    # (capped at prompt end).
-                                    next_boundary = (
-                                        (req.context_current_position // self.tokens_per_block) + 1
-                                    ) * self.tokens_per_block
-                                    chunk_size = min(
-                                        next_boundary - req.context_current_position,
-                                        req.prompt_len - req.context_current_position)
-
-                            req.context_chunk_size = min(
-                                chunk_size,
-                                req.prompt_len - req.context_current_position)
-
-                        success = kv_cache.resume(self._stream.cuda_stream)
-                        assert success
-
-                        success = kv_cache.resize(req.prompt_len)
-                        if not success:
-                            raise ValueError(
-                                f"Failed to resize capacity of KV cache for request {req.py_request_id} to {req.prompt_len} tokens for context update"
-                            )
-
     def _prepare_draft_resources(self, scheduled_batch: ScheduledRequests):
         """Create/resize KV caches in the draft V2 manager for scheduled requests.
 

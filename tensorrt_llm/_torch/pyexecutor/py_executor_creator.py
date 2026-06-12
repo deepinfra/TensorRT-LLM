@@ -700,9 +700,18 @@ def create_py_executor(
     if guided_decoding_config is not None:
         with allocation_scope(ExecutorMemoryType.GUIDED_DECODER):
             if mapping.is_last_pp_rank():
+                # Must match create_torch_sampler_args' slot-pool sizing:
+                # with the overlap scheduler there are 2 in-flight micro
+                # batches, and the sampler's new_tokens buffer (copied into
+                # CapturableGuidedDecoder.new_tokens) is sized accordingly.
+                if mapping.has_pp():
+                    num_micro_batches = mapping.pp_size
+                else:
+                    num_micro_batches = (
+                        1 if llm_args.disable_overlap_scheduler else 2)
                 kwargs = {
                     "guided_decoding_config": guided_decoding_config,
-                    "max_num_sequences": max_batch_size,
+                    "max_num_sequences": max_batch_size * num_micro_batches,
                     "vocab_size_padded": model_engine.model.vocab_size_padded,
                     "rank": mapping.rank,
                 }

@@ -5,7 +5,7 @@ import os
 import threading
 import weakref
 from queue import Empty
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import torch
 import zmq
