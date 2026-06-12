@@ -712,12 +712,15 @@ class Eagle3OneModelWorker(SpecWorkerBase):
 
         self._execute_guided_decoder_if_present(logits)
 
-        # Stash a 0-d boolean for the NaN check on target logits, mirroring
+        # Stash a 0-d per-row-sampleability bool on target logits, mirroring
         # MTPWorker.sample_and_accept_draft_tokens (which runs after the guided
-        # decoder). Propagated through the forward output dict so
-        # SpecSamplerBase.update_requests can check it on its natural host sync —
-        # safe under CUDA graph capture.
-        self.logits_finite = torch.isfinite(logits).all()
+        # decoder). -inf values from guided-decoding masks are legitimate; only
+        # a fully non-finite row is unsampleable. Propagated through the forward
+        # output dict so SpecSamplerBase.update_requests can check it on its
+        # natural host sync — safe under CUDA graph capture.
+        self.logits_finite = torch.isfinite(logits).any(dim=-1).all()
+        self.logits_nan_count = torch.isnan(logits).sum()
+        self.logits_inf_count = torch.isinf(logits).sum()
 
         # Sample and accept tokens. ``input_ids`` is required by the relaxed-
         # acceptance path (scans for thinking-phase tokens); ignored otherwise.
@@ -798,6 +801,8 @@ class Eagle3OneModelWorker(SpecWorkerBase):
             'next_draft_tokens': next_draft_tokens,
             'next_new_tokens': next_new_tokens,
             'logits_finite': getattr(self, 'logits_finite', None),
+            'logits_nan_count': getattr(self, 'logits_nan_count', None),
+            'logits_inf_count': getattr(self, 'logits_inf_count', None),
         }
 
     def _forward_draft_loop(self, inputs, attn_metadata, spec_metadata,
