@@ -230,6 +230,11 @@ class GuidedDecoder:
                     continue
 
                 if matcher_init:
+                    # Drop any stale matcher left by a previous request in this
+                    # slot BEFORE attempting creation: if create() raises (e.g.
+                    # unsupported/malformed schema), the old grammar must not be
+                    # applied to the new request's tokens.
+                    self.grammar_matchers[slot] = None
                     matcher = self.grammar_matcher_factory.create(
                         req.guided_decoding_params)
                     self.grammar_matchers[slot] = matcher
@@ -251,9 +256,16 @@ class GuidedDecoder:
                                 f"Draft request {req.request_id} at slot {slot} failed to accept last new token: {req.new_token}."
                             )
                             continue
+                        # Degrade to unguided generation: drop the matcher so
+                        # subsequent tokens of this request are not constrained
+                        # (and not re-reported every iteration). The capturable
+                        # one-model-spec path has no request-termination plumbing
+                        # for guided failures, so raising here every token would
+                        # spam errors for the rest of the generation.
+                        self.grammar_matchers[slot] = None
                         raise ValueError(
-                            f"Request {req.request_id} at slot {slot} failed to accept last new token: {req.new_token}."
-                        )
+                            f"Request {req.request_id} at slot {slot} failed to accept last new token: {req.new_token}; "
+                            "disabling guidance for this request.")
 
                 self.num_advanced_tokens[slot] += 1
                 if not matcher.is_terminated():
