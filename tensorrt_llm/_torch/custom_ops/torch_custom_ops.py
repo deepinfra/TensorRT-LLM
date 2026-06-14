@@ -1883,9 +1883,24 @@ class fp8SwapABGemmRunner(TunableRunner):
         tactic: int = -1,
     ) -> torch.Tensor:
         input, weight, weight_scale = inputs
+        # Pad M up to a warmed DeepGEMM bucket so the GEMM only ever runs on a
+        # shape whose cubin was JIT-compiled+loaded during warmup. Without this,
+        # the autotuner rounds M to a power-of-2 cache bucket but DeepGEMM is
+        # called with the raw M and rounds it to its own (multiple-of-8 / -128)
+        # granularity, which can miss the warmed set -> a mid-serving
+        # cuModuleLoad that serializes against the in-flight NCCL collective
+        # under the overlap scheduler and deadlocks the TP ranks. Padding rows
+        # are sliced off the output; per-row GEMM means valid rows are unchanged.
+        orig_m = input.size(0)
+        if orig_m < 128:
+            padded_m = ((orig_m + 7) // 8) * 8  # multiple of 8
+        else:
+            padded_m = ((orig_m + 127) // 128) * 128  # multiple of 128
+        if padded_m != orig_m:
+            input = torch.nn.functional.pad(input, (0, 0, 0, padded_m - orig_m))
         a, a_sf = _fp8_quantize_1x128_ue8m0(input, self.quant_tactic)
         output = torch.empty(
-            (input.size(0), weight.size(0)),
+            (padded_m, weight.size(0)),
             device=input.device,
             dtype=self.output_dtype,
         )
@@ -1896,7 +1911,7 @@ class fp8SwapABGemmRunner(TunableRunner):
             output,
             disable_ue8m0_cast=self.disable_ue8m0_cast,
         )
-        return output
+        return output[:orig_m]
 
 
 @torch.library.custom_op("trtllm::fp8_swap_ab_gemm", mutates_args=())
