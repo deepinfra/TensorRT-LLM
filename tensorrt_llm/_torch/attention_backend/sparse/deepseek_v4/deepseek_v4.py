@@ -203,6 +203,12 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
     num_total_compressed_tokens: Dict[int, int] = {}
     # The max number of context compressed tokens for each compress ratio
     max_ctx_compressed_tokens: Dict[int, int] = {}
+    # Per-ratio total context compressed tokens, computed on the HOST in
+    # prepare(). Used as the (host int) size for the ctx position-id arange and
+    # as the generation output offset, so the metadata prep stays free of
+    # device->host syncs (a sync here deadlocks the overlap scheduler under
+    # mixed chunked-prefill + decode batches).
+    ctx_compressed_total_host: Dict[int, int] = {}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -668,6 +674,10 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
                 new_comp_kv_lens = kv_lens_slice // compress_ratio - cached_slice // compress_ratio
                 cu_new = new_comp_kv_lens.cumsum(0)
                 num_ctx_compressed_tokens = cu_new[num_contexts - 1].item()
+                # Host-side total (cu_new is a CPU tensor, so .item() above is
+                # free). Reused for the ctx arange size and the gen output
+                # offset to avoid a device->host sync in the overlap path.
+                self.ctx_compressed_total_host[compress_ratio] = num_ctx_compressed_tokens
                 num_gen_compressed_tokens = num_generations * (
                     (num_gen_tokens_per_seq + compress_ratio - 1) // compress_ratio
                 )
@@ -685,6 +695,7 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
                     (num_gen_tokens_per_seq + compress_ratio - 1) // compress_ratio
                 )
                 self.max_ctx_compressed_tokens[compress_ratio] = 0
+                self.ctx_compressed_total_host[compress_ratio] = 0
 
         # 2) CUDA-side: fill *_cuda buffers on device.
         kv_lens_cuda = (
@@ -737,14 +748,18 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
                 self.compressed_position_ids_cuda,
                 num_contexts,
                 self._compress_ratios_sorted,
+                self.ctx_compressed_total_host,
             )
 
         if self.num_gen_tokens_per_seq > 0 and num_generations > 0:
-            # Extract output_offset as Python int per ratio to avoid
-            # tensor-scalar slice inside compiled function.
+            # Generation output offset per ratio == total context compressed
+            # tokens for that ratio, already computed on the host in prepare()
+            # (ctx_compressed_total_host). Reusing it avoids a device->host
+            # .item() sync here, which would deadlock the overlap scheduler on
+            # mixed chunked-prefill + decode batches.
             # For decode-only batches (num_contexts == 0), offset is 0.
             gen_output_offsets = {
-                r: self.cu_new_comp_kv_cuda[r][num_contexts].item() if num_contexts > 0 else 0
+                r: self.ctx_compressed_total_host[r] if num_contexts > 0 else 0
                 for r in self._compress_ratios_sorted
             }
             self._compute_gen_compressed_position_ids(
@@ -918,14 +933,20 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
         compressed_position_ids_bufs: Dict[int, torch.Tensor],
         num_contexts: int,
         compress_ratios: list,
+        ctx_totals: Dict[int, int],
     ):
-        """Context-only compressed position IDs (eager, data-dependent shapes)."""
+        """Context-only compressed position IDs (eager, data-dependent shapes).
+
+        ctx_totals: per-ratio total context compressed tokens as a HOST int
+        (computed in prepare()). Using it as the arange size avoids reading
+        cu_new_comp[num_contexts] off the device, which is a device->host sync
+        that deadlocks the overlap scheduler on mixed prefill+decode batches."""
         device = past_kv_lens_bufs[compress_ratios[0]].device
         for compress_ratio in compress_ratios:
             past_kv = past_kv_lens_bufs[compress_ratio]
             cu_new_comp = cu_new_comp_kv_bufs[compress_ratio]
 
-            total_ctx_comp = cu_new_comp[num_contexts]
+            total_ctx_comp = ctx_totals[compress_ratio]
             ctx_idx = torch.arange(total_ctx_comp, dtype=torch.int32, device=device)
             ctx_cu = cu_new_comp[: num_contexts + 1].to(torch.int32)
             ctx_req = torch.searchsorted(ctx_cu[1:], ctx_idx, right=True)
