@@ -305,7 +305,13 @@ def deep_gemm_gen_tuning_buckets(x: int):
     if x >= 128:
         x = min(x, 8192)
         x = max(x, 4096)
-        buckets += tuple(range(128, x, 128))
+        # Inclusive of the top bucket: serving M can reach the cap (e.g. a
+        # chunked-prefill chunk + co-scheduled decode tokens rounds up to the
+        # next multiple of 128 == x). range(128, x, 128) stopped one bucket
+        # short (e.g. 3968 for x=4096), so that top shape was never JIT-warmed
+        # and DeepGEMM cuModuleLoad'd it mid-serving -> deadlocks the overlap
+        # scheduler. Warm one extra bucket so the cap is always pre-compiled.
+        buckets += tuple(range(128, x + 128, 128))
     return buckets
 
 
