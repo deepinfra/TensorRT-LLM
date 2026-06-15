@@ -373,7 +373,8 @@ def launch_server(
         disagg_cluster_config: Optional[DisaggClusterConfig] = None,
         multimodal_server_config: Optional[MultimodalServerConfig] = None,
         served_model_name: Optional[str] = None,
-        kv_events_zmq_endpoint: Optional[str] = None):
+        kv_events_zmq_endpoint: Optional[str] = None,
+        kv_events_replay_endpoint: Optional[str] = None):
 
     # Install the SIGUSR1 signal handler for debugging
     signal.signal(signal.SIGUSR1, print_stack_trace)
@@ -420,7 +421,8 @@ def launch_server(
                               disagg_cluster_config=disagg_cluster_config,
                               multimodal_server_config=multimodal_server_config,
                               chat_template=chat_template,
-                              kv_events_zmq_endpoint=kv_events_zmq_endpoint)
+                              kv_events_zmq_endpoint=kv_events_zmq_endpoint,
+                              kv_events_replay_endpoint=kv_events_replay_endpoint)
         _apply_fastapi_middlewares(server.app, middleware)
 
         # Optionally disable GC (default: not disabled)
@@ -932,6 +934,14 @@ class ChoiceWithAlias(click.Choice):
     help="If set, tee KV-cache events (including token_ids) to this ZMQ PUB "
     "endpoint in vLLM wire format, e.g. tcp://*:5557. Read-only: does not "
     "affect the SSE /kv_cache_events path. Disabled when unset.")
+@click.option(
+    "--kv_events_replay_endpoint",
+    type=str,
+    default=None,
+    help="ZMQ ROUTER endpoint for KV-event gap replay, e.g. tcp://*:5558. "
+    "Lets a subscriber that fell behind request missed batches by sequence "
+    "number. Only used when --kv_events_zmq_endpoint is set; defaults to that "
+    "PUB port + 1. Pass an empty string to disable replay.")
 def serve(
         model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
         host: str, port: int, log_level: str, backend: str, max_beam_width: int,
@@ -952,7 +962,8 @@ def serve(
         telemetry: bool, custom_module_dirs: list[Path],
         chat_template: Optional[str], middleware: tuple[str, ...], grpc: bool,
         served_model_name: Optional[str], visual_gen_args: Optional[str],
-        kv_events_zmq_endpoint: Optional[str]):
+        kv_events_zmq_endpoint: Optional[str],
+        kv_events_replay_endpoint: Optional[str]):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
@@ -1123,7 +1134,8 @@ def serve(
                           disagg_cluster_config,
                           multimodal_server_config,
                           served_model_name=served_model_name,
-                          kv_events_zmq_endpoint=kv_events_zmq_endpoint)
+                          kv_events_zmq_endpoint=kv_events_zmq_endpoint,
+                          kv_events_replay_endpoint=kv_events_replay_endpoint)
 
     def _serve_visual_gen():
         parsed_visual_gen_args = (VisualGenArgs.from_yaml(visual_gen_args)
