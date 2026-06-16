@@ -1373,12 +1373,16 @@ class OpenAIServer(_VideoRoutesMixin):
             events.mark_undone()
 
             async for event in events:
-                # Read-only tee to ZMQ, before the KVHash conversion below
-                # drops the token_ids. Guarded and isolated so it can never
-                # disturb the production SSE path.
+                # Read-only tee to ZMQ: hand the RAW event to the publisher's
+                # consumer thread before the KVHash conversion below drops the
+                # token_ids. enqueue() is a non-blocking put onto a bounded
+                # queue.Queue -- all the (CPU-heavy) msgpack/translation/send
+                # work happens on that thread, never on this asyncio loop, so
+                # it cannot stall the production SSE path. The event dict is
+                # then read concurrently by both paths; neither mutates it.
                 if self.zmq is not None:
                     try:
-                        self.zmq.handle(event)
+                        self.zmq.enqueue(event)
                     except Exception as e:
                         logger.warning(f"KV ZMQ tee failed (event dropped): {e}")
                 try:

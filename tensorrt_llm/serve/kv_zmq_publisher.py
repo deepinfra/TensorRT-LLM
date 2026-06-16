@@ -19,13 +19,21 @@ external consumer (e.g. an NVIDIA Dynamo RadixTree indexer) can subscribe and
 reconstruct the cache state -- including the ``token_ids`` that the SSE
 ``/kv_cache_events`` path drops.
 
-It is a *tee*, not a drain: it owns no polling loop. ``handle()`` is driven
-synchronously from the single existing drain loop
-(``OpenAIServer.kv_event_processor``), preserving the single-consumer
-invariant of ``get_kv_cache_events_async``. Because this sits next to the
-production routing path, the PUB socket is bounded (``SNDHWM``) and sends are
-non-blocking: if no subscriber is attached (or it falls behind), events are
-dropped rather than backing up into the engine's drain loop.
+Threading model: the engine's asyncio drain loop
+(``OpenAIServer.kv_event_processor``) only calls ``enqueue()``, a non-blocking
+hand-off onto a bounded ``queue.Queue``. A single dedicated consumer thread
+owns everything else -- it pulls raw events off the queue, translates/filters
+them, publishes on the PUB socket, appends to the replay buffer, and services
+replay requests on the ROUTER socket. Because exactly one thread touches the
+sockets and the buffer, no lock is needed (this mirrors vLLM's
+``ZmqEventPublisher._publisher_thread``). The ZMQ-side work (msgpack encode +
+send) is thus moved off the asyncio loop and never stalls the SSE path.
+
+Because this sits next to the production routing path, every hand-off is
+bounded and lossy by design: the inbound queue is bounded (overflow increments
+``queue_dropped`` -- unrecoverable, the consumer fell behind), and the PUB
+socket is bounded (``SNDHWM``) with non-blocking sends (overflow increments
+``dropped`` -- recoverable via replay).
 
 The translation logic mirrors the reference ``ZmqKvEventPublisher`` /
 ``_handle_kv_event`` in ``dynamo/components/src/dynamo/trtllm/publisher.py``
@@ -34,6 +42,7 @@ event-id gap detection) so the emitted stream is byte-compatible with what a
 Dynamo indexer expects.
 """
 
+import queue
 import threading
 import time
 from collections import deque
@@ -42,6 +51,10 @@ from typing import Any, Optional
 import zmq
 
 from tensorrt_llm.logger import logger
+
+# Sentinel pushed onto the event queue by shutdown() to wake the consumer
+# thread immediately instead of waiting out its get() timeout.
+_SHUTDOWN = object()
 
 # msgpack encoder for the vLLM wire payload. Prefer msgspec (what the
 # vLLM/Dynamo reference publisher uses, and what requirements.txt pins); fall
@@ -79,22 +92,28 @@ class KvZmqPublisher:
     Wire format: 3-frame multipart ``[topic, 8-byte big-endian sequence, payload]``
     where ``payload`` is the msgpack-serialized batch.
 
-    Replay: when ``replay_endpoint`` is set, a ROUTER socket is bound on a
-    dedicated daemon thread and a ring buffer of the last ``buffer_steps``
-    ``(seq, payload)`` pairs is kept. A subscriber that detects a sequence gap
-    (PUB/SUB is lossy) sends the missing start sequence as an 8-byte big-endian
-    integer; the publisher streams back every buffered batch from that sequence
-    onward, then an end-of-sequence sentinel (``seq = -1``, empty payload). This
-    is byte-compatible with vLLM's ``ZmqEventPublisher`` replay protocol, so an
-    existing Dynamo / standalone-indexer replay client works unchanged.
+    Replay: when ``replay_endpoint`` is set, a ROUTER socket is bound and a ring
+    buffer of the last ``buffer_steps`` ``(seq, payload)`` pairs is kept. Both
+    live on the same consumer thread that does the publishing, which polls the
+    ROUTER between queue items (``poll(0)``). A subscriber that detects a
+    sequence gap (PUB/SUB is lossy) sends the missing start sequence as an
+    8-byte big-endian integer; the publisher streams back every buffered batch
+    from that sequence onward, then an end-of-sequence sentinel (``seq = -1``,
+    empty payload). This is byte-compatible with vLLM's ``ZmqEventPublisher``
+    replay protocol, so an existing Dynamo / standalone-indexer replay client
+    works unchanged.
 
     Args:
         zmq_endpoint: endpoint to bind the PUB socket to, e.g. ``tcp://*:5557``.
         kv_block_size: KV-cache block size in tokens (``kv_cache_config.tokens_per_block``).
         replay_endpoint: endpoint to bind the replay ROUTER socket to, e.g.
-            ``tcp://*:5558``. When ``None`` the replay path is fully disabled
-            (no buffer, no socket, no thread).
+            ``tcp://*:5558``. When ``None`` the replay path is disabled (no
+            buffer, no ROUTER socket); the consumer thread still runs to drain
+            the queue and publish.
         buffer_steps: number of past batches kept in the replay ring buffer.
+        queue_maxsize: bound on the inbound event queue. When the consumer
+            thread cannot keep up the queue fills and the oldest-arriving events
+            are dropped (``queue_dropped``); these are unrecoverable.
         sndhwm: send high-water mark (max queued messages before drops kick in).
         topic: ZMQ topic to publish on (empty string == all topics, vLLM default).
     """
@@ -112,6 +131,7 @@ class KvZmqPublisher:
                  kv_block_size: int,
                  replay_endpoint: Optional[str] = None,
                  buffer_steps: int = 10000,
+                 queue_maxsize: int = 100000,
                  sndhwm: int = 100000,
                  topic: str = "") -> None:
         self.zmq_endpoint = zmq_endpoint
@@ -126,28 +146,27 @@ class KvZmqPublisher:
         self.socket.bind(zmq_endpoint)  # PUB binds (broadcast); subscribers connect.
         self.sequence = 0
         self.dropped = 0
+        self.queue_dropped = 0
 
-        # --- replay state -------------------------------------------------- #
-        # Ring buffer of recently published (seq, payload) pairs. Shared
-        # between the asyncio drain thread (which appends) and the replay
-        # thread (which reads), so all access is guarded by _buffer_lock.
+        # --- threading / replay state -------------------------------------- #
+        # Inbound hand-off from the asyncio drain loop. queue.Queue is the
+        # thread-safe primitive for the OS-thread consumer (vs asyncio.Queue,
+        # which only serves coroutines). This is the ONLY object shared across
+        # threads: the drain loop put_nowait()s, the consumer get()s.
+        self._event_queue: "queue.Queue" = queue.Queue(maxsize=queue_maxsize)
+        # Ring buffer of recently published (seq, payload) pairs. Touched ONLY
+        # by the consumer thread (append on publish, read on replay), so it
+        # needs no lock -- the single-thread invariant replaces it.
         self.replay_endpoint = replay_endpoint
         self._buffer: deque = deque(maxlen=buffer_steps)
-        self._buffer_lock = threading.Lock()
         self._running = True
         self._replay_socket: Optional[zmq.Socket] = None
-        self._replay_thread: Optional[threading.Thread] = None
         if replay_endpoint is not None:
             # ROUTER lets one socket serve many DEALER/REQ clients and reply
-            # request -> many batches. It lives only on the replay thread; the
-            # PUB socket lives only on the drain thread, so no socket is shared.
+            # request -> many batches. Owned by the consumer thread, same as
+            # the PUB socket, so the two are never used concurrently.
             self._replay_socket = self.ctx.socket(zmq.ROUTER)
             self._replay_socket.bind(replay_endpoint)
-            self._replay_thread = threading.Thread(
-                target=self._replay_loop,
-                daemon=True,
-                name="kv-zmq-replay")
-            self._replay_thread.start()
             logger.info(
                 f"KvZmqPublisher replay enabled on {replay_endpoint} "
                 f"(buffer_steps={buffer_steps})")
@@ -167,6 +186,37 @@ class KvZmqPublisher:
         logger.info(
             f"KvZmqPublisher bound to {zmq_endpoint} (topic='{topic}', "
             f"kv_block_size={kv_block_size}, sndhwm={sndhwm})")
+
+        # Single consumer thread owns the PUB socket, the ROUTER socket, the
+        # ring buffer, and the translation state. Started last, so all the
+        # state it touches in handle() is fully initialized before it can run.
+        # It always runs (even with replay disabled) because it is what drains
+        # the queue and publishes.
+        self._consumer_thread = threading.Thread(
+            target=self.zmq_loop, daemon=True, name="kv-zmq-consumer")
+        self._consumer_thread.start()
+
+    # ------------------------------------------------------------------ #
+    # Producer side: non-blocking hand-off from the asyncio drain loop    #
+    # ------------------------------------------------------------------ #
+    def enqueue(self, event: dict) -> None:
+        """Hand a raw native event to the consumer thread (never blocks).
+
+        Called from ``OpenAIServer.kv_event_processor`` for every event,
+        BEFORE the SSE path's KVHash conversion (which drops ``token_ids``).
+        The event dict is shared read-only with that path -- neither side may
+        mutate it. If the consumer thread has fallen behind and the queue is
+        full, the event is dropped and counted; such drops are unrecoverable
+        (unlike PUB-send drops, which replay can fix).
+        """
+        try:
+            self._event_queue.put_nowait(event)
+        except queue.Full:
+            self.queue_dropped += 1
+            if self.queue_dropped % self._DROP_LOG_INTERVAL == 0:
+                logger.warning(
+                    f"KvZmqPublisher queue full: dropped {self.queue_dropped} "
+                    f"events before publish (consumer thread fell behind)")
 
     # ------------------------------------------------------------------ #
     # Transport: native -> vLLM wire format (copied from reference)       #
@@ -232,10 +282,10 @@ class KvZmqPublisher:
         # the ones it will ask to replay once it catches up. Buffering only on
         # success would leave a hole in the buffer at precisely the sequence
         # numbers replay needs. The maxlen ring evicts the oldest as it fills;
-        # gaps older than that window are not recoverable from us.
+        # gaps older than that window are not recoverable from us. No lock:
+        # this runs on the consumer thread, the only thread touching _buffer.
         if self._replay_socket is not None:
-            with self._buffer_lock:
-                self._buffer.append((seq, payload))
+            self._buffer.append((seq, payload))
 
         try:
             self.socket.send_multipart(
@@ -256,7 +306,6 @@ class KvZmqPublisher:
     # ------------------------------------------------------------------ #
     def handle(self, event: dict) -> None:
         """Translate one native KV-cache event and publish it to ZMQ.
-
         ``event`` is the raw native dict as produced by
         ``KVCacheEventSerializer`` (the same shape ``kv_event_processor``
         consumes), so ``token_ids`` are still present.
@@ -377,28 +426,38 @@ class KvZmqPublisher:
         return event["window_size"] != self.max_window_size
 
     # ------------------------------------------------------------------ #
-    # Replay: serve missed batches to subscribers that fell behind        #
+    # Consumer thread: drain queue -> publish, and service replay         #
     # ------------------------------------------------------------------ #
-    def _replay_loop(self) -> None:
-        """Dedicated thread: answer replay requests on the ROUTER socket.
+    def zmq_loop(self) -> None:
+        """Single thread that publishes queued events and answers replay.
 
-        Runs independently of the engine drain loop so replay latency is not
-        tied to the drain cadence. Owns the ROUTER socket exclusively (ZMQ
-        sockets are not thread-safe); only the ring buffer is shared, guarded
-        by ``_buffer_lock``.
+        Mirrors vLLM's ``ZmqEventPublisher._publisher_thread``: each iteration
+        first services a pending replay request (non-critical, ``poll(0)`` so
+        it never blocks the publish path), then pulls one event off the queue
+        and publishes it. Because this is the only thread touching the sockets
+        and the ring buffer, no lock is required. Keeps running until shutdown
+        AND the queue has been drained, so in-flight events are not lost.
         """
-        assert self._replay_socket is not None
-        while self._running:
-            try:
-                # Poll with a timeout so the thread wakes periodically to check
-                # _running and can exit promptly on shutdown.
-                if self._replay_socket.poll(timeout=100):  # ms
+        while self._running or not self._event_queue.empty():
+            if self._replay_socket is not None and self._replay_socket.poll(0):
+                try:
                     self._service_replay()
+                except Exception as e:
+                    logger.warning(f"KvZmqPublisher replay error: {e}")
+
+            try:
+                event = self._event_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if event is _SHUTDOWN:
+                break
+            try:
+                # handle() translates/filters and calls _publish_event, which
+                # appends to the buffer and sends on the PUB socket.
+                self.handle(event)
             except Exception as e:
-                # Never let the replay thread die -- a bad request must not take
-                # replay down for everyone. Back off briefly on error.
-                logger.warning(f"KvZmqPublisher replay error: {e}")
-                time.sleep(0.1)
+                logger.warning(f"KvZmqPublisher handle error (event dropped): {e}")
+                continue
 
     def _service_replay(self) -> None:
         """Stream every buffered batch from the requested sequence onward.
@@ -407,6 +466,8 @@ class KvZmqPublisher:
         ``[client_id, b"", start_seq_bytes]``. Reply: one multipart per batch
         ``[client_id, b"", seq_bytes, payload]`` for every ``seq >= start_seq``
         still in the buffer, then a sentinel ``[client_id, b"", END_SEQ, b""]``.
+        Runs on the consumer thread, so it reads ``_buffer`` directly -- no
+        other thread mutates it.
         """
         assert self._replay_socket is not None
         frame = self._replay_socket.recv_multipart()
@@ -416,13 +477,7 @@ class KvZmqPublisher:
         client_id, _, start_seq_bytes = frame
         start_seq = int.from_bytes(start_seq_bytes, "big")
 
-        # Snapshot under the lock so we iterate a stable view while the drain
-        # thread keeps appending. The deque is small (buffer_steps), so copying
-        # the references is cheap; payloads are not duplicated.
-        with self._buffer_lock:
-            snapshot = list(self._buffer)
-
-        for seq, payload in snapshot:
+        for seq, payload in self._buffer:
             if seq >= start_seq:
                 self._replay_socket.send_multipart(
                     [client_id, b"", seq.to_bytes(8, "big"), payload])
@@ -431,12 +486,17 @@ class KvZmqPublisher:
             [client_id, b"", self.END_SEQ, b""])
 
     def shutdown(self) -> None:
-        """Stop the replay thread, close sockets, and terminate the context."""
-        # Signal the replay thread to exit, then wait for it so it is no longer
-        # touching the ROUTER socket before we close it.
+        """Stop the consumer thread, close sockets, and terminate the context."""
+        # Signal the consumer to exit and wake it immediately with a sentinel
+        # (so it doesn't wait out the get() timeout), then wait for it to stop
+        # touching the sockets before we close them.
         self._running = False
-        if self._replay_thread is not None:
-            self._replay_thread.join(timeout=1.0)
+        try:
+            self._event_queue.put_nowait(_SHUTDOWN)
+        except queue.Full:
+            pass
+        if self._consumer_thread is not None:
+            self._consumer_thread.join(timeout=2.0)
         try:
             if self.socket is not None:
                 self.socket.close()
