@@ -30,6 +30,7 @@ from tensorrt_llm._utils import mpi_rank
 from tensorrt_llm.commands.utils import get_is_diffusion_model
 from tensorrt_llm.executor.utils import LlmLauncherEnvs
 from tensorrt_llm.inputs.multimodal import MultimodalServerConfig
+from tensorrt_llm.serve.kv_events_config import KVEventsConfig
 from tensorrt_llm.llmapi import (BuildConfig, CapacitySchedulerPolicy,
                                  DynamicBatchConfig, KvCacheConfig,
                                  SchedulerConfig)
@@ -373,8 +374,7 @@ def launch_server(
         disagg_cluster_config: Optional[DisaggClusterConfig] = None,
         multimodal_server_config: Optional[MultimodalServerConfig] = None,
         served_model_name: Optional[str] = None,
-        kv_events_zmq_endpoint: Optional[str] = None,
-        kv_events_replay_endpoint: Optional[str] = None):
+        kv_events_config: Optional[KVEventsConfig] = None):
 
     # Install the SIGUSR1 signal handler for debugging
     signal.signal(signal.SIGUSR1, print_stack_trace)
@@ -421,8 +421,7 @@ def launch_server(
                               disagg_cluster_config=disagg_cluster_config,
                               multimodal_server_config=multimodal_server_config,
                               chat_template=chat_template,
-                              kv_events_zmq_endpoint=kv_events_zmq_endpoint,
-                              kv_events_replay_endpoint=kv_events_replay_endpoint)
+                              kv_events_config=kv_events_config)
         _apply_fastapi_middlewares(server.app, middleware)
 
         # Optionally disable GC (default: not disabled)
@@ -928,20 +927,18 @@ class ChoiceWithAlias(click.Choice):
     help=
     "Types of agents to schedule. Now Only Support Open Deep Research agent.")
 @click.option(
-    "--kv_events_zmq_endpoint",
+    "--kv_events_config",
     type=str,
     default=None,
-    help="If set, tee KV-cache events (including token_ids) to this ZMQ PUB "
-    "endpoint in vLLM wire format, e.g. tcp://*:5557. Read-only: does not "
-    "affect the SSE /kv_cache_events path. Disabled when unset.")
-@click.option(
-    "--kv_events_replay_endpoint",
-    type=str,
-    default=None,
-    help="ZMQ ROUTER endpoint for KV-event gap replay, e.g. tcp://*:5558. "
-    "Lets a subscriber that fell behind request missed batches by sequence "
-    "number. Only used when --kv_events_zmq_endpoint is set; defaults to that "
-    "PUB port + 1. Pass an empty string to disable replay.")
+    help="JSON config for teeing KV-cache events (including token_ids) over "
+    "ZMQ in vLLM wire format, mirroring vLLM's KVEventsConfig. Read-only: does "
+    "not affect the SSE /kv_cache_events path. Keys: enable_kv_cache_events "
+    "(bool, master switch), endpoint (PUB, e.g. tcp://*:5557), replay_endpoint "
+    "(ROUTER for gap recovery, e.g. tcp://*:5558; null disables replay), "
+    "buffer_steps, hwm, max_queue_size, topic. Disabled unless "
+    "enable_kv_cache_events is true. Example: "
+    '\'{"enable_kv_cache_events": true, "endpoint": "tcp://*:5557", '
+    '"replay_endpoint": "tcp://*:5558"}\'')
 def serve(
         model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
         host: str, port: int, log_level: str, backend: str, max_beam_width: int,
@@ -962,13 +959,16 @@ def serve(
         telemetry: bool, custom_module_dirs: list[Path],
         chat_template: Optional[str], middleware: tuple[str, ...], grpc: bool,
         served_model_name: Optional[str], visual_gen_args: Optional[str],
-        kv_events_zmq_endpoint: Optional[str],
-        kv_events_replay_endpoint: Optional[str]):
+        kv_events_config: Optional[str]):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
     """
     logger.set_level(log_level)
+
+    # Parse the optional KV-events tee config (vLLM-shaped JSON) once, at the
+    # CLI boundary, so a malformed value fails fast before the engine loads.
+    kv_events_cfg = KVEventsConfig.from_cli(kv_events_config)
 
     if moe_cluster_parallel_size is not None:
         logger.warning(
@@ -1134,8 +1134,7 @@ def serve(
                           disagg_cluster_config,
                           multimodal_server_config,
                           served_model_name=served_model_name,
-                          kv_events_zmq_endpoint=kv_events_zmq_endpoint,
-                          kv_events_replay_endpoint=kv_events_replay_endpoint)
+                          kv_events_config=kv_events_cfg)
 
     def _serve_visual_gen():
         parsed_visual_gen_args = (VisualGenArgs.from_yaml(visual_gen_args)

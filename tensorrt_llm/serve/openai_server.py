@@ -55,6 +55,7 @@ from tensorrt_llm.serve.chat_utils import (load_chat_template,
                                            resolve_top_level_model_type)
 from tensorrt_llm.serve.cluster_storage import create_cluster_storage_client
 from tensorrt_llm.serve.disagg_auto_scaling import DisaggClusterWorker
+from tensorrt_llm.serve.kv_events_config import KVEventsConfig
 from tensorrt_llm.serve.metadata_server import create_metadata_server
 from tensorrt_llm.serve.openai_protocol import (ChatCompletionRequest,
                                                 ChatCompletionResponse,
@@ -289,8 +290,7 @@ class OpenAIServer(_VideoRoutesMixin):
                  disagg_cluster_config: Optional[DisaggClusterConfig] = None,
                  multimodal_server_config: Optional[MultimodalServerConfig] = None,
                  chat_template: Optional[str] = None,
-                 kv_events_zmq_endpoint: Optional[str] = None,
-                 kv_events_replay_endpoint: Optional[str] = None):
+                 kv_events_config: Optional[KVEventsConfig] = None):
         self.generator = generator
         self._is_visual_gen = isinstance(generator, VisualGen)
         self.tool_parser = tool_parser
@@ -309,25 +309,28 @@ class OpenAIServer(_VideoRoutesMixin):
         self.kv_listeners: List[asyncio.Queue] = []
         self.kv_event_processor_task: Optional[asyncio.Task] = None
         # Optional read-only ZMQ tee of raw KV-cache events (with token_ids).
-        # Stays None (fully disabled) unless an endpoint is provided.
+        # Stays None (fully disabled) unless kv_events_config turns it on.
         self.zmq = None
-        if kv_events_zmq_endpoint:
+        # vLLM builds a ZMQ publisher iff publisher resolves to "zmq" (which
+        # __post_init__ derives from enable_kv_cache_events unless set explicitly).
+        if kv_events_config is not None and kv_events_config.publisher == "zmq":
             from tensorrt_llm.serve.kv_zmq_publisher import KvZmqPublisher
             block_size = self.generator.args.kv_cache_config.tokens_per_block
-            # If no explicit replay endpoint is given, default to the PUB port
-            # + 1 (vLLM's tcp://*:5557 / :5558 convention) so gap recovery is on
-            # by default whenever the tee is. Pass an empty string to disable.
-            replay_endpoint = kv_events_replay_endpoint
-            if replay_endpoint is None:
-                replay_endpoint = self._default_replay_endpoint(
-                    kv_events_zmq_endpoint)
-            elif replay_endpoint == "":
-                replay_endpoint = None
-            self.zmq = KvZmqPublisher(kv_events_zmq_endpoint, block_size,
-                                      replay_endpoint=replay_endpoint)
+            # Field names mirror vLLM's KVEventsConfig: replay_endpoint=None
+            # disables gap recovery, hwm is the PUB high-water-mark, and
+            # max_queue_size bounds the in-memory event queue.
+            self.zmq = KvZmqPublisher(
+                kv_events_config.endpoint,
+                block_size,
+                replay_endpoint=kv_events_config.replay_endpoint,
+                buffer_steps=kv_events_config.buffer_steps,
+                queue_maxsize=kv_events_config.max_queue_size,
+                sndhwm=kv_events_config.hwm,
+                topic=kv_events_config.topic)
             logger.info(
-                f"KV-events ZMQ tee enabled on {kv_events_zmq_endpoint} "
-                f"(block_size={block_size}, replay={replay_endpoint})")
+                f"KV-events ZMQ tee enabled on {kv_events_config.endpoint} "
+                f"(block_size={block_size}, "
+                f"replay={kv_events_config.replay_endpoint})")
         try:
             self.processor = AutoProcessor.from_pretrained(hf_tokenizer_path, trust_remote_code=trust_remote_code)
         except Exception:
@@ -1342,20 +1345,6 @@ class OpenAIServer(_VideoRoutesMixin):
         else:
             self.kv_map[block_hash] = hash_obj
             return hash_obj
-
-    @staticmethod
-    def _default_replay_endpoint(pub_endpoint: str) -> Optional[str]:
-        """Derive a replay ROUTER endpoint from the PUB endpoint by +1 on the
-        port (vLLM's :5557 / :5558 convention). Returns None if the port can't
-        be parsed, leaving replay disabled rather than guessing wrong."""
-        last_colon = pub_endpoint.rfind(":")
-        if last_colon == -1:
-            return None
-        base, port_str = pub_endpoint[:last_colon], pub_endpoint[last_colon + 1:]
-        try:
-            return f"{base}:{int(port_str) + 1}"
-        except ValueError:
-            return None
 
     async def kv_event_processor(self):
         logger.info("Starting kv_event_processor")
