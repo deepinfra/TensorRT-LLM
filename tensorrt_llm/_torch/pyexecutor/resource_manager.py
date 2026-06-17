@@ -16,6 +16,8 @@ import copy
 import enum
 import math
 import os
+
+import numpy as np
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass

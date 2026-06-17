@@ -428,6 +428,17 @@ def _response_format_to_guided_decoding_params(
     if guided_decoding_params.structural_tag is not None:
         return guided_decoding_params
 
+    # gemma4 reasoning is OPTIONAL (channel-based: <|channel>...<channel|>) and
+    # off by default for structured output. The reasoning-wrapper below forces a
+    # mandatory reasoning block before the constrained content (designed for
+    # always-reasoning models like deepseek-r1). For gemma4 that makes the model
+    # emit its JSON inside the reasoning channel and stop, leaving message
+    # content empty (JSON lands in reasoning_content). Also, Gemma4ReasoningParser
+    # has no reasoning_start/reasoning_end attrs, so the wrapper would AttributeError.
+    # Apply the content constraint directly instead (same as reasoning_parser None).
+    if reasoning_parser == "gemma4":
+        return guided_decoding_params
+
     # Adapt guided_decoding_params for reasoning parser
     if guided_decoding_params.json is not None:
         content = {
