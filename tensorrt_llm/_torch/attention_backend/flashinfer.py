@@ -923,7 +923,16 @@ class FlashInferAttentionMetadata(AttentionMetadata):
         # that can be too big if using chunked prefill/kv cache reuse
         # since we allocate all blocks ahead of time.
         num_blocks = ((kv_lens + self.page_size - 1) // self.page_size)
-        self.num_blocks = num_blocks.tolist()
+        # PERF: kv_lens lives on CUDA, so num_blocks.tolist() forces a full
+        # GPU sync on the executor thread every iteration (py-spy: ~28% of
+        # executor wall time at batch 96). The same values are computable
+        # from the CPU-side tensors (seq_lens_kv is the pinned-host mirror
+        # of seq_lens_kv_cuda, cached_token_lens is built on CPU above), so
+        # build the Python list without touching the device.
+        n_active = cached_token_lens.size(0)
+        kv_lens_cpu = cached_token_lens + self.seq_lens_kv[:n_active]
+        self.num_blocks = ((kv_lens_cpu + self.page_size - 1) //
+                           self.page_size).tolist()
         self.num_context_blocks = sum(self.num_blocks[:self.num_contexts])
         self.num_generation_blocks = sum(self.num_blocks[self.num_contexts:])
 
