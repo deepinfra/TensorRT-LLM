@@ -1306,7 +1306,7 @@ class SpecWorkerBase(nn.Module, ABC):
         # in SpecSamplerBase.update_requests where there's already a sync.
         # See mtp.MTPWorker.sample_and_accept_draft_tokens for the analogous
         # check on the MTP-relaxed and MTP-strict-thop paths.
-        self.logits_finite = torch.isfinite(logits).any(dim=-1).all()
+        self.logits_finite = (~torch.isnan(logits)).all()
         # Counts for the failure diagnostic; only inspected on the crash
         # path. Cheap GPU reductions, no host sync, no fresh allocations
         # (safe inside CUDA graph capture).
