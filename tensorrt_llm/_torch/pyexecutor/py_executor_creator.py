@@ -414,9 +414,15 @@ def create_py_executor(
     if llm_args.attn_backend in ["FLASHINFER", "FLASHINFER_STAR_ATTENTION"]:
         # Workaround for flashinfer and star attention
         if kv_cache_config.enable_block_reuse:
-            logger.warning(
-                f"Disabling block reuse for {llm_args.attn_backend} backend")
-            kv_cache_config.enable_block_reuse = False
+            if (llm_args.attn_backend == "FLASHINFER" and os.getenv(
+                    "TRTLLM_FLASHINFER_ALLOW_BLOCK_REUSE", "0") == "1"):
+                logger.warning(
+                    "Keeping block reuse ENABLED for FLASHINFER backend "
+                    "(TRTLLM_FLASHINFER_ALLOW_BLOCK_REUSE=1)")
+            else:
+                logger.warning(
+                    f"Disabling block reuse for {llm_args.attn_backend} backend")
+                kv_cache_config.enable_block_reuse = False
 
     if llm_args.attn_backend == "FLASHINFER_STAR_ATTENTION" and enable_chunked_context:
         logger.warning(
