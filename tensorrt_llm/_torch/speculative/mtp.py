@@ -790,7 +790,7 @@ class MTPWorker(SpecWorkerBase):
         # -inf values from guided-decoding masks are legitimate; rows with
         # a mix of -inf and finite still have a sampleable max and must not
         # trip this guard.
-        self.logits_finite = torch.isfinite(logits).any(dim=-1).all()
+        self.logits_finite = (~torch.isnan(logits)).all()
         # Counts for the failure diagnostic; only inspected on the crash
         # path. Cheap GPU reductions, no host sync, no fresh allocations
         # (safe inside CUDA graph capture).
