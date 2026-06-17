@@ -671,13 +671,13 @@ class Eagle3OneModelWorker(SpecWorkerBase):
 
         self._execute_guided_decoder_if_present(logits)
 
-        # Stash a 0-d per-row-sampleability bool on target logits, mirroring
+        # Stash a 0-d NaN-only check on target logits, mirroring
         # MTPWorker.sample_and_accept_draft_tokens (which runs after the guided
-        # decoder). -inf values from guided-decoding masks are legitimate; only
-        # a fully non-finite row is unsampleable. Propagated through the forward
-        # output dict so SpecSamplerBase.update_requests can check it on its
-        # natural host sync — safe under CUDA graph capture.
-        self.logits_finite = torch.isfinite(logits).any(dim=-1).all()
+        # decoder). Only NaN (FP8 KV poisoning) is fatal; -inf from guided
+        # decoding masks is legitimate, so check ~isnan, not isfinite. Propagated
+        # through the forward output dict so SpecSamplerBase.update_requests can
+        # check it on its natural host sync — safe under CUDA graph capture.
+        self.logits_finite = (~torch.isnan(logits)).all()
         self.logits_nan_count = torch.isnan(logits).sum()
         self.logits_inf_count = torch.isinf(logits).sum()
 
