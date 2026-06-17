@@ -5,6 +5,8 @@ import copy
 import enum
 import math
 import os
+
+import numpy as np
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass
@@ -2599,6 +2601,11 @@ class KVCacheManagerV2(BaseResourceManager):
 
         self.enable_block_reuse = kv_cache_config.enable_block_reuse
         self.enable_partial_reuse = kv_cache_config.enable_partial_reuse
+        # Cumulative prefix-reuse accounting (in tokens), fed into
+        # get_kv_cache_stats() so /metrics reports real
+        # gpu_prefix_cache_queries/hits for V2-managed models.
+        self._reuse_reused_tokens = 0
+        self._reuse_missed_tokens = 0
 
         # With pipeline parallelism, multiple microbatches can be in-flight
         # simultaneously, so we need slots for all concurrent sequences.
@@ -2983,6 +2990,13 @@ class KVCacheManagerV2(BaseResourceManager):
                 if kv_cache is None:
                     return False
                 kv_cache.cuda_stream = self._stream.cuda_stream
+                if self.enable_block_reuse:
+                    # Count once per request, at create time (re-entries for
+                    # an existing cache skip this branch).
+                    committed = kv_cache.num_committed_tokens
+                    self._reuse_reused_tokens += committed
+                    self._reuse_missed_tokens += max(
+                        0, req.prompt_len - 1 - committed)
 
             if not self.enable_block_reuse:
                 kv_cache.stop_committing()
@@ -3032,6 +3046,15 @@ class KVCacheManagerV2(BaseResourceManager):
         # None means "no growth this iter, nothing to revert"; this also
         # invalidates a stale snapshot from a prior iter on the same req.
         req.py_ctx_pre_resize_cap = pre_cap if capacity > pre_cap else None
+        return True
+
+    def _kv_connector_should_add_sequence(self, request: LlmRequest) -> bool:
+        # KVCacheManagerV2 does not support a kv_connector_manager (see the
+        # assertion in __init__ and get_kv_cache_manager_cls, which forbids the
+        # connector for V2 / Gemma4 hybrid). With no connector, every sequence
+        # is always onboarded. V1 defines the same helper; it was missing on V2,
+        # which crashed prepare_resources() on the first context chunk
+        # (AttributeError) for Gemma4 hybrid models that require V2.
         return True
 
     def extend_capacity_for_tokens(self, request: LlmRequest) -> None:
@@ -3102,14 +3125,32 @@ class KVCacheManagerV2(BaseResourceManager):
                         "Star attention is not supported for kv cache manager v2"
                     )
                 else:
-                    if req.is_first_context_chunk and self._kv_connector_should_add_sequence(
+                    if req.is_first_context_chunk and req.py_request_id not in self.kv_cache_map and self._kv_connector_should_add_sequence(
                             req):
+                        # Guard `req.py_request_id not in self.kv_cache_map`:
+                        # KV-cache memory estimation and warmup can re-enter
+                        # prepare_resources for a request whose KV cache was
+                        # already created (e.g. chunked-prefill dummy/estimation
+                        # requests submitted through the event loop), which hit
+                        # `_create_kv_cache`'s "already exists" assert and killed
+                        # startup ("KV cache for request <max_batch_size> already
+                        # exists"). The first-chunk block (create+resume+resize to
+                        # prompt_len) is idempotent: on a genuine first chunk the
+                        # id is absent so this is a no-op; it only skips the
+                        # redundant re-create. Required for Gemma4 hybrid (V2).
                         # Last token cannot be recovered, so we don't include it in the input tokens to look up for the block that can be reused.
                         kv_cache = self._create_kv_cache(
                             req.py_request_id, req.lora_task_id,
                             req.get_tokens(DEFAULT_BEAM_INDEX)[:-1]
                             if self.enable_block_reuse else None)
                         assert beam_width == 1, "Currently, KVCacheManagerV2 only supports beam width 1"
+                        if self.enable_block_reuse:
+                            # Prefix-reuse accounting (create-once thanks to
+                            # the kv_cache_map guard above).
+                            _committed = kv_cache.num_committed_tokens
+                            self._reuse_reused_tokens += _committed
+                            self._reuse_missed_tokens += max(
+                                0, req.prompt_len - 1 - _committed)
                         if not self.enable_block_reuse:
                             assert kv_cache.num_committed_tokens == 0
                             kv_cache.stop_committing()
@@ -3248,7 +3289,34 @@ class KVCacheManagerV2(BaseResourceManager):
 
     def get_kv_cache_stats(self):
         kv_cache_stats = KvCacheStats()
-        kv_cache_stats.allocated_bytes = self.impl.get_quota(GPU_LEVEL)
+        quota = self.impl.get_quota(GPU_LEVEL)
+        kv_cache_stats.allocated_bytes = quota
+        kv_cache_stats.tokens_per_block = self.tokens_per_block
+
+        # Capacity/usage: V2 is byte-quota based with no fixed block pool, so
+        # derive block equivalents from bytes-per-token (drives the
+        # gpu_cache_usage_perc gauge, which previously read 0/0).
+        bytes_per_block = self.get_cache_bytes_per_token(
+        ) * self.tokens_per_block
+        if bytes_per_block > 0:
+            max_blocks = quota // bytes_per_block
+            try:
+                util = self.impl._storage.get_overall_utilization(GPU_LEVEL)
+            except Exception:
+                util = 0.0
+            used = int(util * max_blocks)
+            kv_cache_stats.max_num_blocks = max_blocks
+            kv_cache_stats.used_num_blocks = used
+            kv_cache_stats.free_num_blocks = max_blocks - used
+
+        # Prefix-reuse counters accumulated at KV-cache create time (drive
+        # gpu_prefix_cache_queries_total / gpu_prefix_cache_hits_total).
+        tpb = self.tokens_per_block
+        kv_cache_stats.reused_blocks = self._reuse_reused_tokens // tpb
+        kv_cache_stats.missed_blocks = self._reuse_missed_tokens // tpb
+        lookups = kv_cache_stats.reused_blocks + kv_cache_stats.missed_blocks
+        kv_cache_stats.cache_hit_rate = (kv_cache_stats.reused_blocks /
+                                         lookups if lookups else 0.0)
 
         return kv_cache_stats
 
@@ -3454,15 +3522,32 @@ class KVCacheManagerV2(BaseResourceManager):
         else:
             div_factor = 1
 
-        res = []
+        # PERF: this is called from the attention backend's prepare() for
+        # every pool on every iteration, looping over the whole batch. The
+        # original per-request torch.as_tensor + torch.where + .tolist()
+        # burned >55% of executor-core CPU at high batch (py-spy verified),
+        # starving the GPU. get_base_page_indices() returns an
+        # array.array/memoryview, so use zero-copy numpy instead of torch
+        # tensor dispatch, and skip the arithmetic entirely when it is a
+        # no-op (scale == div_factor), which keeps BAD_PAGE_INDEX intact.
+        scale = int(self.index_scales[pool_id])
+        kv_cache_map = self.kv_cache_map
 
+        if scale == div_factor:
+            # idx * scale // div == idx for all valid indices and
+            # BAD_PAGE_INDEX maps to itself; return the raw indices.
+            # IndexSeq is array.array | memoryview; both support .tolist().
+            return [
+                kv_cache_map[req_id].get_base_page_indices(pool_id).tolist()
+                for req_id in request_ids
+            ]
+
+        res = []
         for req_id in request_ids:
-            idx_tensor = torch.as_tensor(
-                self.kv_cache_map[req_id].get_base_page_indices(pool_id))
-            res.append((torch.where(
-                idx_tensor != BAD_PAGE_INDEX,
-                idx_tensor * self.index_scales[pool_id] // div_factor,
-                BAD_PAGE_INDEX)).tolist())
+            arr = np.asarray(kv_cache_map[req_id].get_base_page_indices(pool_id))
+            res.append(
+                np.where(arr != BAD_PAGE_INDEX, arr * scale // div_factor,
+                         BAD_PAGE_INDEX).tolist())
 
         return res
 

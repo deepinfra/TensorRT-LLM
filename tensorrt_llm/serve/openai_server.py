@@ -1033,7 +1033,11 @@ class OpenAIServer(_VideoRoutesMixin):
         def format_line(name: str, value: float) -> str:
             return f'vllm:{name}{{model_name="{self.model}"}} {value}\n'
 
-        resp += format_line('gpu_cache_usage_perc', float(used_num_blocks/max_num_blocks))
+        # KVCacheManagerV2 reports maxNumBlocks=0 (it has no fixed block pool);
+        # guard the division so /metrics does not 500 for V2-managed models.
+        resp += format_line(
+            'gpu_cache_usage_perc',
+            float(used_num_blocks / max_num_blocks) if max_num_blocks else 0.0)
         resp += format_line('gpu_prefix_cache_queries_total', float(missed_blocks + reused_blocks))
         resp += format_line('gpu_prefix_cache_hits_total', float(reused_blocks))
         resp += format_line('tokens_per_block', float(tokens_per_block))
