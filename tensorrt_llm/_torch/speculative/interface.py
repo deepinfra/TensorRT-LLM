@@ -1299,7 +1299,7 @@ class SpecWorkerBase(nn.Module, ABC):
         # already a sync. See mtp.MTPWorker.sample_and_accept_draft_tokens
         # for the analogous check on the MTP-relaxed and MTP-strict-thop
         # paths that bypass this method.
-        self.logits_finite = torch.isfinite(logits).all()
+        self.logits_finite = (~torch.isnan(logits)).all()
 
         if spec_metadata.allow_advanced_sampling:
             num_gens = batch_size - num_contexts

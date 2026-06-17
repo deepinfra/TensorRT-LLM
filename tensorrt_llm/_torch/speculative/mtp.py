@@ -788,7 +788,7 @@ class MTPWorker(SpecWorkerBase):
         # propagate this bool through the worker forward output dict so the
         # natural sync in SpecSamplerBase.update_requests can check it without
         # an extra host sync — safe under CUDA graph capture.
-        self.logits_finite = torch.isfinite(logits).all()
+        self.logits_finite = (~torch.isnan(logits)).all()
 
         # The return buffer
         if self.spec_config.use_relaxed_acceptance_for_thinking or not self.is_thop:
