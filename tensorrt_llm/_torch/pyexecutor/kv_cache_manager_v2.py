@@ -18,6 +18,7 @@ import math
 import os
 from typing import TYPE_CHECKING, Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
 
+import numpy as np
 import torch
 
 from tensorrt_llm._torch.distributed.communicator import Distributed, ReduceOp
@@ -701,6 +702,11 @@ class KVCacheManagerV2(BaseResourceManager):
 
         self.enable_block_reuse = kv_cache_config.enable_block_reuse
         self.enable_partial_reuse = kv_cache_config.enable_partial_reuse
+        # DeepInfra (engine-containers gemma4fix 09): cumulative prefix-reuse
+        # accounting (in tokens), fed into get_kv_cache_stats() so /metrics
+        # reports real gpu_prefix_cache_queries/hits for V2-managed models.
+        self._reuse_reused_tokens = 0
+        self._reuse_missed_tokens = 0
         self.disk_prefetch_num_reqs = kv_cache_config.disk_prefetch_num_reqs
 
         # With pipeline parallelism, multiple microbatches can be in-flight
@@ -1249,6 +1255,15 @@ class KVCacheManagerV2(BaseResourceManager):
                 if kv_cache is None:
                     return False
                 kv_cache.cuda_stream = self._stream.cuda_stream
+                if self.enable_block_reuse:
+                    # DeepInfra (gemma4fix 09): count prefix-reuse once per
+                    # request, at create time (re-entries reuse the existing
+                    # cache and skip this branch). Drives the /metrics
+                    # gpu_prefix_cache_* counters.
+                    _committed = kv_cache.num_committed_tokens
+                    self._reuse_reused_tokens += _committed
+                    self._reuse_missed_tokens += max(
+                        0, req.prompt_len - 1 - _committed)
 
             if not self.enable_block_reuse:
                 kv_cache.stop_committing()
@@ -1463,7 +1478,34 @@ class KVCacheManagerV2(BaseResourceManager):
 
     def get_kv_cache_stats(self):
         kv_cache_stats = KvCacheStats()
-        kv_cache_stats.allocated_bytes = self.impl.get_quota(GPU_LEVEL)
+        quota = self.impl.get_quota(GPU_LEVEL)
+        kv_cache_stats.allocated_bytes = quota
+        kv_cache_stats.tokens_per_block = self.tokens_per_block
+
+        # DeepInfra (engine-containers gemma4fix 09): V2 is byte-quota based
+        # with no fixed block pool, so derive block equivalents from
+        # bytes-per-token (drives the gpu_cache_usage_perc gauge, which
+        # previously read 0/0).
+        bytes_per_block = self.get_cache_bytes_per_token() * self.tokens_per_block
+        if bytes_per_block > 0:
+            max_blocks = quota // bytes_per_block
+            try:
+                util = self.impl._storage.get_overall_utilization(GPU_LEVEL)
+            except Exception:
+                util = 0.0
+            used = int(util * max_blocks)
+            kv_cache_stats.max_num_blocks = max_blocks
+            kv_cache_stats.used_num_blocks = used
+            kv_cache_stats.free_num_blocks = max_blocks - used
+
+        # Prefix-reuse counters accumulated at KV-cache create time (drive
+        # gpu_prefix_cache_queries_total / gpu_prefix_cache_hits_total).
+        tpb = self.tokens_per_block
+        kv_cache_stats.reused_blocks = self._reuse_reused_tokens // tpb
+        kv_cache_stats.missed_blocks = self._reuse_missed_tokens // tpb
+        lookups = kv_cache_stats.reused_blocks + kv_cache_stats.missed_blocks
+        kv_cache_stats.cache_hit_rate = (kv_cache_stats.reused_blocks /
+                                         lookups if lookups else 0.0)
 
         return kv_cache_stats
 
@@ -1666,19 +1708,32 @@ class KVCacheManagerV2(BaseResourceManager):
         else:
             div_factor = 1
 
-        res = []
+        # DeepInfra perf (engine-containers gemma4fix 05): this is called from
+        # the attention backend's prepare() for every pool on every iteration,
+        # looping over the whole batch. The original per-request torch.as_tensor
+        # + torch.where + .tolist() burned >55% of executor-core CPU at high
+        # batch (py-spy verified), starving the GPU. get_base_page_indices()
+        # returns an array.array/memoryview, so use zero-copy numpy instead of
+        # torch tensor dispatch, and skip the arithmetic entirely when it is a
+        # no-op (scale == div_factor), which keeps BAD_PAGE_INDEX intact.
+        scale = int(self.index_scales[pool_id])
+        kv_cache_map = self.kv_cache_map
 
+        if scale == div_factor:
+            # idx * scale // div == idx for all valid indices and
+            # BAD_PAGE_INDEX maps to itself; return the raw indices.
+            # IndexSeq is array.array | memoryview; both support .tolist().
+            return [
+                kv_cache_map[req_id].get_base_page_indices(pool_id).tolist()
+                for req_id in request_ids
+            ]
+
+        res = []
         for req_id in request_ids:
-            idx_tensor = torch.as_tensor(self.kv_cache_map[req_id].get_base_page_indices(pool_id))
+            arr = np.asarray(kv_cache_map[req_id].get_base_page_indices(pool_id))
             res.append(
-                (
-                    torch.where(
-                        idx_tensor != BAD_PAGE_INDEX,
-                        idx_tensor * self.index_scales[pool_id] // div_factor,
-                        BAD_PAGE_INDEX,
-                    )
-                ).tolist()
-            )
+                np.where(arr != BAD_PAGE_INDEX, arr * scale // div_factor,
+                         BAD_PAGE_INDEX).tolist())
 
         return res
 
