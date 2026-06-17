@@ -949,8 +949,16 @@ class Gemma4VisionModel(nn.Module):
 
         hf_hd = first_attn.hf_head_dim
         padded_hd = first_attn.head_dim
-        nh = first_attn.num_heads
-        nkv = first_attn.num_key_value_heads
+        # Use the FULL (unsharded) head counts from the vision config. This pad
+        # runs on the full checkpoint weights *before* ``_load_weights_impl``
+        # applies the TP split, whereas ``first_attn.num_heads`` /
+        # ``num_key_value_heads`` are already divided by tp_size (e.g. 16 -> 8
+        # at tp_size=2). Using the sharded counts here mis-sizes the reshape and
+        # trips the shape assert. The config values are correct for both tp1 and
+        # tpN since the weights at this point are unsharded.
+        vc = first_attn.vision_config
+        nh = vc.num_attention_heads
+        nkv = getattr(vc, "num_key_value_heads", nh)
         pad_w = padded_hd - hf_hd
 
         # HF keys at this point have already had ``.linear.`` stripped if the

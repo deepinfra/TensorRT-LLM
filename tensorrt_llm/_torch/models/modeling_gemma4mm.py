@@ -771,6 +771,16 @@ class Gemma4ForConditionalGeneration(PreTrainedModel):
         return self.llm.infer_max_seq_len()
 
     @property
+    def vocab_size_padded(self) -> int:
+        # Delegate to the inner language model's lm_head. The guided-decoding
+        # (xgrammar) setup in py_executor_creator reads
+        # `model_engine.model.vocab_size_padded`; the multimodal wrapper
+        # (PreTrainedModel) doesn't inherit the DecoderModelForCausalLM property,
+        # so without this, guided_decoding_backend=xgrammar crashes with
+        # "'Gemma4ForConditionalGeneration' object has no attribute 'vocab_size_padded'".
+        return self.llm.vocab_size_padded
+
+    @property
     def multimodal_data_device_paths(self) -> List[str]:
         """Dotted paths in ``multimodal_data`` that the engine should ship to
         GPU. Anything not listed stays CPU-resident — notably
