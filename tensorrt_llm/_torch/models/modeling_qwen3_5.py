@@ -1,7 +1,21 @@
 import re
+from typing import Dict, List
 
+import torch
+from transformers import PretrainedConfig
+
+from ...inputs import (ContentFormat, MultimodalPlaceholderMetadata,
+                       MultimodalPlaceholderPlacement, register_input_processor,
+                       support_multimodal_disaggregated)
+from ..pyexecutor.config_utils import _Qwen35ConfigCompat
+from .checkpoints.base_weight_mapper import BaseWeightMapper
+from .checkpoints.hf.qwen3_5_weight_mapper import Qwen3_5MoeHfWeightMapper
+from .modeling_multimodal_utils import _is_disagg
 from .modeling_qwen3_next import Qwen3NextForCausalLM
-from .modeling_utils import register_auto_model
+from .modeling_qwen3vl import (Qwen3VisionModel, Qwen3VisionModelBase,
+                               Qwen3VLInputProcessorBase, Qwen3VLModelBase)
+from .modeling_utils import (ModelConfig, register_auto_model,
+                             register_vision_encoder)
 
 _LANG_PREFIX = "model.language_model."
 
@@ -118,6 +132,128 @@ class Qwen3_5MoeForCausalLM(Qwen3NextForCausalLM):
     def __init__(self, model_config):
         _normalize_qwen35_exclude_modules(model_config)
         super().__init__(model_config)
+
+
+def _normalize_qwen35_mrope_config(text_config) -> None:
+    """Materialize Qwen3.5 mRoPE aliases needed by the Qwen3-VL path.
+
+    HF stores RoPE metadata under ``rope_parameters``; the shared Qwen3-VL
+    wrapper reads ``rope_theta``, ``partial_rotary_factor``, and
+    ``rope_scaling`` directly on the text config.
+    """
+    rope_parameters = getattr(text_config, "rope_parameters", None)
+    if not rope_parameters:
+        return
+    if hasattr(rope_parameters, "to_dict"):
+        rope_parameters = rope_parameters.to_dict()
+    flattened = _Qwen35ConfigCompat._flatten_rope({
+        "rope_parameters": dict(rope_parameters),
+        "rope_scaling": dict(getattr(text_config, "rope_scaling", None) or {}),
+    })
+    for attr in ("rope_theta", "partial_rotary_factor", "rope_scaling"):
+        value = flattened.get(attr)
+        if value is not None:
+            setattr(text_config, attr, value)
+
+
+def _normalize_qwen35_qwen3next_text_aliases(text_config) -> None:
+    """Materialize Qwen3Next-style text aliases used by the shared runtime."""
+    if getattr(text_config, "intermediate_size", None) is None:
+        moe_intermediate_size = getattr(text_config, "moe_intermediate_size",
+                                        None)
+        num_experts_per_tok = getattr(text_config, "num_experts_per_tok", None)
+        shared_expert_intermediate_size = (
+            getattr(text_config, "shared_expert_intermediate_size", 0) or 0)
+        if moe_intermediate_size is not None and num_experts_per_tok is not None:
+            text_config.intermediate_size = (
+                num_experts_per_tok * moe_intermediate_size +
+                shared_expert_intermediate_size)
+
+
+def _normalize_qwen35_quantization_config(model_config) -> None:
+    quantization_config = getattr(model_config, "quantization_config", None)
+    if not isinstance(quantization_config, dict):
+        return
+
+    modules = quantization_config.get("modules_to_not_convert")
+    if modules is None:
+        return
+
+    text_config = getattr(model_config, "text_config", None)
+    normalized_modules = _Qwen35ConfigCompat._normalize_exclude_modules(modules)
+    if text_config is not None:
+        normalized_modules = _Qwen35ConfigCompat._add_qkvz_bf16_workaround(
+            text_config.to_dict(), normalized_modules)
+    quantization_config["modules_to_not_convert"] = sorted(
+        set(normalized_modules))
+
+
+def _normalize_qwen35_moe_vl_config(model_config) -> None:
+    """Adapt HF Qwen3.5-MoE VLM config to TRT-LLM runtime conventions."""
+    if not getattr(model_config, "architectures", None):
+        model_config.architectures = ["Qwen3_5MoeForConditionalGeneration"]
+
+    text_config = getattr(model_config, "text_config", None)
+    if text_config is None:
+        raise ValueError("Qwen3.5-MoE VLM config is missing text_config")
+
+    text_config.architectures = ["Qwen3_5MoeForCausalLM"]
+    _normalize_qwen35_qwen3next_text_aliases(text_config)
+    _normalize_qwen35_mrope_config(text_config)
+
+    model_config.get_text_config = lambda decoder=False: text_config
+    _normalize_qwen35_quantization_config(model_config)
+
+
+# TODO: Add tests for disaggregated support.
+@support_multimodal_disaggregated
+@register_vision_encoder(Qwen3VisionModelBase, vlm_base_model=Qwen3VisionModel)
+@register_auto_model("Qwen3_5MoeForConditionalGeneration")
+@register_input_processor(
+    Qwen3VLInputProcessorBase,
+    model_type="qwen3_5_moe",
+    placeholder_metadata=MultimodalPlaceholderMetadata(
+        placeholder_map={
+            "image": "<|vision_start|><|image_pad|><|vision_end|>",
+            "video": "<|vision_start|><|video_pad|><|vision_end|>",
+        },
+        placeholder_placement=MultimodalPlaceholderPlacement.BEFORE_TEXT,
+        placeholders_separator="",
+        content_format=ContentFormat.STRING,
+    ),
+)
+class Qwen3_5MoeVLModel(Qwen3VLModelBase):
+    """VLM wrapper composing Qwen3 vision encoder with Qwen3.5 MoE text decoder."""
+
+    def __init__(self, model_config: ModelConfig[PretrainedConfig], *args,
+                 **kwargs):
+        kwargs["vision_model_class"] = Qwen3VisionModel
+        kwargs["disable_fuse_rope"] = kwargs.get("disable_fuse_rope", False)
+        super().__init__(model_config, *args, **kwargs)
+
+    @property
+    def multimodal_data_device_paths(self) -> List[str]:
+        return [
+            "image.pixel_values",
+            "video.pixel_values_videos",
+            "multimodal_embedding",
+        ]
+
+    def load_weights(self, weights: Dict[str, torch.Tensor],
+                     weight_mapper: BaseWeightMapper):
+        if not _is_disagg():
+            self.mm_encoder.load_weights(weights)
+
+        weight_mapper = Qwen3_5MoeHfWeightMapper()
+        weight_mapper.init_model_and_config(self.llm, self.model_config)
+        # Qwen3_5MoeHfWeightMapper._normalize_weight_names already strips the
+        # ``model.language_model.`` prefix and drops ``model.visual.*`` tensors,
+        # so no extra params_map remapping is needed here.
+        filtered_weights = {
+            k: v
+            for k, v in weights.items() if not k.startswith("model.visual.")
+        }
+        self.llm.load_weights(filtered_weights, weight_mapper)
 
 
 @register_auto_model("Qwen3_5ForCausalLM")

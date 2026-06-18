@@ -6,7 +6,58 @@ from typing import List, Optional
 import torch
 import transformers
 
+from tensorrt_llm._utils import str_dtype_to_torch
 from tensorrt_llm.logger import logger
+
+
+def _coerce_torch_dtype(dtype):
+    """Normalize dtype values from HF configs into torch dtype objects.
+
+    HF configs may store dtype fields as torch dtypes, strings, or the sentinel
+    value "auto". Returning None for "auto" lets the caller keep its normal
+    fallback path instead of treating "auto" as a concrete dtype.
+    """
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    if dtype == "auto":
+        return None
+    if isinstance(dtype, str):
+        return str_dtype_to_torch(dtype)
+    return dtype
+
+
+def resolve_hf_torch_dtype(config):
+    """Return the model's regular tensor dtype from common HF config fields.
+
+    Transformers has used both dtype and torch_dtype across versions and model
+    families. This helper checks both names and coerces whichever one is present.
+    An "auto" value in any field is treated the same as missing.
+    """
+    for attr in ("dtype", "torch_dtype"):
+        coerced = _coerce_torch_dtype(getattr(config, attr, None))
+        if coerced is not None:
+            return coerced
+    return None
+
+
+def resolve_mamba_ssm_cache_dtype(config):
+    """Return the dtype to use for hybrid Mamba/SSM cache allocations.
+
+    Qwen3.5-style configs may store this field on the top-level config or the
+    nested text_config, and may call it either mamba_ssm_cache_dtype or
+    mamba_ssm_dtype. An "auto" value in any field is treated the same as missing.
+    """
+    configs = [config]
+    text_config = getattr(config, "text_config", None)
+    if text_config is not None:
+        configs.append(text_config)
+
+    for candidate_config in configs:
+        for attr in ("mamba_ssm_cache_dtype", "mamba_ssm_dtype"):
+            coerced = _coerce_torch_dtype(getattr(candidate_config, attr, None))
+            if coerced is not None:
+                return coerced
+    return None
 
 
 def is_gemma4_hybrid(config):
@@ -249,8 +300,14 @@ def extract_mamba_kv_cache_params(
             full_attn_mask.extend([True] * num_spec_layers)
             mamba_mask.extend([False] * num_spec_layers)
 
-    mamba_ssm_cache_dtype = (quant_config.mamba_ssm_cache_dtype
-                             if quant_config is not None else None)
+    mamba_ssm_cache_dtype = None
+    if quant_config is not None:
+        mamba_ssm_cache_dtype = _coerce_torch_dtype(
+            quant_config.mamba_ssm_cache_dtype)
+    if mamba_ssm_cache_dtype is None:
+        mamba_ssm_cache_dtype = (resolve_mamba_ssm_cache_dtype(config)
+                                 or resolve_hf_torch_dtype(config)
+                                 or torch.bfloat16)
 
     return MambaKVCacheParams(
         state_size=state_size,
@@ -262,7 +319,7 @@ def extract_mamba_kv_cache_params(
         full_attention_layer_mask=full_attn_mask,
         num_mamba_layers=sum(mamba_mask),
         num_full_attention_layers=sum(full_attn_mask),
-        dtype=config.torch_dtype,
+        dtype=resolve_hf_torch_dtype(config) or torch.bfloat16,
         mamba_ssm_cache_dtype=mamba_ssm_cache_dtype,
     )
 
@@ -449,6 +506,18 @@ def load_pretrained_config(model_name_or_path: str,
         config_class = _CONFIG_REGISTRY[model_type]
         model_config = config_class.from_pretrained(model_name_or_path,
                                                     **kwargs)
+    elif (model_type == "qwen3_5_moe" and
+          (("text_config" in config_dict and "vision_config" in config_dict) or
+           (architectures
+            and architectures[0] == "Qwen3_5MoeForConditionalGeneration"))):
+        # Qwen3.5-MoE VLM: keep the HF-native composite config (text_config +
+        # vision_config) and normalize it model-side, instead of flattening to
+        # a text-only Qwen3NextConfig (which would drop the vision tower).
+        from tensorrt_llm._torch.models.modeling_qwen3_5 import \
+            _normalize_qwen35_moe_vl_config
+        model_config = transformers.Qwen3_5MoeConfig.from_pretrained(
+            model_name_or_path, **kwargs)
+        _normalize_qwen35_moe_vl_config(model_config)
     elif model_type in ("qwen3_5", "qwen3_5_text", "qwen3_5_moe",
                         "qwen3_5_moe_text") or (
                             architectures and architectures[0] in (
