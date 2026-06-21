@@ -217,19 +217,29 @@ class SpecSamplerBase(Sampler[SampleStateSpec], AsyncWorkerMixin):
                          if state.host.logits_nan_count is not None else -1)
             inf_total = (int(state.host.logits_inf_count.item())
                          if state.host.logits_inf_count is not None else -1)
+            # TRTLLM_NAN_GUARD_NONFATAL=1 downgrades this from a fatal os._exit
+            # to log-and-continue: the deterministic top-1 sampler emits PAD for
+            # the affected row(s) (degraded output for that batch) but the engine
+            # stays up — same opt-out semantics as the dense FlashInfer sampler
+            # guard in sampling_utils_flashinfer.py.
+            nonfatal = os.environ.get("TRTLLM_NAN_GUARD_NONFATAL", "0") == "1"
             msg = (
-                "FATAL: unsampleable target logits in spec-decode sampler — "
+                "unsampleable target logits in spec-decode sampler — "
                 "at least one row has no finite values. "
                 f"nan_count={nan_total} inf_count={inf_total}. "
                 "If nan_count>0 → likely real NaN propagation upstream "
                 "(KV cache, attention math, projection). "
                 "If nan_count=0 and inf_count is a multiple of vocab_size → "
                 "a row was fully masked by guided decoding (grammar allowed "
-                "no tokens). Terminating engine.")
+                "no tokens). " +
+                ("Continuing with degraded (PAD) output for this batch "
+                 "(TRTLLM_NAN_GUARD_NONFATAL=1)."
+                 if nonfatal else "Terminating engine."))
             logger.error(msg)
-            sys.stderr.write(msg + "\n")
-            sys.stderr.flush()
-            os._exit(1)
+            if not nonfatal:
+                sys.stderr.write("FATAL: " + msg + "\n")
+                sys.stderr.flush()
+                os._exit(1)
 
         new_tokens = state.host.new_tokens.tolist()
         new_tokens_lens_list = state.host.new_tokens_lens.tolist()
