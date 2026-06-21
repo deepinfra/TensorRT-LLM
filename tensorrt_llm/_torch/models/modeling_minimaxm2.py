@@ -50,10 +50,10 @@ class _EScoreCorrectionBiasHolder(nn.Module):
     the whole block_sparse_moe prefix before gate and experts.backend load (see #11119).
     """
 
-    def __init__(self, num_experts: int, dtype: torch.dtype = torch.float32):
+    def __init__(self, num_experts: int):
         super().__init__()
         self.e_score_correction_bias = nn.Parameter(
-            torch.empty((num_experts), dtype=dtype), requires_grad=False
+            torch.empty((num_experts), dtype=torch.float32), requires_grad=False
         )
 
     def load_weights(self, weights: List[Dict]):
@@ -83,12 +83,6 @@ class MiniMaxM2MoE(nn.Module):
         self.gate = Linear(
             self.hidden_dim, self.num_experts, bias=False, dtype=torch.float32, quant_config=None
         )
-        self.moe_backend = model_config.moe_backend
-        if self.moe_backend == 'TRTLLM':
-            bias_dtype = torch.bfloat16
-        else:
-            bias_dtype = torch.float32
-
         reduce_results = True
         self.experts = create_moe(
             routing_method=MiniMaxM2MoeRoutingMethod(
@@ -104,7 +98,7 @@ class MiniMaxM2MoE(nn.Module):
         )
         # Holder ensures generic loader only marks block_sparse_moe.e_score_correction_bias
         # consumed, so gate and experts.backend can still load (see #11119).
-        self.e_score_correction_bias = _EScoreCorrectionBiasHolder(self.num_experts, dtype=bias_dtype)
+        self.e_score_correction_bias = _EScoreCorrectionBiasHolder(self.num_experts)
 
     def forward(
         self,
