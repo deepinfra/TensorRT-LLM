@@ -1174,8 +1174,13 @@ class KvCacheCreator:
         # 10% buffer absorbs that drift without needing a runtime admission
         # check that re-budgets every scheduling step.
         draft_kv_cache_config = self._kv_cache_config.model_copy(update={'host_cache_size': 0})
-        if target_kv_cache_manager is not None:
-            target_blocks = target_kv_cache_manager.blocks_in_primary_pool
+        # Hybrid mamba cache managers (e.g. CppMambaHybridCacheManager) do not
+        # expose blocks_in_primary_pool; skip the draft sizing adjustment and
+        # fall back to free_gpu_memory_fraction-based sizing for them.
+        target_blocks_attr = getattr(target_kv_cache_manager,
+                                     'blocks_in_primary_pool', None)
+        if target_kv_cache_manager is not None and target_blocks_attr is not None:
+            target_blocks = target_blocks_attr
             min_draft_blocks = math.ceil(target_blocks * 1.1)
             min_draft_tokens = min_draft_blocks * self._tokens_per_block
 
