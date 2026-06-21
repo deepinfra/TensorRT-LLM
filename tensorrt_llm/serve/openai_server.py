@@ -2432,7 +2432,7 @@ class OpenAIServer(_VideoRoutesMixin):
                         if return_token_ids_on_first_chunk:
                             pp_res.prompt_token_ids = promise.prompt_token_ids
                             return_token_ids_on_first_chunk = False
-                        pp_res_json = pp_res.model_dump_json(exclude_unset=True)
+                        pp_res_json = pp_res.model_dump_json(exclude_none=True)  # exclude_unset dropped id/object/created (OpenAI-required)
                         yield f"data: {pp_res_json}\n\n"
                 yield "data: [DONE]\n\n"
                 nvtx_mark("generation ends")
@@ -3407,7 +3407,7 @@ class OpenAIServer(_VideoRoutesMixin):
                         if return_token_ids_on_first_chunk:
                             pp_res.prompt_token_ids = promise.prompt_token_ids
                             return_token_ids_on_first_chunk = False
-                        pp_res_json = pp_res.model_dump_json(exclude_unset=True)
+                        pp_res_json = pp_res.model_dump_json(exclude_none=True)  # exclude_unset dropped id/object/created (OpenAI-required)
                         yield f"data: {pp_res_json}\n\n"
             finally:
                 print(f"Completion generator finally {did_complete=}")
