@@ -19,6 +19,7 @@ referring to types like LlmRequest.
 """
 
 import abc
+import os
 import sys
 from collections.abc import Hashable
 from dataclasses import dataclass
@@ -264,6 +265,29 @@ class _StrategyImpls:
             # device-side assert below provides the same protection without
             # stalling the pipeline.
             # https://github.com/pytorch/pytorch/issues/36853
+
+            # DeepInfra: a NaN in the sampler inputs (e.g. fp8-KV precision or a
+            # multimodal edge case) makes the async assert below an UNRECOVERABLE
+            # device-side assert that aborts the whole engine (worker dies, the
+            # HTTP frontend lingers at health=000). With TRTLLM_NAN_GUARD_NONFATAL=1
+            # we instead sanitize the NaNs in place so sampling can neither abort
+            # (device assert) nor raise (FlashInfer check_nan -> "Sampling failed"
+            # terminates the event loop): replace NaN with 0 and, if that leaves a
+            # fully-zeroed row, make it a degenerate-but-valid distribution at
+            # index 0. The offending request gets a degraded token for that step,
+            # but the engine stays up. Only NaN is touched -- +/-inf is left intact
+            # so legitimate guided-decoding (-inf) masks are preserved. Opt-in
+            # because the isnan check forces a host sync per sampling call.
+            if os.environ.get("TRTLLM_NAN_GUARD_NONFATAL", "0") == "1":
+                nan_mask = torch.isnan(inputs)
+                if bool(nan_mask.any()):
+                    inputs[nan_mask] = 0.0
+                    if inputs.dim() >= 2:
+                        dead_rows = inputs.sum(dim=-1) == 0
+                        if bool(dead_rows.any()):
+                            inputs[dead_rows, 0] = 1.0
+                return False
+
             torch._assert_async(~torch.any(torch.isnan(inputs)))
             return False
 
