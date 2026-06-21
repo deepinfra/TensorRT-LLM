@@ -678,20 +678,6 @@ class TRTLLMGenFusedMoE(MoE):
         topk_group = routing_params.topk_group
         routed_scaling_factor = routing_params.routed_scaling_factor
 
-        if routing_bias is not None and routing_bias.dtype != torch.bfloat16:
-            routing_bias = routing_bias.to(torch.bfloat16)
-
-        # DeepSeekV3 and MiniMax2 require float32 router_logits for the C++ kernel;
-        # all other routing methods require bfloat16.
-        if router_logits is not None:
-            if isinstance(self.routing_method, (DeepSeekV3MoeRoutingMethod, MiniMaxM2MoeRoutingMethod)):
-                if router_logits.dtype != torch.float32:
-                    router_logits = router_logits.to(torch.float32)
-            elif router_logits.dtype != torch.bfloat16:
-                router_logits = router_logits.to(torch.bfloat16)
-
-        kernel_routing_method_type = self.routing_method.routing_method_type
-
         if token_selected_experts is not None:
             # for cases like deepep low latency where fake top_k=1 might be used
             top_k = token_selected_experts.shape[-1]
@@ -755,7 +741,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                kernel_routing_method_type,
+                self.routing_method.routing_method_type,
                 topk_weights=token_final_scales,
                 topk_ids=token_selected_experts,
                 output=moe_output,
@@ -801,7 +787,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                kernel_routing_method_type,
+                self.routing_method.routing_method_type,
                 do_finalize=do_finalize,
                 topk_weights=token_final_scales,
                 topk_ids=token_selected_experts,
@@ -849,7 +835,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                kernel_routing_method_type,
+                self.routing_method.routing_method_type,
                 do_finalize=do_finalize,
                 act_type=0,
                 topk_weights=token_final_scales,
@@ -897,7 +883,7 @@ class TRTLLMGenFusedMoE(MoE):
                 self.slot_start,
                 self.expert_size_per_partition,
                 routed_scaling_factor,
-                kernel_routing_method_type,
+                self.routing_method.routing_method_type,
                 0,  # act_type
                 token_final_scales,
                 token_selected_experts,
@@ -1105,14 +1091,6 @@ class TRTLLMGenFusedMoE(MoE):
                 sizes=None if use_dp_padding else all_rank_num_tokens)
         else:
             # No communication path: use non-post-quant-comm quantization
-            # For routing methods not supported by the C++ kernel (e.g., MiniMax2),
-            # do routing in Python and pass pre-computed topk_ids/topk_weights.
-            if isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
-                token_selected_experts, token_final_scales = self.routing_method.apply(
-                    router_logits)
-                token_selected_experts = token_selected_experts.to(torch.int32)
-                if token_final_scales is not None:
-                    token_final_scales = token_final_scales.to(torch.bfloat16)
             x, x_sf = self.quantize_input(x, post_quant_comm=False)
 
         moe_output: Optional[torch.Tensor] = None
@@ -1125,11 +1103,7 @@ class TRTLLMGenFusedMoE(MoE):
 
         # Call the extracted run_moe interface
         # Determine router_logits based on post_quant_comm
-        # For MiniMax2 (unsupported by C++ routing kernel), always use separated routing
-        if post_quant_comm or isinstance(self.routing_method, MiniMaxM2MoeRoutingMethod):
-            router_logits_arg = None
-        else:
-            router_logits_arg = router_logits
+        router_logits_arg = None if post_quant_comm else router_logits
 
         final_hidden_states = self.run_moe(
             x=x,
