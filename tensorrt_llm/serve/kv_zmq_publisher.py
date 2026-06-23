@@ -166,10 +166,19 @@ class KvZmqPublisher:
             # request -> many batches. Owned by the consumer thread, same as
             # the PUB socket, so the two are never used concurrently.
             self._replay_socket = self.ctx.socket(zmq.ROUTER)
+            # A replay streams the WHOLE ring buffer in one tight loop. ROUTER's
+            # mute action is to DROP silently (not block), so a send HWM below
+            # buffer_steps truncates large replays -- the subscriber gets a hole
+            # in the middle, every later block fails ParentBlockNotFound, and its
+            # tree collapses. Keep the HWM >= buffer_steps (queued count is capped
+            # by the ring anyway) so a full replay always fits. Must be set before
+            # bind() to take effect.
+            replay_sndhwm = max(sndhwm, buffer_steps)
+            self._replay_socket.setsockopt(zmq.SNDHWM, replay_sndhwm)
             self._replay_socket.bind(replay_endpoint)
             logger.info(
                 f"KvZmqPublisher replay enabled on {replay_endpoint} "
-                f"(buffer_steps={buffer_steps})")
+                f"(buffer_steps={buffer_steps}, sndhwm={replay_sndhwm})")
 
         # --- translation / filtering state (mirrors the reference publisher) ---
         # Block hashes for partial blocks (fewer than kv_block_size tokens). They
