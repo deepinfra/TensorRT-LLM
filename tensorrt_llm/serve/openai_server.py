@@ -316,13 +316,13 @@ class OpenAIServer(_VideoRoutesMixin):
         if kv_events_config is not None and kv_events_config.publisher == "zmq":
             from tensorrt_llm.serve.kv_zmq_publisher import KvZmqPublisher
             block_size = self.generator.args.kv_cache_config.tokens_per_block
-            # Field names mirror vLLM's KVEventsConfig: replay_endpoint=None
-            # disables gap recovery, hwm is the PUB high-water-mark, and
-            # max_queue_size bounds the in-memory event queue.
+            # Field names mirror vLLM's KVEventsConfig: enable_local_indexer
+            # turns on in-process recovery state, hwm is the PUB high-water-mark,
+            # and max_queue_size bounds the in-memory event queue.
             self.zmq = KvZmqPublisher(
                 kv_events_config.endpoint,
                 block_size,
-                replay_endpoint=kv_events_config.replay_endpoint,
+                enable_local_indexer=kv_events_config.enable_local_indexer,
                 buffer_steps=kv_events_config.buffer_steps,
                 queue_maxsize=kv_events_config.max_queue_size,
                 sndhwm=kv_events_config.hwm,
@@ -330,7 +330,7 @@ class OpenAIServer(_VideoRoutesMixin):
             logger.info(
                 f"KV-events ZMQ tee enabled on {kv_events_config.endpoint} "
                 f"(block_size={block_size}, "
-                f"replay={kv_events_config.replay_endpoint})")
+                f"local_indexer={kv_events_config.enable_local_indexer})")
         try:
             self.processor = AutoProcessor.from_pretrained(hf_tokenizer_path, trust_remote_code=trust_remote_code)
         except Exception:
@@ -780,6 +780,9 @@ class OpenAIServer(_VideoRoutesMixin):
         self.app.add_api_route("/kv_cache_events",
                                self.get_kv_cache_events,
                                methods=["GET"])
+        self.app.add_api_route("/kv_recover",
+                               self.kv_recover,
+                               methods=["GET"])
         resource_governor_queue = self.generator._executor.resource_governor_queue
         if resource_governor_queue is not None:
             from .resource_governor import ResourceGovernor
@@ -1199,6 +1202,34 @@ class OpenAIServer(_VideoRoutesMixin):
             # queue is empty, no more events
             pass
         return JSONResponse(content=events)
+
+    def kv_recover(self,
+                   start: Optional[int] = None,
+                   end: Optional[int] = None) -> Response:
+        """Serve KV-event recovery from the in-process local indexer.
+
+        Defined as a *sync* handler on purpose: ``get_recovery_json()`` blocks (a
+        Rust ``block_on``, and a full tree dump can be large), so FastAPI runs
+        this in its threadpool -- keeping the event loop, which also serves
+        inference on this app, free. An ``async def`` here would stall the loop
+        for the whole dump.
+
+        Query params (both optional, non-negative): ``start`` is the first
+        ``event_id`` (== ZMQ ``seq``) the caller is missing; omit it to request a
+        full snapshot. ``end`` is the inclusive upper bound. The body is the
+        JSON-encoded ``WorkerKvQueryResponse`` (``Events`` / ``TreeDump`` /
+        ``TooNew`` / ``InvalidRange`` / ``Error``); the caller applies the events
+        and advances its cursor to ``last_event_id``. Returns 404 when the KV
+        tee / local indexer is not enabled.
+        """
+        if self.zmq is None:
+            raise HTTPException(status_code=404,
+                                detail="KV local indexer not enabled")
+        body = self.zmq.get_recovery_json(start, end)
+        if body is None:
+            raise HTTPException(status_code=404,
+                                detail="KV local indexer not enabled")
+        return Response(content=body, media_type="application/json")
 
     async def _extract_metrics(self, res: RequestOutput, raw_request: Request):
         if not res.finished:

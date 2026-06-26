@@ -1,0 +1,27 @@
+[package]
+name = "kv-local-indexer"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 wrapper around Dynamo's LocalKvIndexer for the TRT-LLM worker"
+license = "Apache-2.0"
+
+[lib]
+name = "kv_local_indexer"
+# cdylib: build a Python extension module (.so). No rlib needed.
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+tokio-util = "0.7"
+serde_json = "1"
+
+# Dynamo's KV indexer, used UNMODIFIED. Path dep for local dev against the
+# sibling checkout; for image/CI builds switch to a pinned git dep, e.g.:
+#   dynamo-kv-router = { git = "https://github.com/ai-dynamo/dynamo.git", rev = "<commit>" }
+# default-features = false: we only need the in-process indexer + protocols,
+# never the standalone-indexer / runtime (NATS/etcd) features.
+dynamo-kv-router = { path = "../../../../dynamo/lib/kv-router", default-features = false }
+
+[profile.release]
+opt-level = 3

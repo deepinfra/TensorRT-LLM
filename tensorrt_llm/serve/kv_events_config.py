@@ -28,9 +28,15 @@ class KVEventsConfig:
     - ``publisher``: ``"zmq"`` to publish, ``"null"`` to disable. Set
       automatically from ``enable_kv_cache_events`` when left at the default.
     - ``endpoint``: PUB address. ``tcp://*:5557`` to bind (broadcast).
-    - ``replay_endpoint``: optional ROUTER address for gap recovery. ``None``
-      disables replay (vLLM default). Set it explicitly, e.g. ``tcp://*:5558``.
-    - ``buffer_steps``: number of recent batches kept for replay.
+    - ``replay_endpoint``: DEPRECATED. The old ZMQ ROUTER replay path has been
+      removed; recovery now goes through the in-process local KV indexer
+      (``enable_local_indexer``) over HTTP. Kept only so existing config JSON
+      that still sets it does not fail to parse; the value is ignored.
+    - ``enable_local_indexer``: build an in-process Dynamo ``LocalKvIndexer``
+      (radix tree + replay ring buffer + snapshot) that the standalone global
+      indexer can query to recover missed events or pull a full snapshot.
+    - ``buffer_steps``: number of recent events kept for replay (the local
+      indexer's ring-buffer capacity).
     - ``hwm``: ZeroMQ high-water-mark for the PUB socket.
     - ``max_queue_size``: max events buffered in memory before drops.
     - ``topic``: ZMQ topic prefix on every published frame.
@@ -39,7 +45,8 @@ class KVEventsConfig:
     enable_kv_cache_events: bool = False
     publisher: Optional[Literal["null", "zmq"]] = None
     endpoint: str = "tcp://*:5557"
-    replay_endpoint: Optional[str] = None
+    replay_endpoint: Optional[str] = None  # deprecated, ignored (see docstring)
+    enable_local_indexer: bool = False
     buffer_steps: int = 10000
     hwm: int = 100000
     max_queue_size: int = 100000

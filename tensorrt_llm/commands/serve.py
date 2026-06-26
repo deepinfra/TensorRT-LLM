@@ -933,12 +933,14 @@ class ChoiceWithAlias(click.Choice):
     help="JSON config for teeing KV-cache events (including token_ids) over "
     "ZMQ in vLLM wire format, mirroring vLLM's KVEventsConfig. Read-only: does "
     "not affect the SSE /kv_cache_events path. Keys: enable_kv_cache_events "
-    "(bool, master switch), endpoint (PUB, e.g. tcp://*:5557), replay_endpoint "
-    "(ROUTER for gap recovery, e.g. tcp://*:5558; null disables replay), "
-    "buffer_steps, hwm, max_queue_size, topic. Disabled unless "
+    "(bool, master switch), endpoint (PUB, e.g. tcp://*:5557), "
+    "enable_local_indexer (bool, build in-process recovery state -- radix tree "
+    "+ replay buffer + snapshot -- that consumers query to recover missed "
+    "events), buffer_steps (replay ring-buffer capacity), hwm, max_queue_size, "
+    "topic. replay_endpoint is deprecated and ignored. Disabled unless "
     "enable_kv_cache_events is true. Example: "
     '\'{"enable_kv_cache_events": true, "endpoint": "tcp://*:5557", '
-    '"replay_endpoint": "tcp://*:5558"}\'')
+    '"enable_local_indexer": true}\'')
 def serve(
         model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
         host: str, port: int, log_level: str, backend: str, max_beam_width: int,
