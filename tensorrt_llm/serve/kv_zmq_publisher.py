@@ -16,8 +16,8 @@
 ``KvZmqPublisher`` translates TensorRT-LLM's native KV-cache events into the
 vLLM ZMQ wire format and broadcasts them on a ``zmq.PUB`` socket, so that an
 external consumer (e.g. an NVIDIA Dynamo RadixTree indexer) can subscribe and
-reconstruct the cache state -- including the ``token_ids`` that the SSE
-``/kv_cache_events`` path drops.
+reconstruct the cache state -- including a precomputed per-block ``tokens_hash``
+(content hash) that the SSE ``/kv_cache_events`` path does not expose.
 
 Threading model: the engine's asyncio drain loop
 (``OpenAIServer.kv_event_processor``) only calls ``enqueue()``, a non-blocking
@@ -45,7 +45,7 @@ Dynamo indexer expects.
 import queue
 import threading
 import time
-from collections import deque
+from collections import deque, namedtuple
 from typing import Any, Optional
 
 import zmq
@@ -71,6 +71,56 @@ except ImportError:
 
     def _encode_msgpack(obj):
         return msgpack.packb(obj, use_bin_type=True)
+
+
+# XXH3-64 hashing for per-block token hashes. The router (Dynamo standalone
+# indexer) no longer hashes token_ids itself -- the engine now sends one
+# precomputed ``tokens_hash`` per block. This value MUST be byte-identical to
+# dynamo's ``compute_block_hash_for_seq`` or the indexer's queries miss every
+# block. Verified by tokens_hash_parity_test.py against the dynamo binding.
+try:
+    import xxhash
+
+    def _xxh3_64(data: bytes, seed: int = 0) -> int:
+        return xxhash.xxh3_64_intdigest(data, seed)
+except ImportError:
+
+    def _xxh3_64(data: bytes, seed: int = 0) -> int:
+        raise RuntimeError(
+            "xxhash is required to compute KV-cache tokens_hash for the ZMQ "
+            "tee; install it (pip install xxhash) in the engine image")
+
+
+# Seed for XXH3, must match dynamo_kv_router::protocols::XXH3_SEED.
+XXH3_SEED = 1337
+
+
+def _compute_block_tokens_hash(token_ids: list[int],
+                               lora_name: Optional[str] = None,
+                               mm_hashes: Optional[list[int]] = None) -> int:
+    """Local per-block token hash, matching dynamo's compute_block_hash_for_seq.
+
+    Equivalent to ``compute_block_hash_for_seq(tokens, kv_block_size, ...)[i]``
+    for a single full (non-eagle) block: XXH3-64 over the block's token ids as
+    little-endian u32s, seeded by ``XXH3_SEED`` (mixed with the LoRA name when
+    present), with sorted multimodal ``mm_hash`` values (u64 LE) appended.
+    """
+    if lora_name:
+        seed = (XXH3_SEED + _xxh3_64(lora_name.encode())) & 0xFFFFFFFFFFFFFFFF
+    else:
+        seed = XXH3_SEED
+    buf = b"".join((t & 0xFFFFFFFF).to_bytes(4, "little") for t in token_ids)
+    if mm_hashes:
+        for h in sorted(mm_hashes):
+            buf += (h & 0xFFFFFFFFFFFFFFFF).to_bytes(8, "little")
+    return _xxh3_64(buf, seed)
+
+
+# One snapshot node per published full block, keyed by signed block_hash in
+# ``kv_snapshot``. Carries just enough to re-emit a BlockStored event and to
+# topologically order the rebuild (parents before children). See
+# dynamo standalone_indexer/docs.md.
+_SnapNode = namedtuple("_SnapNode", ["tokens_hash", "parent_hash", "depth"])
 
 
 def _to_signed_i64(value: Optional[int]) -> Optional[int]:
@@ -126,6 +176,18 @@ class KvZmqPublisher:
     # vLLM's ZmqEventPublisher.END_SEQ so existing replay clients recognize it.
     END_SEQ = (-1).to_bytes(8, "big", signed=True)
 
+    # Snapshot-follows sentinel for the replay protocol: when the requested
+    # start_seq predates the ring buffer, the publisher replies with this header
+    # (payload = snapshot_version as an 8-byte big-endian int), then an
+    # AllBlocksCleared batch and the depth-ordered BlockStored rebuild. See
+    # dynamo standalone_indexer/docs.md.
+    SNAPSHOT_SEQ = (-2).to_bytes(8, "big", signed=True)
+
+    # Number of BlockStored events packed into one snapshot batch. Packing keeps
+    # the snapshot's frame count far below the replay socket's send HWM; one
+    # event per frame would truncate a large tree (the failure this prevents).
+    _SNAPSHOT_BATCH_BLOCKS = 1000
+
     def __init__(self,
                  zmq_endpoint: str,
                  kv_block_size: int,
@@ -159,6 +221,14 @@ class KvZmqPublisher:
         # needs no lock -- the single-thread invariant replaces it.
         self.replay_endpoint = replay_endpoint
         self._buffer: deque = deque(maxlen=buffer_steps)
+        # Per-worker reconstructed tree, maintained on the consumer thread only
+        # (no lock -- same single-thread invariant as _buffer). Populated only
+        # when replay is enabled; used to serve a full snapshot when a
+        # subscriber's requested start_seq has already been evicted from _buffer.
+        self.kv_snapshot: dict[int, _SnapNode] = {}
+        # Seq of the most recently published batch (== snapshot_version); -1
+        # until the first publish. Stamped in _publish_event.
+        self._last_published_seq = -1
         self._running = True
         self._replay_socket: Optional[zmq.Socket] = None
         if replay_endpoint is not None:
@@ -231,15 +301,20 @@ class KvZmqPublisher:
     # Transport: native -> vLLM wire format (copied from reference)       #
     # ------------------------------------------------------------------ #
     def publish_stored(self,
-                       token_ids: list[int],
-                       num_block_tokens: list[int],
+                       tokens_hashes: list[int],
                        block_hashes: list[int],
                        parent_hash: Optional[int] = None,
                        block_mm_infos: Optional[list] = None,
                        attention_dp_rank: int = 0,
                        lora_name: Optional[str] = None) -> None:
-        """Publish a BlockStored event in vLLM format."""
+        """Publish a BlockStored event in vLLM format.
+
+        ``tokens_hashes`` carries one precomputed local block hash per block, in
+        the same order as ``block_hashes``, replacing the old ``token_ids``
+        array -- the router no longer hashes tokens.
+        """
         block_hashes_signed = [_to_signed_i64(h) for h in block_hashes]
+        tokens_hashes_signed = [_to_signed_i64(h) for h in tokens_hashes]
         parent_hash_signed = (_to_signed_i64(parent_hash)
                               if parent_hash is not None else None)
 
@@ -247,13 +322,20 @@ class KvZmqPublisher:
             "type": "BlockStored",
             "block_hashes": block_hashes_signed,
             "parent_block_hash": parent_hash_signed,
-            "token_ids": token_ids,
+            "tokens_hashes": tokens_hashes_signed,
             "block_size": self.kv_block_size,
         }
         if lora_name is not None:
             event["lora_name"] = lora_name
         if block_mm_infos is not None:
             event["block_mm_infos"] = block_mm_infos
+
+        # Record into the snapshot before publishing so kv_snapshot and
+        # _last_published_seq (stamped in _publish_event) stay consistent.
+        if self.replay_endpoint is not None:
+            self._snapshot_record_stored(block_hashes_signed,
+                                         tokens_hashes_signed,
+                                         parent_hash_signed)
 
         self._publish_event(event, attention_dp_rank)
 
@@ -266,11 +348,41 @@ class KvZmqPublisher:
             "type": "BlockRemoved",
             "block_hashes": block_hashes_signed,
         }
+        if self.replay_endpoint is not None:
+            for bh in block_hashes_signed:
+                self.kv_snapshot.pop(bh, None)
         self._publish_event(event, attention_dp_rank)
 
     def publish_all_cleared(self) -> None:
         """Publish an AllBlocksCleared event in vLLM format."""
+        if self.replay_endpoint is not None:
+            self.kv_snapshot.clear()
         self._publish_event({"type": "AllBlocksCleared"})
+
+    def _snapshot_record_stored(self, block_hashes_signed: list,
+                                tokens_hashes_signed: list,
+                                parent_hash_signed: Optional[int]) -> None:
+        """Fold a published BlockStored into ``kv_snapshot``.
+
+        Blocks within one event chain: block[0]'s parent is the event parent,
+        block[i]'s parent is block[i-1]. ``depth`` is ``parent.depth + 1`` (0 for
+        roots, whose ``parent_hash`` is None, or for a block whose parent is not
+        yet known -- such orphans are skipped at emit time). Runs on the consumer
+        thread only, so ``kv_snapshot`` needs no lock.
+        """
+        snapshot = self.kv_snapshot
+        parent = parent_hash_signed
+        for block_hash, tokens_hash in zip(block_hashes_signed,
+                                           tokens_hashes_signed):
+            if parent is None:
+                depth = 0
+            else:
+                parent_node = snapshot.get(parent)
+                depth = parent_node.depth + 1 if parent_node is not None else 0
+            snapshot[block_hash] = _SnapNode(tokens_hash=tokens_hash,
+                                             parent_hash=parent,
+                                             depth=depth)
+            parent = block_hash
 
     def _publish_event(self, event: dict, attention_dp_rank: int = 0) -> None:
         """Serialize and broadcast a single event (non-blocking)."""
@@ -284,6 +396,9 @@ class KvZmqPublisher:
         seq = self.sequence
         sequence_bytes = seq.to_bytes(8, byteorder="big")
         self.sequence += 1
+        # Track the latest published seq; this is the snapshot_version reported
+        # to a far-behind subscriber (see _send_snapshot).
+        self._last_published_seq = seq
 
         # Buffer the batch for replay BEFORE attempting the live send, and do
         # so unconditionally -- even if the send below drops. A drop means a
@@ -338,8 +453,10 @@ class KvZmqPublisher:
         if event_type == "stored":
             self.processing_initial_created_events = False
             parent_hash = _to_signed_i64(data["parent_hash"])
-            token_ids: list[int] = []
-            num_block_tokens: list[int] = []
+            # lora_name applies to the whole sequence and feeds the hash seed,
+            # so read it before hashing each block below.
+            lora_name = data.get("lora_name")
+            tokens_hashes: list[int] = []
             block_hashes: list[int] = []
             block_mm_infos: list[Optional[dict]] = []
             kv_block_size = self.kv_block_size
@@ -364,11 +481,13 @@ class KvZmqPublisher:
                 if token_num_in_block < kv_block_size:
                     partial_block_hashes.add(block_hash)
                     break
-                num_block_tokens.append(token_num_in_block)
-                block_hashes.append(block_hash)
-                token_ids.extend(int(t["token_id"]) for t in block_tokens)
 
+                # Multimodal object hashes for this block, if any. They are both
+                # folded into the token hash (so blocks with identical tokens but
+                # different mm objects hash differently) and passed through as
+                # block_mm_infos (the indexer keeps them as mm_extra_info).
                 mm_keys = block.get("mm_keys")
+                mm_hashes = None
                 if mm_keys:
                     mm_hashes = [
                         int(mk["hash"][:16], 16) for mk in mm_keys
@@ -382,15 +501,22 @@ class KvZmqPublisher:
                             } for h in mm_hashes]
                         })
                     else:
+                        mm_hashes = None
                         block_mm_infos.append(None)
                 else:
                     block_mm_infos.append(None)
 
-            lora_name = data.get("lora_name")
+                # Hash the block's tokens here (the router no longer does it) and
+                # discard the token ids -- only the hash rides the wire.
+                token_ids_in_block = [int(t["token_id"]) for t in block_tokens]
+                tokens_hashes.append(
+                    _compute_block_tokens_hash(token_ids_in_block, lora_name,
+                                               mm_hashes))
+                block_hashes.append(block_hash)
+
             attention_dp_rank = event.get("attention_dp_rank", 0)
-            self.publish_stored(token_ids, num_block_tokens, block_hashes,
-                                parent_hash, block_mm_infos, attention_dp_rank,
-                                lora_name)
+            self.publish_stored(tokens_hashes, block_hashes, parent_hash,
+                                block_mm_infos, attention_dp_rank, lora_name)
 
         elif event_type == "removed":
             self.processing_initial_created_events = False
@@ -469,14 +595,19 @@ class KvZmqPublisher:
                 continue
 
     def _service_replay(self) -> None:
-        """Stream every buffered batch from the requested sequence onward.
+        """Answer one replay request: incremental batches or a full snapshot.
 
         Request frame (from a DEALER/REQ client, identity prepended by ROUTER):
-        ``[client_id, b"", start_seq_bytes]``. Reply: one multipart per batch
-        ``[client_id, b"", seq_bytes, payload]`` for every ``seq >= start_seq``
-        still in the buffer, then a sentinel ``[client_id, b"", END_SEQ, b""]``.
-        Runs on the consumer thread, so it reads ``_buffer`` directly -- no
-        other thread mutates it.
+        ``[client_id, b"", start_seq_bytes]``.
+
+        If ``start_seq`` is still in the ring buffer, reply incrementally: one
+        multipart per batch ``[client_id, b"", seq_bytes, payload]`` for every
+        ``seq >= start_seq``. If ``start_seq`` predates the buffer (evicted), the
+        requested data is gone, so reply with a full snapshot instead (see
+        ``_send_snapshot``) -- otherwise the subscriber would get a hole and its
+        tree would collapse. Either way, finish with a sentinel
+        ``[client_id, b"", END_SEQ, b""]``. Runs on the consumer thread, so it
+        reads ``_buffer``/``kv_snapshot`` directly -- no other thread mutates them.
         """
         assert self._replay_socket is not None
         frame = self._replay_socket.recv_multipart()
@@ -486,13 +617,94 @@ class KvZmqPublisher:
         client_id, _, start_seq_bytes = frame
         start_seq = int.from_bytes(start_seq_bytes, "big")
 
-        for seq, payload in self._buffer:
-            if seq >= start_seq:
-                self._replay_socket.send_multipart(
-                    [client_id, b"", seq.to_bytes(8, "big"), payload])
+        if not self._buffer:
+            # Nothing buffered yet: nothing to replay and no snapshot to build.
+            self._replay_socket.send_multipart(
+                [client_id, b"", self.END_SEQ, b""])
+            return
+
+        if start_seq < self._buffer[0][0]:
+            # Requested data has already been evicted from the ring buffer ->
+            # serve a full snapshot (clear + depth-ordered rebuild) instead of a
+            # hole that would collapse the subscriber's tree.
+            self._send_snapshot(client_id)
+        else:
+            for seq, payload in self._buffer:
+                if seq >= start_seq:
+                    self._replay_socket.send_multipart(
+                        [client_id, b"", seq.to_bytes(8, "big"), payload])
         # End-of-sequence marker so the client knows replay is complete.
         self._replay_socket.send_multipart(
             [client_id, b"", self.END_SEQ, b""])
+
+    def _send_snapshot(self, client_id: bytes) -> None:
+        """Stream a full snapshot of the current tree to one replay client.
+
+        Wire (see dynamo standalone_indexer/docs.md):
+          [id, b"", SNAPSHOT_SEQ, S]              header; S = snapshot_version
+          [id, b"", S, batch([AllBlocksCleared])] clear the worker first
+          [id, b"", S, batch([BlockStored, ...])] depth-ordered, packed rebuild
+          ...                                     (END_SEQ is sent by the caller)
+
+        Runs on the consumer thread, so kv_snapshot is not mutated concurrently
+        and S == _last_published_seq is consistent with its contents.
+        """
+        S = self._last_published_seq
+        s_bytes = S.to_bytes(8, "big")
+
+        # Header: tells the subscriber a snapshot follows and which watermark to
+        # adopt once it ends.
+        self._replay_socket.send_multipart(
+            [client_id, b"", self.SNAPSHOT_SEQ, s_bytes])
+
+        # Clear the worker's stale state before the rebuild. A plain vLLM batch
+        # so the existing apply path handles it (and fans out to lower tiers).
+        clear_batch = [time.time(), [{"type": "AllBlocksCleared"}], 0]
+        self._replay_socket.send_multipart(
+            [client_id, b"", s_bytes, _encode_msgpack(clear_batch)])
+
+        # Depth-ordered rebuild: a parent has strictly smaller depth than its
+        # child, so sorting by depth guarantees parents are emitted first. Skip
+        # orphans (a non-root block whose parent was evicted) -- emitting one
+        # would be rejected (ParentBlockNotFound) and strand its subtree; they
+        # are re-learned from the live stream.
+        present: set = set()
+        skipped = 0
+        emitted = 0
+        batch_events: list = []
+
+        def _flush() -> None:
+            if not batch_events:
+                return
+            batch = [time.time(), list(batch_events), 0]
+            self._replay_socket.send_multipart(
+                [client_id, b"", s_bytes, _encode_msgpack(batch)])
+            batch_events.clear()
+
+        for block_hash, node in sorted(self.kv_snapshot.items(),
+                                       key=lambda item: item[1].depth):
+            if node.parent_hash is not None and node.parent_hash not in present:
+                skipped += 1
+                continue
+            present.add(block_hash)
+            batch_events.append({
+                "type": "BlockStored",
+                "block_hashes": [block_hash],
+                "parent_block_hash": node.parent_hash,
+                "tokens_hashes": [node.tokens_hash],
+                "block_size": self.kv_block_size,
+            })
+            emitted += 1
+            if len(batch_events) >= self._SNAPSHOT_BATCH_BLOCKS:
+                _flush()
+        _flush()
+
+        if skipped:
+            logger.warning(
+                f"KvZmqPublisher snapshot skipped {skipped} orphan block(s) "
+                f"(parent evicted) while serving version {S}")
+        logger.info(
+            f"KvZmqPublisher served snapshot version={S} ({emitted} blocks)")
 
     def shutdown(self) -> None:
         """Stop the consumer thread, close sockets, and terminate the context."""
