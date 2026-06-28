@@ -203,6 +203,10 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
     num_total_compressed_tokens: Dict[int, int] = {}
     # The max number of context compressed tokens for each compress ratio
     max_ctx_compressed_tokens: Dict[int, int] = {}
+    # Total context compressed tokens per ratio, pre-extracted host-side in
+    # prepare() and reused by on_update_kv_lens() (like num_total_compressed_tokens)
+    # so the device path needs no GPU->host sync (which deadlocks overlap).
+    num_ctx_compressed_tokens: Dict[int, int] = {}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -662,12 +666,17 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
         kv_lens_slice = kv_lens[:num_requests]
         cached_slice = cached_token_lens[:num_requests]
 
+        # Pre-extract per-ratio ctx compressed-token totals as Python ints from
+        # the host-side kv_lens, stored on self so the device path reuses them
+        # instead of reading cu_new_comp off the GPU — that GPU->host sync
+        # deadlocks the overlap scheduler.
         if num_contexts > 0:
             # Prefill path: need per-request tensor ops for ctx scalar metadata.
             for compress_ratio in self.compress_ratio_set:
                 new_comp_kv_lens = kv_lens_slice // compress_ratio - cached_slice // compress_ratio
                 cu_new = new_comp_kv_lens.cumsum(0)
                 num_ctx_compressed_tokens = cu_new[num_contexts - 1].item()
+                self.num_ctx_compressed_tokens[compress_ratio] = num_ctx_compressed_tokens
                 num_gen_compressed_tokens = num_generations * (
                     (num_gen_tokens_per_seq + compress_ratio - 1) // compress_ratio
                 )
@@ -691,7 +700,9 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
             self.cached_token_lens_cuda[:num_requests] + self._seq_lens_cuda[:num_requests]
         )
         cached_tokens_cuda = self.cached_token_lens_cuda[:num_requests]
-        self.prepare_compressed_kv_metadata(kv_lens_cuda, cached_tokens_cuda)
+        self.prepare_compressed_kv_metadata(
+            kv_lens_cuda, cached_tokens_cuda, self.num_ctx_compressed_tokens
+        )
 
         self._compute_compressed_mask(
             self.new_comp_kv_lens_cuda,
@@ -706,6 +717,7 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
         self,
         kv_lens: torch.Tensor,
         cached_tokens: torch.Tensor,
+        ctx_comp_tokens: Optional[Dict[int, int]] = None,
     ):
         """Compute per-ratio compressed KV lens and position IDs on device.
 
@@ -714,6 +726,11 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
         Args:
             kv_lens: Total KV lengths per request (device tensor, [batch_size]).
             cached_tokens: Cached token counts per request (device tensor, [batch_size]).
+            ctx_comp_tokens: Per-ratio Python-int totals of context compressed
+                tokens, pre-extracted host-side by the caller. When provided,
+                the ctx position-id and gen-offset paths avoid a GPU->host sync
+                (which deadlocks the overlap scheduler). None falls back to a
+                device read (e.g. on_update_kv_lens, decode-only).
         """
         batch_size = kv_lens.shape[0]
         num_contexts = self.num_contexts
@@ -737,16 +754,27 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
                 self.compressed_position_ids_cuda,
                 num_contexts,
                 self._compress_ratios_sorted,
+                ctx_comp_tokens,
             )
 
         if self.num_gen_tokens_per_seq > 0 and num_generations > 0:
-            # Extract output_offset as Python int per ratio to avoid
-            # tensor-scalar slice inside compiled function.
+            # Gen output_offset (where gen tokens start in the compressed buffer)
+            # equals the total ctx compressed tokens. Reuse the host-side
+            # ctx_comp_tokens when available so this avoids a tensor-scalar
+            # .item() (GPU->host sync) — that sync deadlocks the overlap
+            # scheduler. Fall back to a device read only when not pre-extracted.
             # For decode-only batches (num_contexts == 0), offset is 0.
-            gen_output_offsets = {
-                r: self.cu_new_comp_kv_cuda[r][num_contexts].item() if num_contexts > 0 else 0
-                for r in self._compress_ratios_sorted
-            }
+            if num_contexts == 0:
+                gen_output_offsets = {r: 0 for r in self._compress_ratios_sorted}
+            elif ctx_comp_tokens is not None:
+                gen_output_offsets = {
+                    r: ctx_comp_tokens[r] for r in self._compress_ratios_sorted
+                }
+            else:
+                gen_output_offsets = {
+                    r: self.cu_new_comp_kv_cuda[r][num_contexts].item()
+                    for r in self._compress_ratios_sorted
+                }
             self._compute_gen_compressed_position_ids(
                 self.past_kv_lens_cuda,
                 self.compressed_position_ids_cuda,
@@ -772,7 +800,11 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
             num_gen_tokens // self.num_generations if self.num_generations > 0 else 0
         )
 
-        self.prepare_compressed_kv_metadata(kv_lens, cached_tokens)
+        # Reuse the host-side ctx totals from prepare() (stable batch-wide, like
+        # num_total_compressed_tokens) so this path also avoids the GPU->host sync.
+        self.prepare_compressed_kv_metadata(
+            kv_lens, cached_tokens, self.num_ctx_compressed_tokens
+        )
 
         self._compute_compressed_mask(
             self.new_comp_kv_lens_cuda,
@@ -918,14 +950,26 @@ class DeepseekV4TrtllmAttentionMetadata(DSAtrtllmAttentionMetadata):
         compressed_position_ids_bufs: Dict[int, torch.Tensor],
         num_contexts: int,
         compress_ratios: list,
+        ctx_total_tokens: Optional[Dict[int, int]] = None,
     ):
-        """Context-only compressed position IDs (eager, data-dependent shapes)."""
+        """Context-only compressed position IDs.
+
+        ctx_total_tokens: per-ratio Python-int totals of context compressed
+        tokens, pre-extracted host-side by the caller. When provided, the total
+        is a Python int so torch.arange / slicing need no GPU->host sync — the
+        overlap scheduler deadlocks if prepare syncs. Falls back to a device
+        read (cu_new_comp[num_contexts], data-dependent shape) when not given.
+        """
         device = past_kv_lens_bufs[compress_ratios[0]].device
         for compress_ratio in compress_ratios:
             past_kv = past_kv_lens_bufs[compress_ratio]
             cu_new_comp = cu_new_comp_kv_bufs[compress_ratio]
 
-            total_ctx_comp = cu_new_comp[num_contexts]
+            total_ctx_comp = (
+                ctx_total_tokens[compress_ratio]
+                if ctx_total_tokens is not None
+                else cu_new_comp[num_contexts]
+            )
             ctx_idx = torch.arange(total_ctx_comp, dtype=torch.int32, device=device)
             ctx_cu = cu_new_comp[: num_contexts + 1].to(torch.int32)
             ctx_req = torch.searchsorted(ctx_cu[1:], ctx_idx, right=True)
