@@ -4316,6 +4316,7 @@ class PyExecutor:
             req for req in self.active_requests
             if req.py_disaggregated_params and req.py_disaggregated_params.
             schedule_style != DisaggScheduleStyle.GENERATION_FIRST
+            and not getattr(req.py_disaggregated_params, "kv_transfer_only", False)
         ]
         need_check_one = bool(non_gen_first_reqs) and all(
             req.is_disagg_generation_transmission_in_progress
@@ -4523,6 +4524,12 @@ class PyExecutor:
 
                 self._maybe_prepend_logprobs_and_logits(req, beam_width)
 
+                # kv_transfer_only: transfer done + first token adopted; finish now
+                # (no generation forward pass), KV is committed for reuse.
+                if (req.py_disaggregated_params is not None and getattr(
+                        req.py_disaggregated_params, "kv_transfer_only", None)):
+                    req.finish_by(FinishReason.LENGTH, 0)
+
     def _update_sampler_state_for_disagg_gen_request(self, req, beam_width,
                                                      first_gen_tokens) -> bool:
         """Update beam sampler state with context-side first-token data."""
@@ -4672,6 +4679,7 @@ class PyExecutor:
             req for req in self.active_requests
             if req.py_disaggregated_params and req.py_disaggregated_params.
             schedule_style != DisaggScheduleStyle.GENERATION_FIRST
+            and not getattr(req.py_disaggregated_params, "kv_transfer_only", False)
         ]
         block_transfer = bool(non_gen_first_active) and all(
             req.is_disagg_generation_transmission_in_progress
@@ -5259,6 +5267,16 @@ class PyExecutor:
     def _handle_first_token_response(self, scheduled_batch):
         new_responses = []
         for req in scheduled_batch.generation_requests:
+            # A request already finished before its first-token response (only
+            # kv_transfer_only, which finish_by()s at transmission-complete) gets
+            # its single is_final result from the terminal _handle_responses path.
+            # Emitting a first-token response here too would be a SECOND final for
+            # the same client_id -> the proxy pops on the first and KeyErrors on
+            # this one (fatal engine shutdown). Mirror of the is_finished skip
+            # already in _emit_first_token_responses. Stock requests are never
+            # finished at this point, so this is a no-op for them.
+            if req.is_finished:
+                continue
             if req.py_decoding_iter == 1:
                 logger.debug(
                     f'Send first token response for request {req.py_request_id}'
