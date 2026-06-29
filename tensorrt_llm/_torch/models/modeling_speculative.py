@@ -1978,7 +1978,8 @@ class SpecDecOneEngineForCausalLM(DecoderModelForCausalLM[TModel, TConfig],
                 self.spec_worker.set_draft_model(self.draft_model)
                 self.epilogue.append(self.spec_worker)
 
-            if self.draft_config is not None and model_config.spec_config.eagle3_model_arch == "llama3":
+            if self.draft_config is not None and spec_config.spec_dec_mode.is_eagle3_one_model(
+            ) and model_config.spec_config.eagle3_model_arch == "llama3":
                 for key, value in self.draft_config.extra_attrs.items():
                     if key in ('attn_layers', 'mla_layers') and key in model_config.extra_attrs:
                         model_config.extra_attrs[key].update(value)
