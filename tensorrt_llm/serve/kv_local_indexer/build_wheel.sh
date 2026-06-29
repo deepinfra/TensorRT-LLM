@@ -9,8 +9,9 @@
 #   build_wheel.sh <pytrtllm-builder-tag>
 #
 # Requirements:
-#   - The dynamo checkout must sit next to the TensorRT-LLM checkout (the crate
-#     path-deps ../../../../dynamo/lib/kv-router). Both must be under one parent.
+#   - NO local dynamo checkout needed: Cargo.toml pins dynamo-kv-router to a
+#     public upstream git commit, so cargo fetches it during the build. (This is
+#     why the container needs network access for the git fetch + crates.io.)
 #   - The base-image container needs the Rust 1.93.1 toolchain + libclang +
 #     maturin. This script installs them if missing; in an air-gapped setup,
 #     pre-bake them into the base image or build on a host that already has the
@@ -22,25 +23,17 @@ BASE_IMAGE="localhost:30500/pytrtllm-builder:${BASE_TAG}"
 
 CRATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRTLLM_ROOT="$(cd "${CRATE_DIR}/../../.." && pwd)"   # .../TensorRT-LLM
-PARENT="$(cd "${TRTLLM_ROOT}/.." && pwd)"            # must also contain dynamo/
 OUT_DIR="${TRTLLM_ROOT}/wheels"
 mkdir -p "${OUT_DIR}"
 
-if [[ ! -d "${PARENT}/dynamo/lib/kv-router" ]]; then
-  echo "ERROR: ${PARENT}/dynamo/lib/kv-router not found." >&2
-  echo "       The crate path-deps it; check out dynamo next to TensorRT-LLM." >&2
-  exit 1
-fi
-
 echo "Building kv_local_indexer wheel in ${BASE_IMAGE} ..."
-# Mount only the two repos to fresh /work/* paths (not the whole home dir to
+# Mount only the TRT-LLM repo to a fresh /work path (not the whole home dir to
 # /src), and cd inside the command rather than using -w: bind-mounting over an
 # existing dir + auto-created workdir trips runc on some docker versions
-# ("mkdir ...: file exists"). The relative path-dep resolves because both repos
-# land as siblings under /work.
+# ("mkdir ...: file exists"). dynamo is NOT mounted -- cargo fetches the pinned
+# git rev from Cargo.toml/Cargo.lock over the network.
 docker run --rm \
   -v "${TRTLLM_ROOT}":/work/TensorRT-LLM \
-  -v "${PARENT}/dynamo":/work/dynamo \
   "${BASE_IMAGE}" bash -lc '
     set -euo pipefail
     cd /work/TensorRT-LLM/tensorrt_llm/serve/kv_local_indexer

@@ -9,6 +9,9 @@ __pycache__/
 *.npy
 *.so
 *.whl
+# but DO commit the prebuilt kv_local_indexer wheel: it lets images build without
+# a Rust toolchain / dynamo fetch. Rebuild it when src/lib.rs or the dynamo rev changes.
+!wheels/*.whl
 .VSCodeCounter
 cpp/build*
 cpp/Release

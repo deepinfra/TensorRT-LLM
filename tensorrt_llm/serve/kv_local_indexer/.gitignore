@@ -1,3 +1,4 @@
 /target
 *.so
-Cargo.lock
+# Cargo.lock IS committed: with a pinned git dep it makes the build fully
+# reproducible (every transitive dep version is locked).
