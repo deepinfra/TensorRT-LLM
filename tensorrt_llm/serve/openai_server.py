@@ -122,6 +122,11 @@ prom_metrics = defaultdict(float, {
     "num_requests_waiting": 0,
     "prompt_tokens_total": 0,
     "generation_tokens_total": 0,
+    # Seeded so /metrics always exposes them, even before the first iteration
+    # writes /dev/shm (otherwise a progress check scraping at startup sees no
+    # iteration_tokens_total_sum and reports the engine as making no progress).
+    "iteration_tokens_total_sum": 0,
+    "iteration_tokens_total_count": 0,
 })
 
 from .._utils import nvtx_mark, set_prometheus_multiproc_dir
@@ -1330,8 +1335,12 @@ class OpenAIServer(_VideoRoutesMixin):
         bufs = None
         try:
             if prom_metrics_file is None:
+                # No O_TRUNC: this fd only reads. The executor (py_executor)
+                # rewrites the full snapshot via pwrite(offset=0) each iteration;
+                # truncating here on the first scrape would drop those counters
+                # until the next iteration (and forever if the engine is idle).
                 prom_metrics_file = os.open(PROM_METRICS_FILENAME,
-                                            os.O_RDWR|os.O_CREAT|os.O_TRUNC)
+                                            os.O_RDONLY|os.O_CREAT)
             bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
             if len(bufs) >= 2:
                 keybuf, valbuf = bufs
@@ -1361,10 +1370,11 @@ class OpenAIServer(_VideoRoutesMixin):
         for metric_key, metric_val in prom_metrics.items():
             separator = ',' if '{' in metric_key else '{'
             resp += f'vllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
-        await self.get_iteration_stats()
-        if "kvCacheStats" in self.last_iteration_stat:
-            resp += self.format_kv_cache_stats(self.last_iteration_stat["kvCacheStats"])
-
+        # Don't drain iteration stats here: in RPC-orchestrator mode that call
+        # blocks on a wait-for-stat RPC (seconds when the engine is idle) and
+        # times out /metrics scrapes; the vllm:* counters above are already
+        # complete (sourced from the shared-memory snapshot), and the background
+        # _iteration_stats_collector_loop still feeds Prometheus.
         return Response(status_code=200, content=resp)
 
     def format_kv_cache_stats(self, kv_cache_stats) -> str:
