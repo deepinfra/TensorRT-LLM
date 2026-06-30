@@ -9,8 +9,6 @@ __pycache__/
 *.npy
 *.so
 *.whl
-# The kv_local_indexer wheel is NOT committed: build_python_changes.sh fetches it
-# from the deepinfra/kv-local-indexer GitHub release into wheels/ at build time.
 .VSCodeCounter
 cpp/build*
 cpp/Release
