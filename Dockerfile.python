@@ -5,12 +5,11 @@ COPY python.patch /app/tensorrt_llm/python.patch
 RUN patch -p1 -i/app/tensorrt_llm/python.patch -d/usr/local/lib/python3.12/dist-packages
 #RUN pip install git+https://github.com/Dao-AILab/fast-hadamard-transform.git
 
-# Compiled Rust extension for the in-process KV local indexer. The python.patch
-# above only carries the .py changes, NOT this native module, so install it
-# separately. Build it first with
-#   tensorrt_llm/serve/kv_local_indexer/build_wheel.sh <base-tag>
-# which drops a cp312 wheel into ./wheels (kept empty otherwise). Tolerant of an
-# absent wheel so images that don't need recovery still build.
+# Prebuilt KV local indexer extension (no Rust toolchain here). The .py changes
+# ride in via python.patch above; this native module is a separate wheel that
+# build_python_changes.sh fetches from the deepinfra/kv-local-indexer GitHub
+# release into ./wheels before this build. Tolerant of an absent wheel so images
+# that don't need recovery still build.
 COPY wheels/ /tmp/kv_local_indexer_wheels/
 RUN if ls /tmp/kv_local_indexer_wheels/*.whl >/dev/null 2>&1; then \
         pip install --no-deps --no-index \

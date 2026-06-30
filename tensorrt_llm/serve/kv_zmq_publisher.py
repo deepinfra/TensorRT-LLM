@@ -164,7 +164,9 @@ class KvZmqPublisher:
         self._indexer = None
         if enable_local_indexer:
             # Imported lazily so the tee works without the compiled wrapper
-            # unless recovery is actually enabled.
+            # unless recovery is actually enabled. The wrapper ships as a prebuilt
+            # wheel from github.com/deepinfra/kv-local-indexer (no Rust in this repo);
+            # the engine image installs it via build_python_changes.sh + Dockerfile.python.
             from kv_local_indexer import LocalIndexer
             self._indexer = LocalIndexer(worker_id, kv_block_size, buffer_steps)
             logger.info(
