@@ -77,6 +77,94 @@ BlocksPerWindow = Dict[int, Tuple[
     int]]  # window_size -> (blocks_in_primary_pool, blocks_in_secondary_pool)
 
 
+# ---------------------------------------------------------------------------
+# Non-fatal KV-cache block-pool exhaustion guard
+# ---------------------------------------------------------------------------
+# Under MAX_UTILIZATION the capacity scheduler deliberately over-subscribes the
+# KV-cache block pool, relying on eviction/pause to recover.  When the pool is
+# truly saturated the C++ block manager raises a fatal assertion from inside
+# allocation (WindowBlockManager::allocateBlock / LRUEvictionPolicy::getFreeBlock)
+# which propagates out of `prepare_resources`, escapes the PyExecutor event loop
+# and kills the worker thread on every rank: the engine stops stepping but the
+# process stays up, so health/metrics go silent until the pod is killed.
+#
+# By default we instead reject the request(s) that could not be allocated and
+# keep stepping -- the same log-and-continue philosophy as
+# TRTLLM_NAN_GUARD_NONFATAL.  This preserves MAX_UTILIZATION's high concurrency
+# for the common (short-request) traffic while degrading the rare
+# over-subscription event from a pod-wide outage to a single graceful rejection.
+# Set TRTLLM_KV_EXHAUSTION_NONFATAL=0 to restore the previous fatal behavior.
+_KV_CACHE_EXHAUSTION_SIGNATURES = (
+    "No free blocks left",  # WindowBlockManager::allocateBlock (kvCacheManager.cpp)
+    "No free block found",  # LRUEvictionPolicy::getFreeBlock (evictionPolicy.cpp)
+    "Can't allocate new blocks",  # WindowBlockManager::allocateBlock / addToken
+)
+
+
+def is_kv_cache_exhaustion_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is a KV-cache block-pool exhaustion raised by the C++
+    block manager and surfaced through nanobind as a generic exception.
+
+    Matched by message signature because the C++ assertions (TLLM_THROW /
+    TLLM_CHECK_WITH_INFO) do not map to a dedicated Python exception type.
+    Unrelated failures (CUDA OOM, request validation) must NOT match, so they
+    keep their existing fatal behavior.
+    """
+    msg = str(exc)
+    return any(sig in msg for sig in _KV_CACHE_EXHAUSTION_SIGNATURES)
+
+
+def kv_exhaustion_nonfatal_enabled() -> bool:
+    """True unless TRTLLM_KV_EXHAUSTION_NONFATAL=0 opts out of non-fatal
+    handling of KV-cache block-pool exhaustion (default on -> reject and keep
+    stepping).  Must be set uniformly across ranks: the executor drain path is
+    rank-symmetric under attention DP."""
+    return os.environ.get("TRTLLM_KV_EXHAUSTION_NONFATAL", "1") != "0"
+
+
+def _record_kv_exhausted_requests(scheduled_batch: ScheduledRequests,
+                                  requests: List[LlmRequest],
+                                  exc: BaseException) -> None:
+    """Remove ``requests`` (which could not be allocated because the block pool
+    is saturated) from ``scheduled_batch`` and queue them for graceful rejection
+    by the executor.
+
+    Blocks are intentionally NOT freed here: with overlap scheduling the
+    offending request may still be referenced by the previous batch's in-flight
+    forward, so the executor frees + fails them only once no kernel can
+    reference their blocks (see PyExecutor._drain_kv_rejected_requests).  The
+    failing allocation threw on a pre-allocation capacity check, so no partial
+    block was left behind and the manager stays consistent for the rest of the
+    step.
+    """
+    if not requests:
+        return
+    reject_ids = {req.py_request_id for req in requests}
+    scheduled_batch.context_requests_chunking = [
+        r for r in scheduled_batch.context_requests_chunking
+        if r.py_request_id not in reject_ids
+    ]
+    scheduled_batch.context_requests_last_chunk = [
+        r for r in scheduled_batch.context_requests_last_chunk
+        if r.py_request_id not in reject_ids
+    ]
+    scheduled_batch.generation_requests = [
+        r for r in scheduled_batch.generation_requests
+        if r.py_request_id not in reject_ids
+    ]
+    already = {
+        req.py_request_id
+        for req in scheduled_batch.kv_cache_rejected_requests
+    }
+    scheduled_batch.kv_cache_rejected_requests.extend(
+        req for req in requests if req.py_request_id not in already)
+    logger.warning(
+        f"KV cache block pool exhausted ({str(exc).strip()}); rejecting "
+        f"{len(requests)} request(s) {[req.py_request_id for req in requests]} "
+        f"to keep the engine running "
+        f"(set TRTLLM_KV_EXHAUSTION_NONFATAL=0 to make this fatal).")
+
+
 @dataclass
 class PoolConfiguration:
     """Configuration of a single KV pool.
@@ -746,7 +834,18 @@ class KVCacheManager(BaseResourceManager):
             batch_request_infos, batch_llm_requests = self._collect_context_sequences(
                 scheduled_batch, is_cross=False, is_star_cp=is_star_cp)
 
+            # Reject the request(s) that hit a saturated block pool instead of
+            # letting the C++ allocation assert kill the executor thread (see
+            # is_kv_cache_exhaustion_error); TRTLLM_KV_EXHAUSTION_NONFATAL=0
+            # disables.  Pipeline parallelism keeps the fatal behavior: its
+            # executor loop does not collect/drain rejected requests (deferred
+            # free is unsafe with pipeline-depth in-flight micro-batches), so
+            # recording them there would strand requests forever.
+            nonfatal = (kv_exhaustion_nonfatal_enabled()
+                        and self.mapping.pp_size == 1)
+
             if batch_request_infos:
+<<<<<<< HEAD
                 self.impl.add_sequence_batch(batch_request_infos,
                                              batch_llm_requests)
                 for req in batch_llm_requests:
@@ -754,13 +853,35 @@ class KVCacheManager(BaseResourceManager):
                         self.impl.add_token(req.py_request_id)
                     for _ in range(get_draft_token_length(req)):
                         self.impl.add_token(req.py_request_id)
+=======
+                try:
+                    self.impl.add_sequence_batch(batch_request_infos,
+                                                 batch_llm_requests)
+                    for req in batch_ctx_requests:
+                        for _ in range(self.num_extra_kv_tokens):
+                            self.impl.add_token(req.py_request_id)
+                        for _ in range(get_draft_token_length(req)):
+                            self.impl.add_token(req.py_request_id)
+>>>>>>> bea76fe0e ([None][fix] PyExecutor: non-fatal KV-cache block-pool exhaustion guard (default on))
 
-                    if self.kv_connector_manager is not None:
-                        block_ids = self.get_cache_indices(req)
-                        self.kv_connector_manager.update_state_after_alloc(
-                            req, block_ids)
+                        if self.kv_connector_manager is not None:
+                            block_ids = self.get_cache_indices(req)
+                            self.kv_connector_manager.update_state_after_alloc(
+                                req, block_ids)
+                except Exception as e:
+                    if not (nonfatal and is_kv_cache_exhaustion_error(e)):
+                        raise
+                    # Onboarding this step's new context requests overflowed the
+                    # pool.  Onboarding only touches first-chunk context requests
+                    # (no in-flight forward references them yet), so reject the
+                    # whole new-admission batch and let the running generation
+                    # requests below proceed.
+                    _record_kv_exhausted_requests(scheduled_batch,
+                                                   list(batch_ctx_requests), e)
 
-            for req in scheduled_batch.generation_requests:
+            # Iterate a snapshot: _record_kv_exhausted_requests mutates
+            # scheduled_batch.generation_requests on rejection.
+            for req in list(scheduled_batch.generation_requests):
                 if self.mapping.has_cp_helix():
                     # Distribute the decode blocks across CP ranks in a round-robin manner.
                     decode_block_id = (req.py_decoding_iter -
@@ -772,10 +893,20 @@ class KVCacheManager(BaseResourceManager):
                         req.py_helix_is_inactive_rank = True
                         # Skip allocating KV cache at decode for inactive helix ranks.
                         continue
-                draft_len = get_draft_token_length(req)
-                self.impl.add_token(req.py_request_id)
-                for _ in range(max(draft_len, self._kv_reserve_draft_tokens)):
+                try:
+                    draft_len = get_draft_token_length(req)
                     self.impl.add_token(req.py_request_id)
+                    for _ in range(max(draft_len,
+                                       self._kv_reserve_draft_tokens)):
+                        self.impl.add_token(req.py_request_id)
+                except Exception as e:
+                    if not (nonfatal and is_kv_cache_exhaustion_error(e)):
+                        raise
+                    # A running request cannot grow into the saturated pool.
+                    # Reject just this one; the executor frees it once no
+                    # in-flight forward references its blocks.
+                    _record_kv_exhausted_requests(scheduled_batch, [req], e)
+                    continue
 
             # prefill and generation kernels wait for scheduled offload/onboard/partial copy work before launching
             self.impl.refresh_blocks()
