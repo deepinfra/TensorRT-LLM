@@ -213,6 +213,10 @@ class ScheduledRequests:
     """Maps a request id to the prompt-ordered indices of its multimodal items
     selected for encoder execution this iteration (only items whose encoder
     outputs are still missing). ``None`` when no items were scheduled."""
+    kv_cache_rejected_requests: RequestList
+    """Requests dropped this step because the KV-cache block pool was exhausted
+    (not populated when disabled via TRTLLM_KV_EXHAUSTION_NONFATAL=0).  Drained
+    and failed by the executor; see PyExecutor._drain_kv_rejected_requests."""
 
     def __init__(self):
         self.encoder_requests: RequestList = []
@@ -223,6 +227,7 @@ class ScheduledRequests:
         self.recompute_paused_requests: RequestList = []
         self.added_inflight_req_ids: list[int] = []
         self.scheduled_mm_encoder_items: dict[int, list[int]] | None = None
+        self.kv_cache_rejected_requests: RequestList = []
 
     @property
     def is_generation_only(self) -> bool:

@@ -93,7 +93,8 @@ from .request_utils import (RequestBroadcaster, attach_py_objects_to_requests,
                             derive_attention_dp_per_rank_request_cap,
                             get_from_waiting_queue, merge_requests)
 from .resource_manager import (NoFreeSlotsError, ResourceManager,
-                               ResourceManagerType, request_context)
+                               ResourceManagerType,
+                               kv_exhaustion_nonfatal_enabled, request_context)
 from .sampler import (AsyncWorkerMixin, Sampler, SamplerEvent, SampleState,
                       SampleStateTensors, TRTLLMSampler)
 from .scheduler import (RequestScheduler, ScheduledRequests,
@@ -600,6 +601,10 @@ class PyExecutor:
         self._warn_if_kv_block_budget_unchecked()
 
         self.max_input_len = max_input_len
+        # Requests dropped by the KV-cache exhaustion guard (on by default,
+        # TRTLLM_KV_EXHAUSTION_NONFATAL=0 disables), failed one iteration later
+        # so no in-flight overlap forward still references their blocks.
+        self._pending_kv_rejected: List[LlmRequest] = []
         # _executor_loop private data
         self.max_num_active_requests = model_engine.get_max_num_sequences()
         # nvbug-6133201: under attention DP, tighten the per-rank request
@@ -4226,6 +4231,10 @@ class PyExecutor:
 
                 self._handle_disagg_cache_errors_synced()
 
+                # Fail any requests the KV-cache exhaustion guard dropped last
+                # iteration (now safe: their in-flight forward has been
+                # consumed). Before scheduling so they are not re-picked.
+                self._drain_kv_rejected_requests()
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
 
                 if scheduled_batch is None:
@@ -4289,6 +4298,7 @@ class PyExecutor:
                     self._handle_dynamic_draft_len(scheduled_batch)
 
                     self.resource_manager.prepare_resources(scheduled_batch)
+                    self._collect_kv_rejected_requests(scheduled_batch)
 
                 if self.kv_connector_manager:
                     self.kv_connector_manager.handle_metadata()
@@ -5057,6 +5067,11 @@ class PyExecutor:
 
                 self._handle_disagg_cache_errors_synced()
 
+                # Fail any requests the KV-cache exhaustion guard dropped last
+                # iteration (now safe: their in-flight forward has been
+                # consumed). Before scheduling so they are not re-picked.
+                self._drain_kv_rejected_requests()
+
                 # Need to wait for the copy of previous iteration before
                 # modifying any host memory copied to GPU. Scheduler V2
                 # modifies the host page table, so wait before scheduling.
@@ -5122,6 +5137,7 @@ class PyExecutor:
                     self._handle_dynamic_draft_len(scheduled_batch)
 
                     self.resource_manager.prepare_resources(scheduled_batch)
+                    self._collect_kv_rejected_requests(scheduled_batch)
 
                 if self.kv_connector_manager:
                     self.kv_connector_manager.handle_metadata()
@@ -7933,6 +7949,41 @@ class PyExecutor:
                 request.py_per_pos_drafted[pos] += 1
             for pos in range(min(py_num_accepted, MAX_SPEC_DECODE_POSITIONS)):
                 request.py_per_pos_accepted[pos] += 1
+
+    def _collect_kv_rejected_requests(
+            self, scheduled_batch: ScheduledRequests) -> None:
+        """Move requests dropped by the KV-cache exhaustion guard out of the
+        just-prepared batch into the pending queue.  They are failed at the top
+        of the next iteration (see _drain_kv_rejected_requests) rather than now,
+        so any in-flight overlap forward that referenced their blocks has been
+        consumed before the blocks are freed."""
+        rejected = scheduled_batch.kv_cache_rejected_requests
+        if rejected:
+            self._pending_kv_rejected.extend(rejected)
+            scheduled_batch.kv_cache_rejected_requests = []
+
+    def _drain_kv_rejected_requests(self) -> None:
+        """Fail requests dropped by the KV-cache exhaustion guard, reusing the
+        request-scoped error path (charge_budget=False) so a saturated block
+        pool degrades to a graceful per-request rejection instead of the C++
+        allocation assert killing the executor thread.
+
+        Only skipped when the guard is disabled (TRTLLM_KV_EXHAUSTION_NONFATAL=0)
+        -- a process-wide, rank-symmetric switch.  When enabled (the default) it
+        is entered unconditionally each iteration, even with nothing to reject:
+        under attention DP the response gather inside _handle_errors must be
+        entered by every rank in lockstep (an empty `requests` list is a paired
+        no-op).
+        """
+        if not kv_exhaustion_nonfatal_enabled():
+            return
+        rejected = self._pending_kv_rejected
+        self._pending_kv_rejected = []
+        self._handle_errors(
+            "KV cache block pool exhausted under load; request rejected to keep "
+            "the engine running.",
+            requests=rejected,
+            charge_budget=False)
 
     def _handle_errors(self,
                        error_msg: Optional[str] = None,
