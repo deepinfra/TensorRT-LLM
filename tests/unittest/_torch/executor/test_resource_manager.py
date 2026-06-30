@@ -35,6 +35,32 @@ root_dir = current_dir.parent.parent.parent.parent
 sys.path.append(str(root_dir / "tests" / "integration"))
 
 
+def test_is_kv_cache_exhaustion_error_classification():
+    """The non-fatal KV-exhaustion guard must recognize the fatal block-pool
+    asserts thrown by the C++ block manager (kvCacheManager.cpp /
+    evictionPolicy.cpp) and surfaced through nanobind as generic exceptions,
+    while leaving unrelated errors alone so they still propagate fatally."""
+    from tensorrt_llm._torch.pyexecutor.resource_manager import \
+        is_kv_cache_exhaustion_error
+
+    # The three real assert signatures (kvCacheManager.cpp:2480 / :2810,
+    # evictionPolicy.cpp:160).
+    assert is_kv_cache_exhaustion_error(
+        RuntimeError("Can't allocate new blocks for window size 262152. "
+                     "No free blocks left."))
+    assert is_kv_cache_exhaustion_error(
+        RuntimeError("No free block found. This shouldn't happen!"))
+    assert is_kv_cache_exhaustion_error(
+        RuntimeError("Can't allocate new blocks. No free blocks left."))
+
+    # Unrelated errors must NOT be swallowed by the guard: a genuine CUDA OOM
+    # or a request-validation error should still surface as before.
+    assert not is_kv_cache_exhaustion_error(
+        ValueError("Token ID out of range"))
+    assert not is_kv_cache_exhaustion_error(
+        RuntimeError("CUDA out of memory"))
+
+
 class TestResourceManager(unittest.TestCase):
     CPP_RESOURCES_DIR = os.path.join(str(root_dir), "cpp", "tests", "resources")
     CPP_DATA_DIR = os.path.join(CPP_RESOURCES_DIR, "data")
