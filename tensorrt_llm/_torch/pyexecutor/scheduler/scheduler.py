@@ -136,6 +136,10 @@ class ScheduledRequests:
     """Requests that are in the generation phase."""
     paused_requests: RequestList
     """Requests that are paused."""
+    kv_cache_rejected_requests: RequestList
+    """Requests dropped this step because the KV-cache block pool was exhausted
+    (not populated when disabled via TRTLLM_KV_EXHAUSTION_NONFATAL=0).  Drained
+    and failed by the executor; see PyExecutor._drain_kv_rejected_requests."""
 
     def __init__(self):
         self.encoder_requests: RequestList = []
@@ -143,6 +147,7 @@ class ScheduledRequests:
         self.context_requests_last_chunk: RequestList = []
         self.generation_requests: RequestList = []
         self.paused_requests: RequestList = []
+        self.kv_cache_rejected_requests: RequestList = []
 
     @property
     def is_generation_only(self) -> bool:
