@@ -23,17 +23,24 @@ Threading model: the engine's asyncio drain loop
 (``OpenAIServer.kv_event_processor``) only calls ``enqueue()``, a non-blocking
 hand-off onto a bounded ``queue.Queue``. A single dedicated consumer thread
 owns everything else -- it pulls raw events off the queue, translates/filters
-them, publishes on the PUB socket, appends to the replay buffer, and services
-replay requests on the ROUTER socket. Because exactly one thread touches the
-sockets and the buffer, no lock is needed (this mirrors vLLM's
+them, publishes on the PUB socket, and (when enabled) feeds each event into the
+in-process ``LocalKvIndexer``. Because exactly one thread touches the PUB socket
+and the translation state, no lock is needed (this mirrors vLLM's
 ``ZmqEventPublisher._publisher_thread``). The ZMQ-side work (msgpack encode +
 send) is thus moved off the asyncio loop and never stalls the SSE path.
+
+Recovery: instead of a fixed-window ZMQ ROUTER replay deque, each event is also
+fed into a Dynamo ``LocalKvIndexer`` (radix tree + replay ring buffer +
+snapshot), enabled via ``enable_local_indexer``. A consumer that misses events
+queries the worker out-of-band (HTTP, served elsewhere) and gets either the
+buffered events or a full tree snapshot. The indexer is fed ``event_id == seq``
+(the same ZMQ batch sequence), so the consumer keeps detecting gaps on ``seq``.
 
 Because this sits next to the production routing path, every hand-off is
 bounded and lossy by design: the inbound queue is bounded (overflow increments
 ``queue_dropped`` -- unrecoverable, the consumer fell behind), and the PUB
 socket is bounded (``SNDHWM``) with non-blocking sends (overflow increments
-``dropped`` -- recoverable via replay).
+``dropped`` -- recoverable from the local indexer).
 
 The translation logic mirrors the reference ``ZmqKvEventPublisher`` /
 ``_handle_kv_event`` in ``dynamo/components/src/dynamo/trtllm/publisher.py``
@@ -45,7 +52,6 @@ Dynamo indexer expects.
 import queue
 import threading
 import time
-from collections import deque
 from typing import Any, Optional
 
 import zmq
@@ -92,25 +98,22 @@ class KvZmqPublisher:
     Wire format: 3-frame multipart ``[topic, 8-byte big-endian sequence, payload]``
     where ``payload`` is the msgpack-serialized batch.
 
-    Replay: when ``replay_endpoint`` is set, a ROUTER socket is bound and a ring
-    buffer of the last ``buffer_steps`` ``(seq, payload)`` pairs is kept. Both
-    live on the same consumer thread that does the publishing, which polls the
-    ROUTER between queue items (``poll(0)``). A subscriber that detects a
-    sequence gap (PUB/SUB is lossy) sends the missing start sequence as an
-    8-byte big-endian integer; the publisher streams back every buffered batch
-    from that sequence onward, then an end-of-sequence sentinel (``seq = -1``,
-    empty payload). This is byte-compatible with vLLM's ``ZmqEventPublisher``
-    replay protocol, so an existing Dynamo / standalone-indexer replay client
-    works unchanged.
+    Recovery: when ``enable_local_indexer`` is set, every published event is also
+    fed into an in-process Dynamo ``LocalKvIndexer`` (radix tree + replay ring
+    buffer of ``buffer_steps`` events + snapshot), keyed by ``event_id == seq``.
+    A consumer that detects a sequence gap recovers out-of-band by querying the
+    worker (HTTP, served by the engine) and receives either the buffered events
+    or a full tree snapshot. This replaces the old fixed-window ZMQ ROUTER replay.
 
     Args:
         zmq_endpoint: endpoint to bind the PUB socket to, e.g. ``tcp://*:5557``.
         kv_block_size: KV-cache block size in tokens (``kv_cache_config.tokens_per_block``).
-        replay_endpoint: endpoint to bind the replay ROUTER socket to, e.g.
-            ``tcp://*:5558``. When ``None`` the replay path is disabled (no
-            buffer, no ROUTER socket); the consumer thread still runs to drain
-            the queue and publish.
-        buffer_steps: number of past batches kept in the replay ring buffer.
+        enable_local_indexer: build the in-process ``LocalKvIndexer`` used for
+            recovery. When ``False`` the consumer thread still drains the queue
+            and publishes, but no recovery state is kept.
+        worker_id: stable id stamped on indexed events (informational for
+            recovery; the consumer applies events under the worker it queried).
+        buffer_steps: capacity of the local indexer's replay ring buffer (events).
         queue_maxsize: bound on the inbound event queue. When the consumer
             thread cannot keep up the queue fills and the oldest-arriving events
             are dropped (``queue_dropped``); these are unrecoverable.
@@ -122,14 +125,11 @@ class KvZmqPublisher:
     # a multiple of this, so a missing/slow subscriber does not spam the log.
     _DROP_LOG_INTERVAL = 10000
 
-    # End-of-replay sentinel: signed -1 as an 8-byte big-endian int, matching
-    # vLLM's ZmqEventPublisher.END_SEQ so existing replay clients recognize it.
-    END_SEQ = (-1).to_bytes(8, "big", signed=True)
-
     def __init__(self,
                  zmq_endpoint: str,
                  kv_block_size: int,
-                 replay_endpoint: Optional[str] = None,
+                 enable_local_indexer: bool = False,
+                 worker_id: int = 0,
                  buffer_steps: int = 10000,
                  queue_maxsize: int = 100000,
                  sndhwm: int = 100000,
@@ -154,31 +154,24 @@ class KvZmqPublisher:
         # which only serves coroutines). This is the ONLY object shared across
         # threads: the drain loop put_nowait()s, the consumer get()s.
         self._event_queue: "queue.Queue" = queue.Queue(maxsize=queue_maxsize)
-        # Ring buffer of recently published (seq, payload) pairs. Touched ONLY
-        # by the consumer thread (append on publish, read on replay), so it
-        # needs no lock -- the single-thread invariant replaces it.
-        self.replay_endpoint = replay_endpoint
-        self._buffer: deque = deque(maxlen=buffer_steps)
         self._running = True
-        self._replay_socket: Optional[zmq.Socket] = None
-        if replay_endpoint is not None:
-            # ROUTER lets one socket serve many DEALER/REQ clients and reply
-            # request -> many batches. Owned by the consumer thread, same as
-            # the PUB socket, so the two are never used concurrently.
-            self._replay_socket = self.ctx.socket(zmq.ROUTER)
-            # A replay streams the WHOLE ring buffer in one tight loop. ROUTER's
-            # mute action is to DROP silently (not block), so a send HWM below
-            # buffer_steps truncates large replays -- the subscriber gets a hole
-            # in the middle, every later block fails ParentBlockNotFound, and its
-            # tree collapses. Keep the HWM >= buffer_steps (queued count is capped
-            # by the ring anyway) so a full replay always fits. Must be set before
-            # bind() to take effect.
-            replay_sndhwm = max(sndhwm, buffer_steps)
-            self._replay_socket.setsockopt(zmq.SNDHWM, replay_sndhwm)
-            self._replay_socket.bind(replay_endpoint)
+
+        # In-process recovery state: a Dynamo LocalKvIndexer (radix tree +
+        # replay ring buffer + snapshot), fed every published event keyed by
+        # event_id == seq. Stays None when disabled. Fed only by the consumer
+        # thread; queried by the (out-of-band) recovery handler. The indexer is
+        # internally synchronized, so no lock is needed here.
+        self._indexer = None
+        if enable_local_indexer:
+            # Imported lazily so the tee works without the compiled wrapper
+            # unless recovery is actually enabled. The wrapper ships as a prebuilt
+            # wheel from github.com/deepinfra/kv-local-indexer (no Rust in this repo);
+            # the engine image installs it via build_python_changes.sh + Dockerfile.python.
+            from kv_local_indexer import LocalIndexer
+            self._indexer = LocalIndexer(worker_id, kv_block_size, buffer_steps)
             logger.info(
-                f"KvZmqPublisher replay enabled on {replay_endpoint} "
-                f"(buffer_steps={buffer_steps}, sndhwm={replay_sndhwm})")
+                f"KvZmqPublisher local indexer enabled "
+                f"(worker_id={worker_id}, buffer_steps={buffer_steps})")
 
         # --- translation / filtering state (mirrors the reference publisher) ---
         # Block hashes for partial blocks (fewer than kv_block_size tokens). They
@@ -196,11 +189,11 @@ class KvZmqPublisher:
             f"KvZmqPublisher bound to {zmq_endpoint} (topic='{topic}', "
             f"kv_block_size={kv_block_size}, sndhwm={sndhwm})")
 
-        # Single consumer thread owns the PUB socket, the ROUTER socket, the
-        # ring buffer, and the translation state. Started last, so all the
-        # state it touches in handle() is fully initialized before it can run.
-        # It always runs (even with replay disabled) because it is what drains
-        # the queue and publishes.
+        # Single consumer thread owns the PUB socket and the translation state,
+        # and feeds the local indexer. Started last, so all the state it touches
+        # in handle() is fully initialized before it can run. It always runs
+        # (even without the local indexer) because it drains the queue and
+        # publishes.
         self._consumer_thread = threading.Thread(
             target=self.zmq_loop, daemon=True, name="kv-zmq-consumer")
         self._consumer_thread.start()
@@ -255,7 +248,9 @@ class KvZmqPublisher:
         if block_mm_infos is not None:
             event["block_mm_infos"] = block_mm_infos
 
-        self._publish_event(event, attention_dp_rank)
+        seq = self._publish_event(event, attention_dp_rank)
+        self._feed_stored(seq, token_ids, block_hashes_signed,
+                          parent_hash_signed, attention_dp_rank, lora_name)
 
     def publish_removed(self,
                        block_hashes: list[int],
@@ -266,14 +261,20 @@ class KvZmqPublisher:
             "type": "BlockRemoved",
             "block_hashes": block_hashes_signed,
         }
-        self._publish_event(event, attention_dp_rank)
+        seq = self._publish_event(event, attention_dp_rank)
+        self._feed_removed(seq, block_hashes_signed, attention_dp_rank)
 
     def publish_all_cleared(self) -> None:
         """Publish an AllBlocksCleared event in vLLM format."""
-        self._publish_event({"type": "AllBlocksCleared"})
+        seq = self._publish_event({"type": "AllBlocksCleared"})
+        self._feed_cleared(seq)
 
-    def _publish_event(self, event: dict, attention_dp_rank: int = 0) -> None:
-        """Serialize and broadcast a single event (non-blocking)."""
+    def _publish_event(self, event: dict, attention_dp_rank: int = 0) -> int:
+        """Serialize and broadcast a single event; return its sequence number.
+
+        The returned ``seq`` is used by the caller as the local indexer's
+        ``event_id``, so the live ZMQ stream and the indexer share one id space.
+        """
         # vLLM batch format: [timestamp, [events], data_parallel_rank].
         timestamp = time.time()
         batch = [timestamp, [event], attention_dp_rank]
@@ -285,30 +286,77 @@ class KvZmqPublisher:
         sequence_bytes = seq.to_bytes(8, byteorder="big")
         self.sequence += 1
 
-        # Buffer the batch for replay BEFORE attempting the live send, and do
-        # so unconditionally -- even if the send below drops. A drop means a
-        # subscriber fell behind (HWM full); the dropped batches are exactly
-        # the ones it will ask to replay once it catches up. Buffering only on
-        # success would leave a hole in the buffer at precisely the sequence
-        # numbers replay needs. The maxlen ring evicts the oldest as it fills;
-        # gaps older than that window are not recoverable from us. No lock:
-        # this runs on the consumer thread, the only thread touching _buffer.
-        if self._replay_socket is not None:
-            self._buffer.append((seq, payload))
-
         try:
             self.socket.send_multipart(
                 [self.topic.encode(), sequence_bytes, payload],
                 flags=zmq.NOBLOCK)
         except zmq.Again:
             # No subscriber / buffer full: drop the LIVE send. Expected and
-            # harmless for a read-only tee -- the batch is still in the replay
-            # buffer above. Log only at coarse intervals to avoid spam.
+            # harmless for a read-only tee -- the event is still recoverable
+            # from the local indexer. Log only at coarse intervals to avoid spam.
             self.dropped += 1
             if self.dropped % self._DROP_LOG_INTERVAL == 0:
                 logger.warning(
                     f"KvZmqPublisher dropped {self.dropped} events "
                     f"(no subscriber or HWM reached on {self.zmq_endpoint})")
+
+        return seq
+
+    # ------------------------------------------------------------------ #
+    # Feed the in-process local indexer (recovery state)                  #
+    # ------------------------------------------------------------------ #
+    # These run on the consumer thread in seq order, so the indexer's replay
+    # buffer stays ordered and consecutive (event_id == seq). An indexing
+    # failure is logged and swallowed so it never breaks the live publish path.
+    def _feed_stored(self, seq, token_ids, block_hashes, parent_hash,
+                     attention_dp_rank, lora_name) -> None:
+        if self._indexer is None:
+            return
+        try:
+            self._indexer.apply_stored(seq, token_ids, block_hashes,
+                                       parent_hash, attention_dp_rank, lora_name)
+        except Exception as e:
+            logger.warning(
+                f"KvZmqPublisher local indexer apply_stored failed: {e}")
+
+    def _feed_removed(self, seq, block_hashes, attention_dp_rank) -> None:
+        if self._indexer is None:
+            return
+        try:
+            self._indexer.apply_removed(seq, block_hashes, attention_dp_rank)
+        except Exception as e:
+            logger.warning(
+                f"KvZmqPublisher local indexer apply_removed failed: {e}")
+
+    def _feed_cleared(self, seq) -> None:
+        if self._indexer is None:
+            return
+        try:
+            self._indexer.apply_cleared(seq)
+        except Exception as e:
+            logger.warning(
+                f"KvZmqPublisher local indexer apply_cleared failed: {e}")
+
+    # ------------------------------------------------------------------ #
+    # Recovery query (served over HTTP by the engine)                     #
+    # ------------------------------------------------------------------ #
+    def get_recovery_json(self,
+                          start: Optional[int] = None,
+                          end: Optional[int] = None) -> Optional[str]:
+        """Return recovery events for ``[start, end]`` as a JSON string.
+
+        ``start`` is the first ``event_id`` (== ZMQ ``seq``) the caller is
+        missing; ``None`` requests a full snapshot. The result is an
+        externally-tagged ``WorkerKvQueryResponse`` (``Events`` / ``TreeDump`` /
+        ``TooNew`` / ``InvalidRange`` / ``Error``). Returns ``None`` when the
+        local indexer is disabled.
+
+        Thread-safe (the indexer is internally synchronized), but may be heavy
+        (a full tree dump), so callers should run it off the asyncio event loop.
+        """
+        if self._indexer is None:
+            return None
+        return self._indexer.get_events_json(start, end)
 
     # ------------------------------------------------------------------ #
     # Translation + filtering (adapted from reference _handle_kv_event)   #
@@ -435,25 +483,19 @@ class KvZmqPublisher:
         return event["window_size"] != self.max_window_size
 
     # ------------------------------------------------------------------ #
-    # Consumer thread: drain queue -> publish, and service replay         #
+    # Consumer thread: drain queue -> translate -> publish + feed indexer  #
     # ------------------------------------------------------------------ #
     def zmq_loop(self) -> None:
-        """Single thread that publishes queued events and answers replay.
+        """Single thread that translates queued events and publishes them.
 
-        Mirrors vLLM's ``ZmqEventPublisher._publisher_thread``: each iteration
-        first services a pending replay request (non-critical, ``poll(0)`` so
-        it never blocks the publish path), then pulls one event off the queue
-        and publishes it. Because this is the only thread touching the sockets
-        and the ring buffer, no lock is required. Keeps running until shutdown
-        AND the queue has been drained, so in-flight events are not lost.
+        Mirrors vLLM's ``ZmqEventPublisher._publisher_thread``: pull one event
+        off the queue, translate/filter it, publish on the PUB socket, and feed
+        the local indexer. Because this is the only thread touching the PUB
+        socket and the translation state, no lock is required. Keeps running
+        until shutdown AND the queue has been drained, so in-flight events are
+        not lost.
         """
         while self._running or not self._event_queue.empty():
-            if self._replay_socket is not None and self._replay_socket.poll(0):
-                try:
-                    self._service_replay()
-                except Exception as e:
-                    logger.warning(f"KvZmqPublisher replay error: {e}")
-
             try:
                 event = self._event_queue.get(timeout=0.1)
             except queue.Empty:
@@ -461,44 +503,18 @@ class KvZmqPublisher:
             if event is _SHUTDOWN:
                 break
             try:
-                # handle() translates/filters and calls _publish_event, which
-                # appends to the buffer and sends on the PUB socket.
+                # handle() translates/filters and calls publish_*, which sends
+                # on the PUB socket and feeds the local indexer.
                 self.handle(event)
             except Exception as e:
                 logger.warning(f"KvZmqPublisher handle error (event dropped): {e}")
                 continue
 
-    def _service_replay(self) -> None:
-        """Stream every buffered batch from the requested sequence onward.
-
-        Request frame (from a DEALER/REQ client, identity prepended by ROUTER):
-        ``[client_id, b"", start_seq_bytes]``. Reply: one multipart per batch
-        ``[client_id, b"", seq_bytes, payload]`` for every ``seq >= start_seq``
-        still in the buffer, then a sentinel ``[client_id, b"", END_SEQ, b""]``.
-        Runs on the consumer thread, so it reads ``_buffer`` directly -- no
-        other thread mutates it.
-        """
-        assert self._replay_socket is not None
-        frame = self._replay_socket.recv_multipart()
-        if len(frame) != 3:
-            logger.warning(f"KvZmqPublisher invalid replay request: {frame}")
-            return
-        client_id, _, start_seq_bytes = frame
-        start_seq = int.from_bytes(start_seq_bytes, "big")
-
-        for seq, payload in self._buffer:
-            if seq >= start_seq:
-                self._replay_socket.send_multipart(
-                    [client_id, b"", seq.to_bytes(8, "big"), payload])
-        # End-of-sequence marker so the client knows replay is complete.
-        self._replay_socket.send_multipart(
-            [client_id, b"", self.END_SEQ, b""])
-
     def shutdown(self) -> None:
-        """Stop the consumer thread, close sockets, and terminate the context."""
+        """Stop the consumer thread, close the socket, and terminate the context."""
         # Signal the consumer to exit and wake it immediately with a sentinel
         # (so it doesn't wait out the get() timeout), then wait for it to stop
-        # touching the sockets before we close them.
+        # touching the socket before we close it.
         self._running = False
         try:
             self._event_queue.put_nowait(_SHUTDOWN)
@@ -506,11 +522,15 @@ class KvZmqPublisher:
             pass
         if self._consumer_thread is not None:
             self._consumer_thread.join(timeout=2.0)
+        if self._indexer is not None:
+            try:
+                self._indexer.shutdown()
+            except Exception as e:
+                logger.warning(
+                    f"KvZmqPublisher local indexer shutdown failed: {e}")
         try:
             if self.socket is not None:
                 self.socket.close()
-            if self._replay_socket is not None:
-                self._replay_socket.close(linger=0)
             if self.ctx is not None:
                 self.ctx.term()
         finally:

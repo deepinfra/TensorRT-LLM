@@ -4,4 +4,11 @@ FROM $url AS pytrtllm-builder
 COPY python.patch /app/tensorrt_llm/python.patch
 RUN patch -p1 -i/app/tensorrt_llm/python.patch -d/usr/local/lib/python3.12/dist-packages
 #RUN pip install git+https://github.com/Dao-AILab/fast-hadamard-transform.git
+
+# KV local indexer: a prebuilt PUBLIC wheel installed straight from its GitHub
+# github.com/deepinfra/kv-local-indexer. Bump by pointing KV_WHEEL_URL at a newer release.
+ARG KV_WHEEL_URL=https://github.com/deepinfra/kv-local-indexer/releases/download/v0.1.0/kv_local_indexer-0.1.0-cp312-cp312-linux_x86_64.whl
+RUN pip install --no-deps "${KV_WHEEL_URL}" && \
+    python3.12 -c "import kv_local_indexer; print('kv_local_indexer OK')"
+
 ENTRYPOINT ["/bin/bash", "-c", "exec \"$@\"", "--", "/usr/local/bin/trtllm-serve"]
