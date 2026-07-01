@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -83,24 +83,40 @@ std::optional<uintptr_t> launchHostFunc(uintptr_t streamPtr, bool freeUserData, 
         = std::make_unique<HostFuncUserData>(freeUserData, pyHostFunc, nb::tuple(pyArgs), nb::dict(pyKwargs));
 
     cudaError_t err;
+    {
+        // Release the GIL only around the eager enqueue. cudaLaunchHostFunc serializes
+        // host-function dispatch on the stream, so in the non-capturing path it can
+        // busy-wait in the driver behind an in-flight callback; that callback
+        // (cudaHostFuncTrampoline) reacquires the GIL to run Python (e.g. xgrammar in
+        // guided decoding), so holding the GIL here deadlocks against it. During graph
+        // capture (freeUserData == false) no callback runs, so we keep the GIL to hold
+        // capture on a single thread. The release scope ends before the nanobind
+        // refcount work below, preserving the object-lifetime fix from #13251.
+        std::optional<nb::gil_scoped_release> gilRelease;
+        if (freeUserData)
+        {
+            gilRelease.emplace();
+        }
 #if CUDART_VERSION >= 13020
-    if (lowLatency)
-    {
-        err = cudaLaunchHostFunc_v2(stream, cudaHostFuncTrampoline, hostFuncUserData.get(), cudaHostTaskSpinWait);
-    }
-    else
-    {
-        err = cudaLaunchHostFunc(stream, cudaHostFuncTrampoline, hostFuncUserData.get());
-    }
+        if (lowLatency)
+        {
+            err = cudaLaunchHostFunc_v2(stream, cudaHostFuncTrampoline, hostFuncUserData.get(), cudaHostTaskSpinWait);
+        }
+        else
+        {
+            err = cudaLaunchHostFunc(stream, cudaHostFuncTrampoline, hostFuncUserData.get());
+        }
 #else
-    if (lowLatency)
-    {
-        static std::once_flag sWarnOnce;
-        std::call_once(sWarnOnce,
-            []() { TLLM_LOG_WARNING("Low-latency host task dispatch requires CUDA 13.2+; falling back to default."); });
-    }
-    err = cudaLaunchHostFunc(stream, cudaHostFuncTrampoline, hostFuncUserData.get());
+        if (lowLatency)
+        {
+            static std::once_flag sWarnOnce;
+            std::call_once(sWarnOnce,
+                []()
+                { TLLM_LOG_WARNING("Low-latency host task dispatch requires CUDA 13.2+; falling back to default."); });
+        }
+        err = cudaLaunchHostFunc(stream, cudaHostFuncTrampoline, hostFuncUserData.get());
 #endif
+    }
     if (err != cudaSuccess)
     {
         throw std::runtime_error("Failed to launch host function.");
