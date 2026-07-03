@@ -47,6 +47,8 @@ from tensorrt_llm.logger import logger
 from tensorrt_llm.media.encoding import image_to_bytes
 from tensorrt_llm.media.tensor_payload import is_tensor_format
 from tensorrt_llm.metrics.collector import MetricsCollector
+from tensorrt_llm.llmapi.llm_utils import KvCacheRetentionConfig as _KvRetention
+import datetime as _dt
 from tensorrt_llm.sampling_params import GuidedDecodingParams
 from tensorrt_llm.serve.chat_utils import (load_chat_template,
                                            parse_chat_messages_coroutines,
@@ -1293,8 +1295,14 @@ class OpenAIServer(_VideoRoutesMixin):
                     preprocess_fn, prompt, sampling_params,
                     disaggregated_params)
 
+            _kv_retention = None
+            _ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
+            if _ttl_s:
+                _kv_retention = _KvRetention([])
+                _kv_retention.disk_retention_ms = _dt.timedelta(seconds=_ttl_s)
             promise = self.generator.generate_async(
                 inputs=generate_inputs,
+                kv_cache_retention_config=_kv_retention,
                 sampling_params=sampling_params,
                 _postproc_params=postproc_params
                 if self.postproc_worker_enabled else None,
@@ -1747,8 +1755,14 @@ class OpenAIServer(_VideoRoutesMixin):
                 agent_hierarchy=request.agent_hierarchy)
 
             # Generate
+            _kv_retention = None
+            _ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
+            if _ttl_s:
+                _kv_retention = _KvRetention([])
+                _kv_retention.disk_retention_ms = _dt.timedelta(seconds=_ttl_s)
             promise = self.generator.generate_async(
                 inputs=harmony_tokens,
+                kv_cache_retention_config=_kv_retention,
                 sampling_params=sampling_params,
                 _postproc_params=postproc_params
                 if self.postproc_worker_enabled else None,

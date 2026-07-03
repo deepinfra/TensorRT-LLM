@@ -650,7 +650,8 @@ void tb::kv_cache_manager::KVCacheManagerBindings::initBindings(nb::module_& m)
 
     nb::class_<tbk::KVCacheManager, tbk::BaseKVCacheManager>(m, "KVCacheManager")
         .def(nb::init<std::vector<SizeType32> const&, SizeType32, SizeType32,
-                 std::map<SizeType32, std::tuple<SizeType32, SizeType32>> const&, SizeType32, std::string const&, SizeType32,
+                 std::map<SizeType32, std::tuple<SizeType32, SizeType32>> const&, SizeType32, std::string const&, bool,
+                 SizeType32,
                  SizeType32,
                  std::vector<SizeType32> const&, nvinfer1::DataType, SizeType32, int64_t, SizeType32, SizeType32, bool,
                  tbk::CacheType, std::optional<tensorrt_llm::executor::RetentionPriority>,
@@ -658,7 +659,7 @@ void tb::kv_cache_manager::KVCacheManagerBindings::initBindings(nb::module_& m)
                  bool, SizeType32, SizeType32, bool, std::optional<tbk::LinearAttentionMetadata>,
                  std::vector<tbk::PoolConfiguration> const&>(),
             nb::arg("num_kv_heads_per_layer"), nb::arg("size_per_head"), nb::arg("tokens_per_block"),
-            nb::arg("blocks_per_window"), nb::arg("blocks_in_disk_pool"), nb::arg("disk_cache_path"),
+            nb::arg("blocks_per_window"), nb::arg("blocks_in_disk_pool"), nb::arg("disk_cache_path"), nb::arg("disk_cache_retained_only"),
             nb::arg("max_num_sequences"),
             nb::arg("max_beam_width"),
             nb::arg("max_attention_window_vec"), nb::arg("dtype"), nb::arg("sink_token_length"), nb::arg("stream"),
