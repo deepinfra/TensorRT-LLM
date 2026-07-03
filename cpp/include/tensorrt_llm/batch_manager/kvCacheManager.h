@@ -905,6 +905,7 @@ public:
         std::vector<SizeType32> const& managedLayers, std::vector<SizeType32> const& numKvHeadsPerLayer,
         SizeType32 sizePerHead, SizeType32 tokensPerBlock, bool isSWA, SizeType32 blocksInPrimaryPool,
         SizeType32 blocksInSecondaryPool, SizeType32 blocksInDiskPool, std::string const& diskCachePath, bool diskRetainedOnly,
+        bool diskProtectUnexpired,
         SizeType32 maxNumSequences, std::shared_ptr<runtime::CudaStream> stream,
         CacheType cacheType, std::optional<executor::RetentionPriority> secondaryOffloadMinPriority,
         std::shared_ptr<KVCacheEventManager> eventManager, bool enablePartialReuse, bool copyOnPartialReuse,
@@ -1397,8 +1398,10 @@ private:
     SizeType32 mNumDiskBlocks;
     std::string mDiskCachePath;
     bool mDiskRetainedOnly{false};
+    bool mDiskProtectUnexpired{false};
     std::size_t mDiskSpills{0};
     std::size_t mDiskGateDropped{0};
+    std::size_t mDiskAdmissionRefused{0};
     std::size_t mDiskOnboards{0};
 
 public:
@@ -1410,6 +1413,11 @@ public:
     [[nodiscard]] std::size_t getNumDiskGateDropped() const
     {
         return mDiskGateDropped;
+    }
+
+    [[nodiscard]] std::size_t getNumDiskAdmissionRefused() const
+    {
+        return mDiskAdmissionRefused;
     }
 
     [[nodiscard]] std::size_t getNumDiskOnboards() const
@@ -1576,7 +1584,8 @@ public:
         SizeType32 indexerKCacheQuantBlockSize = 128, SizeType32 indexerKCacheIndexHeadDim = 0,
         bool indexerKCacheUseFp4 = false, std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
         std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
-        std::string const& diskCachePath = {}, bool diskRetainedOnly = false);
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false,
+        bool diskProtectUnexpired = false);
 
     [[nodiscard]] bool isEnableIndexerKCache() const
     {
@@ -2053,6 +2062,16 @@ public:
         return total;
     }
 
+    [[nodiscard]] std::size_t getNumDiskAdmissionRefused() const
+    {
+        std::size_t total = 0;
+        for (auto const& [windowSize, manager] : mWindowBlockManagers)
+        {
+            total += manager.getNumDiskAdmissionRefused();
+        }
+        return total;
+    }
+
     [[nodiscard]] std::size_t getNumDiskOnboards() const
     {
         std::size_t total = 0;
@@ -2406,7 +2425,8 @@ public:
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
         std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
-        std::string const& diskCachePath = {}, bool diskRetainedOnly = false);
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false,
+        bool diskProtectUnexpired = false);
 
     KVCacheManager(std::vector<SizeType32> const& numKvHeadsPerLayer, SizeType32 sizePerHead, SizeType32 tokensPerBlock,
         BlocksPerWindow const& blocksPerWindow,
@@ -2422,7 +2442,8 @@ public:
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
         std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
-        std::string const& diskCachePath = {}, bool diskRetainedOnly = false);
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false,
+        bool diskProtectUnexpired = false);
 
     KVCacheManager(SizeType32 numLayers, SizeType32 numKvHeads, SizeType32 sizePerHead, SizeType32 tokensPerBlock,
         BlocksPerWindow const& blocksPerWindow,
@@ -2438,7 +2459,8 @@ public:
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
         std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
-        std::string const& diskCachePath = {}, bool diskRetainedOnly = false);
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false,
+        bool diskProtectUnexpired = false);
 
     KVCacheManager(SizeType32 numLayers, SizeType32 numKvHeads, SizeType32 sizePerHead, SizeType32 tokensPerBlock,
         BlocksPerWindow const& blocksPerWindow,
@@ -2450,7 +2472,8 @@ public:
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
         std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
-        std::string const& diskCachePath = {}, bool diskRetainedOnly = false);
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false,
+        bool diskProtectUnexpired = false);
 
     ~KVCacheManager() override = default;
 
