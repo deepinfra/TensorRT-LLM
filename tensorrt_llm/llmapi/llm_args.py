@@ -3004,6 +3004,11 @@ class KvCacheConfig(StrictBaseModel, PybindMirror):
         description=
         "When true, only blocks whose request carried a disk retention TTL may enter the disk cache tier."
     )
+    disk_cache_protect_unexpired: bool = Field(
+        default=False,
+        description=
+        "When true, unexpired disk blocks are never evicted to admit a new one; the new block is refused instead."
+    )
     cross_kv_cache_fraction: Optional[float] = Field(
         default=None,
         description=
@@ -3146,6 +3151,7 @@ class KvCacheConfig(StrictBaseModel, PybindMirror):
             config.disk_cache_size = self.disk_cache_size
             config.disk_cache_path = self.disk_cache_path or ""
             config.disk_cache_retained_only = bool(self.disk_cache_retained_only)
+            config.disk_cache_protect_unexpired = bool(self.disk_cache_protect_unexpired)
         return config
 
     @field_validator('free_gpu_memory_fraction')
