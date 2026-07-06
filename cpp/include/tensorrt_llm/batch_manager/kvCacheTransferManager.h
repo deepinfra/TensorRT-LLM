@@ -173,7 +173,7 @@ private:
         void const* src{nullptr};         // unstaged path: writer reads this pinned host pointer directly
         std::uint64_t spillId{0};         // >0 => track per-spill completion for the reserved-pool reap
     };
-    std::thread mDiskWriter;
+    std::vector<std::thread> mDiskWriters;
     std::mutex mDiskMutex;
     std::condition_variable mDiskQueueCv;
     std::condition_variable mDiskInflightCv;
@@ -198,6 +198,13 @@ private:
     bool mDiskWriterStop{false};
     std::size_t const mDiskWriteQueueMax{
         [] { auto* e = std::getenv("TLLM_KV_DISK_WRITE_QUEUE"); return e ? std::stoul(e) : 1024UL; }()};
+    // Number of background writer threads draining the shared queue (TLLM_KV_DISK_WRITERS, default 1).
+    std::size_t const mNumDiskWriters{[]
+        {
+            auto* e = std::getenv("TLLM_KV_DISK_WRITERS");
+            auto n = e ? std::stoul(e) : 1UL;
+            return n < 1UL ? 1UL : n;
+        }()};
 
     void diskWriterLoop();
     void enqueueDiskWrite(std::string filename, void const* src, std::size_t bytes);
