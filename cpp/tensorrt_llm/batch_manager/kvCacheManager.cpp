@@ -35,6 +35,8 @@
 #include "tensorrt_llm/runtime/worldConfig.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <limits>
 #include <map>
 #include <optional>
@@ -50,6 +52,67 @@ using namespace tensorrt_llm::batch_manager::kv_cache_manager;
 using namespace tensorrt_llm::batch_manager::eviction_policy;
 
 using BlocksPerWindow = std::map<SizeType32, std::tuple<SizeType32, SizeType32>>;
+
+// ---------------------------------------------------------------------------
+// DEEPINFRA KVDBG (temporary diagnostic — remove once diagnosed).
+// Counts every path that detaches a block from the reuse radix trie, split by
+// whether a KV "removed" event was emitted, to localize which path orphans
+// announced block hashes on the KV-event stream (frontend
+// kv_indexer_tracked_blocks leak: FE tree ~200x prefill physical capacity).
+// detach_total is incremented inside detachFromLookupNode itself (the master
+// count); the per-site counters categorize it. detach_total minus the sum of
+// categorized detaches = paths not yet identified. Logged via TLLM_LOG_WARNING
+// every 30s from the getFreeBlock hot path.
+namespace deepinfra_kvdbg
+{
+struct Counters
+{
+    std::atomic<uint64_t> detachTotal{0};        // detachFromLookupNode: actually detached
+    std::atomic<uint64_t> storedBlk{0};          // blocks announced via enqueueStoredEvent
+    std::atomic<uint64_t> evictEmit{0};          // getFreeBlock: in trie -> removed emitted
+    std::atomic<uint64_t> evictContentNoTree{0}; // getFreeBlock: had content but NOT in trie (was silently detached earlier)
+    std::atomic<uint64_t> evictFresh{0};         // getFreeBlock: fresh/empty block (benign)
+    std::atomic<uint64_t> subtreeEmit{0};        // releaseSubtree: in trie -> removed emitted
+    std::atomic<uint64_t> storeRekeyDetach{0};   // storeBlocks insert: detached a still-attached block (SILENT)
+    std::atomic<uint64_t> storeHashMut{0};       // storeBlocks insert: block hash changed on re-store (old hash orphaned)
+    std::atomic<uint64_t> freeLeafSilent{0};     // WindowBlockManager::freeLeafBlock on in-trie block (SILENT)
+    std::atomic<uint64_t> detachFrontOOW{0};     // detachFrontBlock OOW releases (SWA; trie state unchanged)
+};
+
+inline Counters& ctrs()
+{
+    static Counters c;
+    return c;
+}
+
+inline void maybeLog(int windowSize)
+{
+    static std::atomic<int64_t> lastLog{0};
+    auto const now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+    auto prev = lastLog.load(std::memory_order_relaxed);
+    if (now - prev < 30 || !lastLog.compare_exchange_strong(prev, now))
+    {
+        return;
+    }
+    auto& c = ctrs();
+    TLLM_LOG_WARNING(
+        "KVDBGCPP ws=%d detach_total=%llu stored_blk=%llu evict_emit=%llu evict_content_no_tree=%llu "
+        "evict_fresh=%llu subtree_emit=%llu store_rekey_detach=%llu store_hash_mut=%llu free_leaf_silent=%llu "
+        "detach_front_oow=%llu",
+        windowSize, (unsigned long long) c.detachTotal.load(std::memory_order_relaxed),
+        (unsigned long long) c.storedBlk.load(std::memory_order_relaxed),
+        (unsigned long long) c.evictEmit.load(std::memory_order_relaxed),
+        (unsigned long long) c.evictContentNoTree.load(std::memory_order_relaxed),
+        (unsigned long long) c.evictFresh.load(std::memory_order_relaxed),
+        (unsigned long long) c.subtreeEmit.load(std::memory_order_relaxed),
+        (unsigned long long) c.storeRekeyDetach.load(std::memory_order_relaxed),
+        (unsigned long long) c.storeHashMut.load(std::memory_order_relaxed),
+        (unsigned long long) c.freeLeafSilent.load(std::memory_order_relaxed),
+        (unsigned long long) c.detachFrontOOW.load(std::memory_order_relaxed));
+}
+} // namespace deepinfra_kvdbg
 
 namespace
 {
@@ -208,6 +271,9 @@ void KVCacheBlock::detachFromLookupNode()
     {
         return;
     }
+    // DEEPINFRA KVDBG: master count of real trie detaches (early-return above
+    // means this only counts blocks that were actually attached).
+    deepinfra_kvdbg::ctrs().detachTotal.fetch_add(1, std::memory_order_relaxed);
     // clearValue triggers the cascade-prune up through empty ancestor nodes automatically.
     auto const wasCleared = mLookupNode->clearValue(mWindowSize);
     TLLM_CHECK_WITH_INFO(wasCleared,
@@ -1178,6 +1244,12 @@ void WindowBlockManager::startScheduling()
 
 void WindowBlockManager::freeLeafBlock(BlockPtr const& block)
 {
+    // DEEPINFRA KVDBG: SILENT detach — no removed event on this path
+    // (partial-reuse copy target reclamation).
+    if (blockInRadixTree(block))
+    {
+        deepinfra_kvdbg::ctrs().freeLeafSilent.fetch_add(1, std::memory_order_relaxed);
+    }
     // The eviction policy needs blocks to still be linked to their old parents when they're reclaimed.
     // This is so it can check if the parent should be queued for eviction.
     block->freeLeafBlock();
@@ -1205,6 +1277,11 @@ void WindowBlockManager::releaseSubtree(BlockPtr const& block)
     for (auto it = subtree.rbegin(); it != subtree.rend(); ++it)
     {
         auto const& b = *it;
+        // DEEPINFRA KVDBG: emitting path — removed event accompanies the detach.
+        if (blockInRadixTree(b))
+        {
+            deepinfra_kvdbg::ctrs().subtreeEmit.fetch_add(1, std::memory_order_relaxed);
+        }
         if (mEventManager && blockInRadixTree(b))
         {
             mEventManager->enqueueRemovedEvent(b, mWindowSize);
@@ -1278,6 +1355,22 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
     // detachFromLookupNode must do the same.
     {
         std::lock_guard<std::recursive_mutex> treeLock(mLookupTree->getMutex());
+        // DEEPINFRA KVDBG: categorize what getFreeBlock claims. A block with
+        // content that is NOT in the trie was silently detached earlier by a
+        // non-emitting path — its announced hash is orphaned on the FE.
+        if (blockInRadixTree(block))
+        {
+            deepinfra_kvdbg::ctrs().evictEmit.fetch_add(1, std::memory_order_relaxed);
+        }
+        else if (!block->getUniqueTokens().empty())
+        {
+            deepinfra_kvdbg::ctrs().evictContentNoTree.fetch_add(1, std::memory_order_relaxed);
+        }
+        else
+        {
+            deepinfra_kvdbg::ctrs().evictFresh.fetch_add(1, std::memory_order_relaxed);
+        }
+        deepinfra_kvdbg::maybeLog(mWindowSize);
         if (mEventManager && blockInRadixTree(block))
         {
             mEventManager->enqueueRemovedEvent(block, mWindowSize);
@@ -2582,6 +2675,11 @@ std::pair<SizeType32, std::vector<KVCacheBlock::IdType>> WindowBlockManager::sto
             {
                 TLLM_LOG_DEBUG("%s::storeBlocks - linear-attention placeholder %d: inserting at trie slot",
                     mLogPrefix.c_str(), block->getBlockId());
+                // DEEPINFRA KVDBG: same silent re-key as the normal insert path.
+                if (blockInRadixTree(block))
+                {
+                    deepinfra_kvdbg::ctrs().storeRekeyDetach.fetch_add(1, std::memory_order_relaxed);
+                }
                 block->detachFromLookupNode();
                 block->setBlockKey(blockKey, static_cast<SizeType32>(blockKey.uniqueTokens.size()) == mTokensPerBlock);
                 block->setPrevBlockInSeq(prevBlock);
@@ -2620,6 +2718,12 @@ std::pair<SizeType32, std::vector<KVCacheBlock::IdType>> WindowBlockManager::sto
             TLLM_LOG_DEBUG("%s::storeBlocks - Block %d: no existing entry, inserting into search structure",
                 mLogPrefix.c_str(), bid);
 
+            // DEEPINFRA KVDBG: SILENT detach — re-keying a block that is still
+            // attached elsewhere drops its old trie slot with no removed event.
+            if (blockInRadixTree(block))
+            {
+                deepinfra_kvdbg::ctrs().storeRekeyDetach.fetch_add(1, std::memory_order_relaxed);
+            }
             block->detachFromLookupNode();
             block->setBlockKey(blockKey, static_cast<SizeType32>(blockKey.uniqueTokens.size()) == mTokensPerBlock);
             block->setPrevBlockInSeq(prevBlock);
@@ -2629,6 +2733,9 @@ std::pair<SizeType32, std::vector<KVCacheBlock::IdType>> WindowBlockManager::sto
             if (block->getHash() != newHash)
             {
                 TLLM_LOG_DEBUG("#%d block hash %zx -> %zx", bid, block->getHash(), newHash);
+                // DEEPINFRA KVDBG: hash mutated on (re-)store — if the old hash
+                // was announced stored, it is orphaned on the FE.
+                deepinfra_kvdbg::ctrs().storeHashMut.fetch_add(1, std::memory_order_relaxed);
                 block->setHash(newHash);
             }
 
@@ -2670,6 +2777,9 @@ std::pair<SizeType32, std::vector<KVCacheBlock::IdType>> WindowBlockManager::sto
         }
         if (!nonPlaceholderStoredBlocks.empty())
         {
+            // DEEPINFRA KVDBG: blocks announced stored on the KV-event stream.
+            deepinfra_kvdbg::ctrs().storedBlk.fetch_add(
+                nonPlaceholderStoredBlocks.size(), std::memory_order_relaxed);
             mEventManager->enqueueStoredEvent(nonPlaceholderStoredBlocks, mWindowSize);
         }
     }
@@ -3686,6 +3796,10 @@ void WindowBlockManager::detachFrontBlock(GenerationRequest& sequence)
         outOfWindowBlock->setExpirationTime(std::nullopt);
 
         outOfWindowBlock->decRefCount();
+
+        // DEEPINFRA KVDBG: OOW release (SWA). Does not itself detach from the
+        // trie, but tracks the rate of this silent free path.
+        deepinfra_kvdbg::ctrs().detachFrontOOW.fetch_add(1, std::memory_order_relaxed);
 
         if (outOfWindowBlock->hasRefs())
         {
