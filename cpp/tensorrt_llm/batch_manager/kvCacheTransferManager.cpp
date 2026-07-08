@@ -510,24 +510,28 @@ void KVCacheTransferManager::diskWriterLoop()
     }
 }
 
-void KVCacheTransferManager::enqueueDiskWrite(std::string filename, void const* src, std::size_t bytes)
+void KVCacheTransferManager::enqueueDiskWrite(
+    std::string filename, void const* src, std::size_t bytes, bool paid)
 {
     DiskWriteJob job;
     job.filename = std::move(filename);
     job.bytes = bytes;
+    job.paid = paid;
     job.staged.resize(bytes);
     std::memcpy(job.staged.data(), src, bytes); // fast host->host copy; frees the slot
 
     {
         std::unique_lock<std::mutex> lock(mDiskMutex);
-        // Backpressure + per-slot serialization: wait for queue room AND no earlier write
-        // to this same slot still outstanding (so a reused slot cannot race).
+        // Per-slot serialization (always) + backpressure. A paid/retained spill must land, so it bypasses the
+        // queue cap (bounded by paid volume); a best-effort spill also waits for room. Best-effort shedding
+        // under saturation happens upstream at the eviction gate, so a best-effort spill reaching here + then
+        // finding the queue full is the rare TOCTOU case.
         mDiskQueueCv.wait(lock,
             [this, &job]
             {
-                return (mDiskWriteQueue.size() < mDiskWriteQueueMax
-                           && mDiskInflight.find(job.filename) == mDiskInflight.end())
-                    || mDiskWriterStop;
+                bool const slotClear = mDiskInflight.find(job.filename) == mDiskInflight.end();
+                bool const roomOrPaid = job.paid || mDiskWriteQueue.size() < mDiskWriteQueueMax;
+                return (slotClear && roomOrPaid) || mDiskWriterStop;
             });
         if (mDiskWriterStop)
         {
@@ -540,23 +544,25 @@ void KVCacheTransferManager::enqueueDiskWrite(std::string filename, void const* 
 }
 
 void KVCacheTransferManager::enqueueDiskWriteNoCopy(
-    std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId)
+    std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId, bool paid)
 {
     DiskWriteJob job;
     job.filename = std::move(filename);
     job.bytes = bytes;
     job.src = src; // no staging: the writer reads the pinned host slot directly
     job.spillId = spillId;
+    job.paid = paid;
 
     {
         std::unique_lock<std::mutex> lock(mDiskMutex);
-        // Same backpressure + per-slot serialization as enqueueDiskWrite.
+        // Same per-slot serialization + backpressure as enqueueDiskWrite: paid spills bypass the queue cap
+        // (never stall the scheduler), best-effort spills also wait for room.
         mDiskQueueCv.wait(lock,
             [this, &job]
             {
-                return (mDiskWriteQueue.size() < mDiskWriteQueueMax
-                           && mDiskInflight.find(job.filename) == mDiskInflight.end())
-                    || mDiskWriterStop;
+                bool const slotClear = mDiskInflight.find(job.filename) == mDiskInflight.end();
+                bool const roomOrPaid = job.paid || mDiskWriteQueue.size() < mDiskWriteQueueMax;
+                return (slotClear && roomOrPaid) || mDiskWriterStop;
             });
         if (mDiskWriterStop)
         {
@@ -585,6 +591,12 @@ void KVCacheTransferManager::waitForDiskSlotWrites(std::string const& filename)
             auto it = mDiskInflight.find(filename);
             return it == mDiskInflight.end() || it->second <= 0;
         });
+}
+
+bool KVCacheTransferManager::diskWriteQueueFull()
+{
+    std::lock_guard<std::mutex> lock(mDiskMutex);
+    return mDiskWriteQueue.size() >= mDiskWriteQueueMax;
 }
 
 void KVCacheTransferManager::diskReaderLoop()
@@ -708,6 +720,7 @@ void KVCacheTransferManager::spillToFile(BlockPtr const& srcHostBlock, SizeType3
     std::vector<KVCacheBlockPool> const& pools, std::string const& directory)
 {
     TLLM_CHECK_WITH_INFO(!directory.empty(), "disk tier requires a directory");
+    bool const paid = srcHostBlock->isRetainedNow(); // retained/paid spill must land -> bypasses the queue cap
     // The victim's bytes may still be the target of an in-flight async GPU->host copy;
     // wait it out before reading host memory (same event discipline as copyBlock).
     auto const idx = getPendingTransferIndex(srcHostBlock);
@@ -734,7 +747,7 @@ void KVCacheTransferManager::spillToFile(BlockPtr const& srcHostBlock, SizeType3
             continue;
         }
         // Async path: copy bytes out (frees the slot immediately) and hand to the writer.
-        enqueueDiskWrite(filename, ptr->data(), bytes);
+        enqueueDiskWrite(filename, ptr->data(), bytes, paid);
     }
 }
 
@@ -743,6 +756,7 @@ void KVCacheTransferManager::spillToFileNoCopy(BlockPtr const& srcHostBlock, Siz
 {
     TLLM_CHECK_WITH_INFO(!directory.empty(), "disk tier requires a directory");
     TLLM_CHECK_WITH_INFO(mAsyncDiskStore, "spillToFileNoCopy requires the async writer");
+    bool const paid = srcHostBlock->isRetainedNow(); // retained/paid spill must land -> bypasses the queue cap
     // Same event discipline as spillToFile: the victim's bytes may still be the target of an in-flight
     // GPU->host copy; block until it lands before the writer reads host memory.
     auto const idx = getPendingTransferIndex(srcHostBlock);
@@ -765,7 +779,7 @@ void KVCacheTransferManager::spillToFileNoCopy(BlockPtr const& srcHostBlock, Siz
         auto const bytes = static_cast<std::size_t>(ptr->getSizeInBytes());
         // The pool buffer outlives the manager, so this raw pointer stays valid after `ptr` (a view)
         // is destroyed -- the writer reads it later off-thread.
-        enqueueDiskWriteNoCopy(filename, ptr->data(), bytes, spillId);
+        enqueueDiskWriteNoCopy(filename, ptr->data(), bytes, spillId, paid);
     }
 }
 

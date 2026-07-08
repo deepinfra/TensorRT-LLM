@@ -127,6 +127,10 @@ public:
         return mAsyncDiskStore;
     }
 
+    //! \brief True if the async write queue is at capacity. Used to shed best-effort (unpaid) spills under
+    //! writer saturation; paid spills bypass the cap and are never shed.
+    [[nodiscard]] bool diskWriteQueueFull();
+
     void syncTransfers();
 
     ~KVCacheTransferManager();
@@ -193,6 +197,7 @@ private:
         std::vector<std::uint8_t> staged; // staged-memcpy path (used when src == nullptr)
         void const* src{nullptr};         // no-copy path: writer reads this pinned host pointer directly
         std::uint64_t spillId{0};         // >0 => track per-spill completion for the reserved-pool reap
+        bool paid{false};                 // retained/paid spill: bypasses the queue cap, never dropped
     };
     std::vector<std::thread> mDiskWriters;
     std::mutex mDiskMutex;
@@ -216,8 +221,9 @@ private:
         }()};
 
     void diskWriterLoop();
-    void enqueueDiskWrite(std::string filename, void const* src, std::size_t bytes);
-    void enqueueDiskWriteNoCopy(std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId);
+    void enqueueDiskWrite(std::string filename, void const* src, std::size_t bytes, bool paid);
+    void enqueueDiskWriteNoCopy(
+        std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId, bool paid);
     void waitForDiskSlotWrites(std::string const& filename);
 
     // ---- Disk-tier async ONBOARD: read slot files disk->GPU OFF the scheduler thread ----
