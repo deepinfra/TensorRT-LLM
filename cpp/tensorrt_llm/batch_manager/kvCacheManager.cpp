@@ -39,8 +39,10 @@
 #include <chrono>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <sstream>
+#include <unordered_set>
 #include <utility>
 
 namespace tc = tensorrt_llm::common;
@@ -77,7 +79,49 @@ struct Counters
     std::atomic<uint64_t> storeHashMut{0};       // storeBlocks insert: block hash changed on re-store (old hash orphaned)
     std::atomic<uint64_t> freeLeafSilent{0};     // WindowBlockManager::freeLeafBlock on in-trie block (SILENT)
     std::atomic<uint64_t> detachFrontOOW{0};     // detachFrontBlock OOW releases (SWA; trie state unchanged)
+    // --- v2: discriminators for the "stored but unattached at reclaim" mystery ---
+    std::atomic<uint64_t> attachTotal{0};        // attachToLookupNode calls (blocks wired into trie)
+    std::atomic<uint64_t> attachReslot{0};       // attachToLookupNode cleared a PRIOR slot (silent detach!)
+    std::atomic<uint64_t> claimNodeSetPrevNull{0};    // claim: mLookupNode SET but getPrevBlock()==null (parent chain broken)
+    std::atomic<uint64_t> claimStoredNodeNull{0};     // claim: unwired AND was previously ANNOUNCED stored (FE orphan!)
+    std::atomic<uint64_t> claimNeverStoredNodeNull{0}; // claim: unwired, never announced (benign)
+    std::atomic<uint64_t> releasedWithStore{0};  // releaseBlocks calls that re-stored (llmRequest provided)
+    std::atomic<uint64_t> releasedNoStore{0};    // releaseBlocks calls WITHOUT store (llmRequest absent)
 };
+
+// Raw pointers of KVCacheBlock objects whose hashes were announced via
+// enqueueStoredEvent and not yet reclaimed/removed. Bounded by pool size in the
+// healthy case; unbounded growth = announced blocks accumulate unreclaimed.
+inline std::mutex& storedSetMutex()
+{
+    static std::mutex m;
+    return m;
+}
+
+inline std::unordered_set<void const*>& storedSet()
+{
+    static std::unordered_set<void const*> s;
+    return s;
+}
+
+inline void storedSetInsert(void const* p)
+{
+    std::lock_guard<std::mutex> lk(storedSetMutex());
+    storedSet().insert(p);
+}
+
+// Returns true if the pointer was present (i.e. this block had been announced).
+inline bool storedSetErase(void const* p)
+{
+    std::lock_guard<std::mutex> lk(storedSetMutex());
+    return storedSet().erase(p) > 0;
+}
+
+inline size_t storedSetSize()
+{
+    std::lock_guard<std::mutex> lk(storedSetMutex());
+    return storedSet().size();
+}
 
 inline Counters& ctrs()
 {
@@ -100,7 +144,9 @@ inline void maybeLog(int windowSize)
     TLLM_LOG_WARNING(
         "KVDBGCPP ws=%d detach_total=%llu stored_blk=%llu evict_emit=%llu evict_content_no_tree=%llu "
         "evict_fresh=%llu subtree_emit=%llu store_rekey_detach=%llu store_hash_mut=%llu free_leaf_silent=%llu "
-        "detach_front_oow=%llu",
+        "detach_front_oow=%llu | v2 attach_total=%llu attach_reslot=%llu claim_node_set_prev_null=%llu "
+        "claim_stored_node_null=%llu claim_never_stored_node_null=%llu released_with_store=%llu "
+        "released_no_store=%llu stored_set=%zu",
         windowSize, (unsigned long long) c.detachTotal.load(std::memory_order_relaxed),
         (unsigned long long) c.storedBlk.load(std::memory_order_relaxed),
         (unsigned long long) c.evictEmit.load(std::memory_order_relaxed),
@@ -110,7 +156,14 @@ inline void maybeLog(int windowSize)
         (unsigned long long) c.storeRekeyDetach.load(std::memory_order_relaxed),
         (unsigned long long) c.storeHashMut.load(std::memory_order_relaxed),
         (unsigned long long) c.freeLeafSilent.load(std::memory_order_relaxed),
-        (unsigned long long) c.detachFrontOOW.load(std::memory_order_relaxed));
+        (unsigned long long) c.detachFrontOOW.load(std::memory_order_relaxed),
+        (unsigned long long) c.attachTotal.load(std::memory_order_relaxed),
+        (unsigned long long) c.attachReslot.load(std::memory_order_relaxed),
+        (unsigned long long) c.claimNodeSetPrevNull.load(std::memory_order_relaxed),
+        (unsigned long long) c.claimStoredNodeNull.load(std::memory_order_relaxed),
+        (unsigned long long) c.claimNeverStoredNodeNull.load(std::memory_order_relaxed),
+        (unsigned long long) c.releasedWithStore.load(std::memory_order_relaxed),
+        (unsigned long long) c.releasedNoStore.load(std::memory_order_relaxed), storedSetSize());
 }
 } // namespace deepinfra_kvdbg
 
@@ -249,6 +302,13 @@ NextBlockMap KVCacheBlock::getNextBlocks() const
 
 void KVCacheBlock::attachToLookupNode(radix_block_tree::LookupNodePtr node, int windowSize)
 {
+    // DEEPINFRA KVDBG v2: count wiring; a prior-slot clear here is a SILENT
+    // detach (bypasses detachFromLookupNode's counter and any removed event).
+    deepinfra_kvdbg::ctrs().attachTotal.fetch_add(1, std::memory_order_relaxed);
+    if (mLookupNode)
+    {
+        deepinfra_kvdbg::ctrs().attachReslot.fetch_add(1, std::memory_order_relaxed);
+    }
     // Detach from any previous node first.
     if (mLookupNode)
     {
@@ -1281,6 +1341,7 @@ void WindowBlockManager::releaseSubtree(BlockPtr const& block)
         if (blockInRadixTree(b))
         {
             deepinfra_kvdbg::ctrs().subtreeEmit.fetch_add(1, std::memory_order_relaxed);
+            deepinfra_kvdbg::storedSetErase(b.get());
         }
         if (mEventManager && blockInRadixTree(b))
         {
@@ -1361,10 +1422,30 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
         if (blockInRadixTree(block))
         {
             deepinfra_kvdbg::ctrs().evictEmit.fetch_add(1, std::memory_order_relaxed);
+            deepinfra_kvdbg::storedSetErase(block.get());
         }
         else if (!block->getUniqueTokens().empty())
         {
             deepinfra_kvdbg::ctrs().evictContentNoTree.fetch_add(1, std::memory_order_relaxed);
+            // v2 discriminators: HOW did this block lose trie membership?
+            if (block->getLookupNode())
+            {
+                // Wired to a node but getPrevBlock()==null: parent chain broken
+                // (node orphaned from the tree / ancestor value slot empty).
+                deepinfra_kvdbg::ctrs().claimNodeSetPrevNull.fetch_add(1, std::memory_order_relaxed);
+                deepinfra_kvdbg::storedSetErase(block.get());
+            }
+            else if (deepinfra_kvdbg::storedSetErase(block.get()))
+            {
+                // Truly unwired AND this very object was announced stored:
+                // its hash is orphaned on the FE — the leak, caught in the act.
+                deepinfra_kvdbg::ctrs().claimStoredNodeNull.fetch_add(1, std::memory_order_relaxed);
+            }
+            else
+            {
+                // Unwired and never announced (e.g. freed without store): benign.
+                deepinfra_kvdbg::ctrs().claimNeverStoredNodeNull.fetch_add(1, std::memory_order_relaxed);
+            }
         }
         else
         {
@@ -2780,6 +2861,12 @@ std::pair<SizeType32, std::vector<KVCacheBlock::IdType>> WindowBlockManager::sto
             // DEEPINFRA KVDBG: blocks announced stored on the KV-event stream.
             deepinfra_kvdbg::ctrs().storedBlk.fetch_add(
                 nonPlaceholderStoredBlocks.size(), std::memory_order_relaxed);
+            // v2: remember which block objects were announced, so the claim
+            // path can tell "announced then silently lost" from "never announced".
+            for (auto const& b : nonPlaceholderStoredBlocks)
+            {
+                deepinfra_kvdbg::storedSetInsert(b.get());
+            }
             mEventManager->enqueueStoredEvent(nonPlaceholderStoredBlocks, mWindowSize);
         }
     }
@@ -3224,6 +3311,14 @@ std::optional<KVCacheBlock::IdType> WindowBlockManager::releaseBlocks(
             = storeBlocks(std::move(blockKeys), beam0Blocks, /*pinBlocks=*/false);
         TLLM_LOG_DEBUG("%s::releaseBlocks Request %lu, %d blocks stored for reuse", mLogPrefix.c_str(),
             sequence.getRequestId(), numBlocksStoredForReuse);
+        // DEEPINFRA KVDBG v2: sequence released WITH a re-store pass.
+        deepinfra_kvdbg::ctrs().releasedWithStore.fetch_add(1, std::memory_order_relaxed);
+    }
+    else
+    {
+        // DEEPINFRA KVDBG v2: sequence released WITHOUT store (llmRequest absent
+        // or recurrent-state) — its blocks return to the pool unannounced.
+        deepinfra_kvdbg::ctrs().releasedNoStore.fetch_add(1, std::memory_order_relaxed);
     }
     // Iterate all allocated blocks (including placeholder sentinels at OOW positions);
     // EvictionPolicy::releaseBlock silently skips placeholders.
