@@ -1304,11 +1304,16 @@ void WindowBlockManager::startScheduling()
 
 void WindowBlockManager::freeLeafBlock(BlockPtr const& block)
 {
-    // DEEPINFRA KVDBG: SILENT detach — no removed event on this path
-    // (partial-reuse copy target reclamation).
+    // DEEPINFRA: emit a KV "removed" event before detaching (same contract as
+    // getFreeBlock/releaseSubtree). KVDBG keeps counting this path — with the
+    // fix, freeLeafSilent now counts EMITTING freeLeaf detaches.
     if (blockInRadixTree(block))
     {
         deepinfra_kvdbg::ctrs().freeLeafSilent.fetch_add(1, std::memory_order_relaxed);
+        if (mEventManager)
+        {
+            mEventManager->enqueueRemovedEvent(block, mWindowSize);
+        }
     }
     // The eviction policy needs blocks to still be linked to their old parents when they're reclaimed.
     // This is so it can check if the parent should be queued for eviction.
