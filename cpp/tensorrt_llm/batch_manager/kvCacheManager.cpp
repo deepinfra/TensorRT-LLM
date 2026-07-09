@@ -2248,7 +2248,16 @@ std::vector<WindowBlockManager::BatchSeqStats> WindowBlockManager::addSequenceBa
 
 bool WindowBlockManager::blockInRadixTree(BlockPtr const& block)
 {
-    return !block->getUniqueTokens().empty() && block->getPrevBlock() != nullptr;
+    // DEEPINFRA FIX: test actual trie membership, not parent-chain validity.
+    // getPrevBlock() returns nullptr whenever the PARENT node's value slot is
+    // empty — which happens as soon as the parent block is reclaimed — so the
+    // old check reported false for every descendant of an evicted ancestor.
+    // getFreeBlock/releaseSubtree then skipped the KV "removed" event for
+    // ~97% of announced-block reclaims on disagg prefill (diverse prompts →
+    // deep unshared chains → ancestors die early), leaking those hashes
+    // forever in any kv-event consumer (dynamo router radix tree grew to
+    // ~200x the worker's physical capacity). Membership is mLookupNode.
+    return !block->getUniqueTokens().empty() && block->getLookupNode() != nullptr;
 }
 
 std::shared_ptr<KVCacheBlock> WindowBlockManager::findBlocksInReuseTreeByBlockKey(BlockKey const& blockKey)
