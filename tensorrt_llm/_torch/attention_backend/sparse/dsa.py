@@ -454,8 +454,15 @@ class DSAtrtllmAttentionMetadata(TrtllmAttentionMetadata):
     # Enable indexer skip for short sequences
     enable_indexer_skip: bool = False
     # Cross-layer indexer sharing (e.g. GLM-5.2): previous full layer's top-k,
-    # reused by "shared" layers (None for a dense per-layer indexer).
+    # reused by "shared" layers (None for a dense per-layer indexer). Also used
+    # as the per-request stash for MTP cross-step indexer Top-K reuse.
     shared_topk_indices: Optional[torch.Tensor] = None
+    # MTP cross-step indexer Top-K reuse: skip recomputing Top-K on draft
+    # steps > 0 and reuse the stashed step-0 Top-K instead.
+    indexer_skip_topk: bool = False
+    # Whether we are currently inside the MTP draft loop (keeps
+    # shared_topk_indices alive across draft steps).
+    in_mtp_draft_loop: bool = False
     # Whether skip the indexer for context requests
     skip_indexer_for_ctx_reqs: bool = False
     # Whether skip the indexer for generation requests
@@ -813,6 +820,16 @@ class DSAtrtllmAttentionMetadata(TrtllmAttentionMetadata):
                     dtype=torch.float32,
                     capture_graph=capture_graph,
                 )
+
+    def set_skip_topk(self, skip: bool):
+        """MTP cross-step reuse: on draft steps > 0, reuse the stashed step-0
+        indexer Top-K instead of recomputing it."""
+        self.indexer_skip_topk = skip
+
+    def set_in_mtp_draft_loop(self, active: bool):
+        """Mark whether we are inside the MTP draft loop so shared_topk_indices
+        survives across draft steps."""
+        self.in_mtp_draft_loop = active
 
     def _invalidate_pool_view_cache(self):
         """Invalidate the cached pool view and related step-invariant values.
@@ -1210,9 +1227,10 @@ class DSAtrtllmAttentionMetadata(TrtllmAttentionMetadata):
         # pool_view cache here so it is recomputed on the next
         # transform_local_topk_and_prepare_pool_view() call.
         self._invalidate_pool_view_cache()
-        # Per-step state for cross-layer indexer sharing; clear at the step
-        # boundary so a "shared" layer never reuses a stale top-k.
-        self.shared_topk_indices = None
+        # Clear per-step cross-layer top-k, but keep it inside the MTP draft
+        # loop so the step-0 stash survives for the reuse branch.
+        if not self.in_mtp_draft_loop:
+            self.shared_topk_indices = None
 
         if self.kv_cache_manager is not None and self.num_tokens > 0:
             seq_lens = self.seq_lens_cuda[:self.num_seqs]
@@ -1455,6 +1473,13 @@ class Indexer(nn.Module):
         self._enable_heuristic_topk = (
             sparse_attention_config.enable_heuristic_topk
             and get_sm_version() >= 100)
+
+        # MTP cross-step indexer Top-K reuse: reuse a request's step-0 Top-K on
+        # subsequent MTP draft steps instead of recomputing it. Defaults False
+        # for configs that don't define it.
+        self.mtp_index_share = bool(
+            getattr(sparse_attention_config, "index_share_for_mtp_iteration",
+                    False) or False)
 
         if (self.use_cute_dsl_topk
                 or self.use_cute_dsl_paged_mqa_logits) and layer_idx == 0:
@@ -2079,7 +2104,18 @@ class Indexer(nn.Module):
             topk_indices_buffer[:num_ctx_tokens, :] = \
                 metadata.topk_indices_buffer[:num_ctx_tokens, :]
 
-        if has_decode and not metadata.skip_indexer_for_gen_reqs:
+        # MTP cross-step indexer Top-K reuse: on draft steps > 0, reuse the
+        # per-request Top-K stashed at step 0 instead of recomputing it.
+        reuse_topk = (self.mtp_index_share
+                      and getattr(metadata, "indexer_skip_topk", False)
+                      and getattr(metadata, "shared_topk_indices",
+                                  None) is not None)
+
+        if has_decode and not metadata.skip_indexer_for_gen_reqs and reuse_topk:
+            topk_indices_buffer[num_ctx_tokens:num_ctx_tokens +
+                                num_gen_tokens, :] = \
+                metadata.shared_topk_indices[:num_generations, :]
+        elif has_decode and not metadata.skip_indexer_for_gen_reqs:
             max_seq_len = metadata.kv_cache_manager.max_seq_len
             # Get decode lengths per request (from seq_lens) for validation
             gen_seq_lens = metadata.seq_lens[num_contexts:num_contexts +
@@ -2312,6 +2348,25 @@ class Indexer(nn.Module):
             # Fill topk_indices_buffer with pre-defined dense topk indices
             topk_indices_buffer[num_ctx_tokens:num_tokens, :] = \
                 metadata.topk_indices_buffer[num_ctx_tokens:num_tokens, :]
+
+        # MTP Top-K stash: save each sequence's last-token Top-K for reuse
+        # by subsequent draft steps.
+        if (self.mtp_index_share
+                and getattr(metadata, "in_mtp_draft_loop", False)
+                and not reuse_topk):
+            rows = None
+            if num_generations > 0:
+                next_n = num_gen_tokens // num_generations
+                rows = topk_indices_buffer[num_ctx_tokens:num_ctx_tokens +
+                                           num_gen_tokens][next_n - 1::next_n]
+            if num_contexts > 0:
+                ctx_last = torch.cumsum(
+                    metadata.seq_lens_cuda[:num_contexts].to(torch.long),
+                    dim=0) - 1
+                ctx_rows = topk_indices_buffer[ctx_last]
+                rows = ctx_rows if rows is None else torch.cat([ctx_rows, rows])
+            if rows is not None:
+                metadata.shared_topk_indices = rows.contiguous()
         return topk_indices_buffer
 
     def _weight_scale(self, weights: torch.Tensor,

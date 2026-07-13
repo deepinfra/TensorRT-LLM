@@ -532,6 +532,11 @@ class DeepSeekSparseAttentionConfig(BaseSparseAttentionConfig):
         "(SM>=100) and index_head_dim=128, it can halve the indexer K cache "
         "per-token footprint from 132 B to 68 B.",
     )
+    index_share_for_mtp_iteration: Optional[bool] = Field(
+        default=None,
+        description=
+        "Reuse the indexer Top-K across MTP draft steps instead of recomputing "
+        "it each step. Defaults to the model's HF config value.")
 
     @model_validator(mode="after")
     def _validate_indexer_k_dtype(self):

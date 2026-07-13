@@ -789,8 +789,17 @@ class Eagle3OneModelWorker(SpecWorkerBase):
         last_tokens_idx = torch.cumsum(
             attn_metadata.seq_lens_cuda, dim=0, dtype=torch.long) - 1
 
+        # MTP cross-step indexer Top-K reuse: enter the draft loop so the DSA
+        # indexer stashes step-0 Top-K and reuses it on subsequent draft steps.
+        reuse_mtp_topk = (self.is_mtp_eagle
+                          and hasattr(attn_metadata, "set_skip_topk"))
+        if reuse_mtp_topk:
+            attn_metadata.set_in_mtp_draft_loop(True)
+
         with self.draft_kv_cache_context(attn_metadata, draft_kv_cache_manager):
             for i in range(runtime_draft_len):
+                if reuse_mtp_topk:
+                    attn_metadata.set_skip_topk(i > 0)
                 # Run draft model (mode-specific via helper). The helper
                 # passes ``all_rank_num_tokens`` as a kwarg so the draft model
                 # handles save/restore internally (Eagle3DraftModel.forward
@@ -956,6 +965,10 @@ class Eagle3OneModelWorker(SpecWorkerBase):
                     "spec_metadata": spec_metadata,
                 }
         next_draft_tokens = torch.stack(next_draft_tokens, dim=1)
+
+        if reuse_mtp_topk:
+            attn_metadata.set_skip_topk(False)
+            attn_metadata.set_in_mtp_draft_loop(False)
 
         # Override with SA draft tokens after all draft layers have run,
         # so that draft layers never see SA tokens in their inputs.
