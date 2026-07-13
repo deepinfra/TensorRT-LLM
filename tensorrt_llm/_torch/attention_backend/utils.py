@@ -64,6 +64,7 @@ def create_attention(
     sparse_attention_config: Optional["SparseAttentionConfig"] = None,
     dtype: Optional[torch.dtype] = None,
     aux_stream: Optional[torch.cuda.Stream] = None,
+    is_full_indexer_layer: bool = True,
 ):
     if attention_chunk_size is not None and backend_name.upper() != "TRTLLM":
         raise ValueError(
@@ -89,6 +90,15 @@ def create_attention(
     else:
         mla_params = None
 
+    # Cross-layer indexer sharing (e.g. GLM-5.2): only the DSA backend consumes
+    # is_full_indexer_layer to decide whether this layer owns an indexer or
+    # reuses the previous full layer's top-k. Other backends must not receive
+    # the (unexpected) kwarg.
+    extra_kwargs = {}
+    if (sparse_attention_config is not None
+            and getattr(sparse_attention_config, "algorithm", None) == "dsa"):
+        extra_kwargs["is_full_indexer_layer"] = is_full_indexer_layer
+
     return attn_cls(
         layer_idx,
         num_heads,
@@ -103,4 +113,5 @@ def create_attention(
         sparse_attention_config=sparse_attention_config,
         dtype=dtype,
         aux_stream=aux_stream,
+        **extra_kwargs,
     )

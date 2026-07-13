@@ -572,6 +572,38 @@ class DeepSeekSparseAttentionConfig(BaseSparseAttentionConfig):
         self.seq_len_threshold = self.index_topk
         return self.skip_indexer_for_short_seqs
 
+    @staticmethod
+    def is_full_indexer_layer(pretrained_config, layer_idx) -> bool:
+        """Whether a DSA layer runs its own indexer ("full") or reuses the
+        previous full layer's top-k ("shared") -- cross-layer indexer sharing
+        (e.g. GLM-5.2).
+
+        Resolved from the HF config: index_topk_pattern, else
+        index_topk_freq/index_skip_topk_offset. The MTP/nextn layer
+        (>= num_hidden_layers) is always full. Defaults to full (a dense
+        per-layer indexer, e.g. DeepSeek-V3.2).
+        """
+        if pretrained_config is None or layer_idx is None:
+            return True
+        n = getattr(pretrained_config, "num_hidden_layers", None)
+        if n is not None and layer_idx >= n:
+            return True  # MTP/nextn layer
+        pattern = getattr(pretrained_config, "index_topk_pattern", None)
+        if pattern is not None:
+            is_full = not (layer_idx < len(pattern)
+                           and str(pattern[layer_idx]).upper() == "S")
+        else:
+            freq = max(getattr(pretrained_config, "index_topk_freq", 1) or 1, 1)
+            offset = getattr(pretrained_config, "index_skip_topk_offset", 2)
+            is_full = (max(layer_idx - offset + 1, 0) % freq) == 0
+        if layer_idx == 0 and not is_full:
+            logger.warning(
+                "DSA layer 0 resolved to 'shared' but has no prior full layer's "
+                "top-k to reuse; forcing it to 'full'. Check index_topk_pattern."
+            )
+            is_full = True
+        return is_full
+
 
 class SkipSoftmaxAttentionConfig(BaseSparseAttentionConfig):
     """Configuration for skip softmax attention."""
