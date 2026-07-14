@@ -43,6 +43,7 @@
 #include <mutex>
 #include <optional>
 #include <ostream>
+#include <queue>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -67,6 +68,7 @@ namespace tensorrt_llm::batch_manager::kv_cache_manager
 static constexpr SizeType32 kPrimaryLevel = 0;
 
 static constexpr SizeType32 kSecondaryLevel = 1;
+static constexpr SizeType32 kDiskLevel = 2;
 
 // Extra block buffer allocated for SWA to be able to always keep "window size"
 // tokens held in the blocks.
@@ -436,6 +438,66 @@ public:
 
     void swapMemoryPoolBlockOffset(std::shared_ptr<KVCacheBlock> otherBlock);
 
+    static constexpr SizeType32 kNoDiskSlot = -1;
+
+    //! \brief True when this block's bytes live in the disk cache tier.
+    [[nodiscard]] bool isOnDisk() const
+    {
+        return mDiskSlot != kNoDiskSlot;
+    }
+
+    [[nodiscard]] SizeType32 getDiskSlot() const
+    {
+        return mDiskSlot;
+    }
+
+    void setDiskSlot(SizeType32 diskSlot)
+    {
+        mDiskSlot = diskSlot;
+    }
+
+    //! \brief Exchange tier residency with \p other: pool index and disk slot swap together.
+    //! Used by the host->disk spill and the disk->GPU onboard; the tree-resident identity
+    //! keeps its node/hash while the physical backing moves.
+    void swapDiskResidency(std::shared_ptr<KVCacheBlock> const& other)
+    {
+        std::swap(mMemoryPoolBlockIndex, other->mMemoryPoolBlockIndex);
+        std::swap(mDiskSlot, other->mDiskSlot);
+    }
+
+    //! \brief Mark this block's content as retained for the disk tier until \p expiry.
+    //! Re-marking keeps the later deadline.
+    void markRetained(std::chrono::steady_clock::time_point::duration expiry)
+    {
+        mRetentionExpiry = mRetentionExpiry ? std::max(*mRetentionExpiry, expiry) : expiry;
+    }
+
+    [[nodiscard]] bool isRetainedNow() const
+    {
+        return mRetentionExpiry.has_value() && *mRetentionExpiry > std::chrono::steady_clock::now().time_since_epoch();
+    }
+
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point::duration> getRetentionExpiry() const
+    {
+        return mRetentionExpiry;
+    }
+
+    void clearRetention()
+    {
+        mRetentionExpiry = std::nullopt;
+    }
+
+    //! \brief Times this block's content has been reused (prefix-matched); drives the disk reuse-gate.
+    [[nodiscard]] SizeType32 getReuseCount() const
+    {
+        return mReuseCount;
+    }
+
+    void incReuseCount()
+    {
+        ++mReuseCount;
+    }
+
     void incRefCount();
 
     void decRefCount();
@@ -590,6 +652,16 @@ private:
     std::optional<std::chrono::steady_clock::time_point::duration> mExpirationTime;
     // Hash for the event manager
     size_t mHash;
+
+    // Disk cache tier: slot index in the disk file pool; kNoDiskSlot when not disk-resident.
+    SizeType32 mDiskSlot{kNoDiskSlot};
+
+    // Disk-tier retention deadline (steady clock); nullopt = never marked.
+    std::optional<std::chrono::steady_clock::time_point::duration> mRetentionExpiry;
+
+    // How many times this block's content has been reused (prefix-matched). Metadata on the block object,
+    // so it survives tier moves like mRetentionExpiry (swapDiskResidency swaps only residency pointers).
+    SizeType32 mReuseCount{0};
 };
 
 class GenerationRequest
@@ -738,6 +810,11 @@ public:
         return mKvCacheRetentionConfig.getTransferMode();
     }
 
+    [[nodiscard]] std::optional<std::chrono::milliseconds> getDiskRetentionMs() const
+    {
+        return mKvCacheRetentionConfig.getDiskRetentionMs();
+    }
+
     [[nodiscard]] std::string const& getDirectory() const
     {
         return mKvCacheRetentionConfig.getDirectory();
@@ -875,8 +952,10 @@ public:
     explicit WindowBlockManager(nvinfer1::DataType dtype, SizeType32 windowSize,
         std::vector<SizeType32> const& managedLayers, std::vector<SizeType32> const& numKvHeadsPerLayer,
         SizeType32 sizePerHead, SizeType32 tokensPerBlock, bool isSWA, SizeType32 blocksInPrimaryPool,
-        SizeType32 blocksInSecondaryPool, SizeType32 maxNumSequences, std::shared_ptr<runtime::CudaStream> stream,
-        CacheType cacheType, std::optional<executor::RetentionPriority> secondaryOffloadMinPriority,
+        SizeType32 blocksInSecondaryPool, SizeType32 blocksInDiskPool, std::string const& diskCachePath,
+        bool diskRetainedOnly, bool diskProtectUnexpired, SizeType32 maxNumSequences,
+        std::shared_ptr<runtime::CudaStream> stream, CacheType cacheType,
+        std::optional<executor::RetentionPriority> secondaryOffloadMinPriority,
         std::shared_ptr<KVCacheEventManager> eventManager, bool enablePartialReuse, bool copyOnPartialReuse,
         std::shared_ptr<kv_connector::KvCacheConnectorManager> kvCacheConnectorManager,
         radix_block_tree::UnifiedBlockTree& lookupTree, std::shared_ptr<kvc::BaseLoopbackAgent> loopbackAgent = nullptr,
@@ -1197,8 +1276,16 @@ public:
 
     //! \brief Bring offloaded block from secondary to primary memory.
     //! \details Does nothing if block is already in primary memory.
+    //! \brief Reclaim a free secondary (host) block for reuse. If the victim still holds
+    //! reusable content and the disk tier has room, spill it to disk first (residency swap;
+    //! the tree-resident identity moves to the disk level). Returns a CLAIMED block.
+    [[nodiscard]] BlockPtr reclaimSecondaryBlock();
+
     void onboardBlock(GenerationRequest& sequence, BlockPtr const& offloadBlock,
         executor::KvCacheTransferMode mode = executor::KvCacheTransferMode::DRAM, std::string const& directory = "");
+
+    //! \brief True when every block held by requestId has its disk read landed (safe to forward).
+    [[nodiscard]] bool areBlocksReady(LlmRequest::RequestIdType requestId);
 
     //! \brief Bring block from primary to secondary memory.
     //! \details Does nothing if block is already in secondary memory.
@@ -1366,6 +1453,83 @@ private:
     // Number of blocks in pools
     SizeType32 mNumPrimaryBlocks;
     SizeType32 mNumSecondaryBlocks;
+    SizeType32 mNumDiskBlocks;
+    std::string mDiskCachePath;
+    bool mDiskRetainedOnly{false};
+    bool mDiskProtectUnexpired{false};
+    std::size_t mDiskSpills{0};
+    std::size_t mDiskGateDropped{0};
+    std::size_t mDiskWritePressureDropped{0};
+    std::size_t mDiskAdmissionRefused{0};
+    std::size_t mDiskOnboards{0};
+
+public:
+    [[nodiscard]] std::size_t getNumDiskSpills() const
+    {
+        return mDiskSpills;
+    }
+
+    [[nodiscard]] std::size_t getNumDiskGateDropped() const
+    {
+        return mDiskGateDropped;
+    }
+
+    [[nodiscard]] std::size_t getNumDiskAdmissionRefused() const
+    {
+        return mDiskAdmissionRefused;
+    }
+
+    [[nodiscard]] std::size_t getNumDiskOnboards() const
+    {
+        return mDiskOnboards;
+    }
+
+private:
+    //! Disk-tier displacement order among retained blocks: exact earliest deadline;
+    //! among equal deadlines, first-spilled first. Upstream releases and evicts chains
+    //! leaf-first, so arrival order at the disk is deepest-first and FIFO here equals
+    //! suffix-first within a chain (and LRU-like across requests). Entries are lazy:
+    //! validated against live block state on pop, stale ones discarded.
+    struct DiskDeadline
+    {
+        std::chrono::steady_clock::time_point::duration expiry;
+        std::uint64_t seq;
+        BlockPtr block;
+
+        bool operator>(DiskDeadline const& other) const
+        {
+            if (expiry != other.expiry)
+            {
+                return expiry > other.expiry;
+            }
+            return seq > other.seq; // first-arrived pops first among equal deadlines
+        }
+    };
+
+    std::priority_queue<DiskDeadline, std::vector<DiskDeadline>, std::greater<DiskDeadline>> mDiskDeadlines;
+    std::uint64_t mDiskSpillSeq{0};
+
+    // ---- Unstaged async store: reserved host-block pool (env TLLM_KV_DISK_RESERVED_BLOCKS, 0 = off) ----
+    // Target set from the environment in allocatePools. A spill hands out a reserved free host slot
+    // immediately and pins the victim's old slot until its async write drains, avoiding the staging
+    // memcpy on the scheduler thread. Reaped (drained) victim slots rejoin the pool: one out, one in.
+    SizeType32 mReservedHostBlockTarget{0};
+    std::vector<BlockPtr> mReservedHostBlocks;
+    std::unordered_map<std::uint64_t, BlockPtr> mPendingSpillBlocks;
+    // Onboarded disk cards whose async read is still in flight, keyed by the read's tracked block id.
+    // Held out of the disk free queue until the read lands so a spill cannot overwrite the slot file
+    // mid-read; reapReadPendingReleases() returns each card once its read completes.
+    std::unordered_map<KVCacheBlock::IdType, BlockPtr> mReadPendingReleases;
+    // Blocks whose owning request was released while their detached disk-onboard read was still in flight:
+    // held out of the free queue until the read lands (reapReadPendingReleases frees them) so the DMA
+    // destination is never repurposed mid-read. See releaseBlocks / the areBlocksReady park.
+    std::vector<BlockPtr> mReleaseReadPending;
+    void reapReadPendingReleases();
+    std::uint64_t mUnstagedSpillSeq{0};
+
+    //! \brief Pick and claim the disk block to overwrite: empty slots first, then
+    //! unmarked content, then the retained block with the earliest deadline.
+    [[nodiscard]] BlockPtr claimDiskTarget();
 
     // List of allocated blocks for each sequences
     std::unordered_map<LlmRequest::RequestIdType, std::vector<BlockPtr>> mAllocatedBlocksPerSeq;
@@ -1497,7 +1661,8 @@ public:
         std::optional<kvc::BaseAgentConfig> agentConfig = std::nullopt, bool enableIndexerKCache = false,
         SizeType32 indexerKCacheQuantBlockSize = 128, SizeType32 indexerKCacheIndexHeadDim = 0,
         bool indexerKCacheUseFp4 = false, std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
-        std::vector<PoolConfiguration> const& poolConfigurations = {});
+        std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false, bool diskProtectUnexpired = false);
 
     [[nodiscard]] bool isEnableIndexerKCache() const
     {
@@ -1582,6 +1747,9 @@ public:
     //! \details Does nothing if block is already in primary memory.
     void onboardBlock(GenerationRequest& sequence, BlockPtr const& offloadBlock, SizeType32 windowSize,
         executor::KvCacheTransferMode mode = executor::KvCacheTransferMode::DRAM, std::string const& directory = "");
+
+    //! \brief True when every block held by requestId (across windows) has its disk read landed.
+    [[nodiscard]] bool areBlocksReady(LlmRequest::RequestIdType requestId);
 
     //! \brief Bring block from primary to secondary memory for window size.
     //! \details Does nothing if block is already in secondary memory.
@@ -1953,6 +2121,49 @@ private:
     // Stored before mWindowBlockManagers so it is constructed first and its address
     // is stable when passed to each WindowBlockManager constructor.
     radix_block_tree::UnifiedBlockTree mLookupTree;
+
+public:
+    [[nodiscard]] std::size_t getNumDiskSpills() const
+    {
+        std::size_t total = 0;
+        for (auto const& [windowSize, manager] : mWindowBlockManagers)
+        {
+            total += manager.getNumDiskSpills();
+        }
+        return total;
+    }
+
+    [[nodiscard]] std::size_t getNumDiskGateDropped() const
+    {
+        std::size_t total = 0;
+        for (auto const& [windowSize, manager] : mWindowBlockManagers)
+        {
+            total += manager.getNumDiskGateDropped();
+        }
+        return total;
+    }
+
+    [[nodiscard]] std::size_t getNumDiskAdmissionRefused() const
+    {
+        std::size_t total = 0;
+        for (auto const& [windowSize, manager] : mWindowBlockManagers)
+        {
+            total += manager.getNumDiskAdmissionRefused();
+        }
+        return total;
+    }
+
+    [[nodiscard]] std::size_t getNumDiskOnboards() const
+    {
+        std::size_t total = 0;
+        for (auto const& [windowSize, manager] : mWindowBlockManagers)
+        {
+            total += manager.getNumDiskOnboards();
+        }
+        return total;
+    }
+
+private:
     std::map<SizeType32, WindowBlockManager> mWindowBlockManagers;
     std::map<SizeType32, WindowSizeMetadata> mWindowSizeToMetadata;
     std::vector<SizeType32> mLayerToWindowSize;
@@ -2293,7 +2504,8 @@ public:
         bool enableIndexerKCache = false, SizeType32 indexerKCacheQuantBlockSize = 128,
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
-        std::vector<PoolConfiguration> const& poolConfigurations = {});
+        std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false, bool diskProtectUnexpired = false);
 
     KVCacheManager(std::vector<SizeType32> const& numKvHeadsPerLayer, SizeType32 sizePerHead, SizeType32 tokensPerBlock,
         BlocksPerWindow const& blocksPerWindow, SizeType32 maxNumSequences, SizeType32 maxBeamWidth,
@@ -2307,7 +2519,8 @@ public:
         bool enableIndexerKCache = false, SizeType32 indexerKCacheQuantBlockSize = 128,
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
-        std::vector<PoolConfiguration> const& poolConfigurations = {});
+        std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false, bool diskProtectUnexpired = false);
 
     KVCacheManager(SizeType32 numLayers, SizeType32 numKvHeads, SizeType32 sizePerHead, SizeType32 tokensPerBlock,
         BlocksPerWindow const& blocksPerWindow, SizeType32 maxNumSequences, SizeType32 maxBeamWidth,
@@ -2321,7 +2534,8 @@ public:
         bool enableIndexerKCache = false, SizeType32 indexerKCacheQuantBlockSize = 128,
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
-        std::vector<PoolConfiguration> const& poolConfigurations = {});
+        std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false, bool diskProtectUnexpired = false);
 
     KVCacheManager(SizeType32 numLayers, SizeType32 numKvHeads, SizeType32 sizePerHead, SizeType32 tokensPerBlock,
         BlocksPerWindow const& blocksPerWindow, SizeType32 maxNumSequences, SizeType32 maxBeamWidth,
@@ -2331,7 +2545,8 @@ public:
         bool enableIndexerKCache = false, SizeType32 indexerKCacheQuantBlockSize = 128,
         SizeType32 indexerKCacheIndexHeadDim = 0, bool indexerKCacheUseFp4 = false,
         std::optional<LinearAttentionMetadata> linearAttentionMetadata = std::nullopt,
-        std::vector<PoolConfiguration> const& poolConfigurations = {});
+        std::vector<PoolConfiguration> const& poolConfigurations = {}, SizeType32 blocksInDiskPool = 0,
+        std::string const& diskCachePath = {}, bool diskRetainedOnly = false, bool diskProtectUnexpired = false);
 
     ~KVCacheManager() override = default;
 
@@ -2359,6 +2574,12 @@ public:
     [[nodiscard]] SizeType32 getNumFreeBlocks() const override
     {
         return mBlockManager.getNumFreeBlocks();
+    }
+
+    //! \brief True when every KV block held by requestId has its disk read landed (detached onboard).
+    [[nodiscard]] bool areBlocksReady(LlmRequest::RequestIdType requestId)
+    {
+        return mBlockManager.areBlocksReady(requestId);
     }
 
     [[nodiscard]] SizeType32 getNumPools() const override
