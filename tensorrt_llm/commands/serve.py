@@ -455,28 +455,17 @@ def launch_server(
                 f"{backend} is not a known backend, check help for available options.",
                 param_hint="backend")
 
-<<<<<<< HEAD
         server = OpenAIServer(
             generator=llm,
             model=model,
             tool_parser=tool_parser,
+            served_model_name=served_model_name,
             server_role=server_role,
             metadata_server_cfg=metadata_server_cfg,
             disagg_cluster_config=disagg_cluster_config,
             multimodal_server_config=multimodal_server_config,
             chat_template=chat_template,
             allow_request_chat_template=allow_request_chat_template)
-=======
-        server = OpenAIServer(generator=llm,
-                              model=model,
-                              tool_parser=tool_parser,
-                              served_model_name=served_model_name,
-                              server_role=server_role,
-                              metadata_server_cfg=metadata_server_cfg,
-                              disagg_cluster_config=disagg_cluster_config,
-                              multimodal_server_config=multimodal_server_config,
-                              chat_template=chat_template)
->>>>>>> af2d2d70c ([None][feat] OpenAI serving-layer DeepInfra extensions)
         _apply_fastapi_middlewares(server.app, middleware)
 
         # Optionally disable GC (default: not disabled)
@@ -1125,9 +1114,15 @@ def serve(
 
         llm_args_extra_dict = {}
         if extra_llm_api_options is not None:
-<<<<<<< HEAD
-            with open(extra_llm_api_options, 'r') as f:
-                llm_args_extra_dict = yaml.safe_load(f) or {}
+            # DeepInfra prod passes inline JSON to --extra_llm_api_options;
+            # upstream also supports a path to a YAML/JSON config file via
+            # --config. Accept both: an existing file is loaded as YAML, an
+            # inline string is parsed as JSON.
+            if os.path.isfile(extra_llm_api_options):
+                with open(extra_llm_api_options, 'r') as f:
+                    llm_args_extra_dict = yaml.safe_load(f) or {}
+            else:
+                llm_args_extra_dict = json.loads(extra_llm_api_options)
         extra_allow_request_chat_template = _pop_bool_config_option(
             llm_args_extra_dict, "allow_request_chat_template")
         allow_request_chat_template = (allow_request_chat_template
@@ -1136,21 +1131,6 @@ def serve(
             llm_args, llm_args_extra_dict, explicit_cli_keys=explicit_cli_keys)
 
         # CLI --no-telemetry always wins over YAML config
-=======
-            # DeepInfra prod passes inline JSON to --extra_llm_api_options;
-            # upstream also supports a path to a YAML/JSON config file via
-            # --config. Accept both: an existing file is loaded as YAML, an
-            # inline string is parsed as JSON.
-            if os.path.isfile(extra_llm_api_options):
-                with open(extra_llm_api_options, 'r') as f:
-                    llm_args_extra_dict = yaml.safe_load(f)
-            else:
-                llm_args_extra_dict = json.loads(extra_llm_api_options)
-        llm_args = update_llm_args_with_extra_dict(
-            llm_args, llm_args_extra_dict, explicit_cli_keys=explicit_cli_keys)
-
-        # CLI --no-telemetry always wins over config
->>>>>>> af2d2d70c ([None][feat] OpenAI serving-layer DeepInfra extensions)
         if not telemetry:
             llm_args["telemetry_config"] = llm_args[
                 "telemetry_config"].model_copy(update={"disabled": True})

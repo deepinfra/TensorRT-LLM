@@ -77,14 +77,8 @@ from .perf_metrics_manager import PerfMetricsManager
 from .request_utils import (RequestBroadcaster, attach_py_objects_to_requests,
                             derive_attention_dp_per_rank_request_cap,
                             get_from_waiting_queue, merge_requests)
-<<<<<<< HEAD
 from .resource_manager import (ResourceManager, ResourceManagerType,
-                               request_context)
-=======
-from .resource_manager import (KVCacheManagerV2, ResourceManager,
-                               ResourceManagerType,
                                kv_exhaustion_nonfatal_enabled, request_context)
->>>>>>> bea76fe0e ([None][fix] PyExecutor: non-fatal KV-cache block-pool exhaustion guard (default on))
 from .sampler import (AsyncWorkerMixin, Sampler, SamplerEvent, SampleState,
                       SampleStateTensors, TRTLLMSampler)
 from .scheduler import (RequestScheduler, ScheduledRequests,
@@ -2999,15 +2993,12 @@ class PyExecutor:
                 if self._is_kv_manager_v2 and self._can_pause_for_rebalance():
                     self._maybe_rebalance_kv_pools()
 
-<<<<<<< HEAD
                 self._handle_disagg_cache_errors_synced()
 
-=======
                 # Fail any requests the KV-cache exhaustion guard dropped last
                 # iteration (now safe: their in-flight forward has been
                 # consumed). Before scheduling so they are not re-picked.
                 self._drain_kv_rejected_requests()
->>>>>>> bea76fe0e ([None][fix] PyExecutor: non-fatal KV-cache block-pool exhaustion guard (default on))
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
 
@@ -3410,15 +3401,12 @@ class PyExecutor:
                 if self._is_kv_manager_v2 and self._can_pause_for_rebalance():
                     self._maybe_rebalance_kv_pools()
 
-<<<<<<< HEAD
                 self._handle_disagg_cache_errors_synced()
 
-=======
                 # Fail any requests the KV-cache exhaustion guard dropped last
                 # iteration (now safe: their in-flight forward has been
                 # consumed). Before scheduling so they are not re-picked.
                 self._drain_kv_rejected_requests()
->>>>>>> bea76fe0e ([None][fix] PyExecutor: non-fatal KV-cache block-pool exhaustion guard (default on))
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
 
@@ -5549,14 +5537,11 @@ class PyExecutor:
                     and not request.is_finished):
                 should_emit = False
             if should_emit:
-<<<<<<< HEAD
+                request.py_last_stream_emit_iter = 0
+                request.py_last_stream_emit_time = now
                 if request.return_perf_metrics:
                     # Response creation may finalize and copy scalar ctx GPU totals.
                     self.perf_manager.compute_batch_gpu_times([request])
-=======
-                request.py_last_stream_emit_iter = 0
-                request.py_last_stream_emit_time = now
->>>>>>> af2d2d70c ([None][feat] OpenAI serving-layer DeepInfra extensions)
                 response = request.create_response(False, self.dist.rank)
                 if response:
                     request_done = request.is_finished
