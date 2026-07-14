@@ -6990,14 +6990,11 @@ class PyExecutor:
                     and not request.is_finished):
                 should_emit = False
             if should_emit:
-<<<<<<< HEAD
+                request.py_last_stream_emit_iter = 0
+                request.py_last_stream_emit_time = now
                 if request.return_perf_metrics:
                     # Response creation may finalize and copy scalar ctx GPU totals.
                     self.perf_manager.compute_batch_gpu_times([request])
-=======
-                request.py_last_stream_emit_iter = 0
-                request.py_last_stream_emit_time = now
->>>>>>> af2d2d70c ([None][feat] OpenAI serving-layer DeepInfra extensions)
                 response = request.create_response(False, self.dist.rank)
                 if response:
                     request_done = request.is_finished
