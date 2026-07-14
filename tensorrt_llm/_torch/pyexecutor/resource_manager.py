@@ -896,24 +896,14 @@ class KVCacheManager(BaseResourceManager):
                         and self.mapping.pp_size == 1)
 
             if batch_request_infos:
-<<<<<<< HEAD
-                self.impl.add_sequence_batch(batch_request_infos,
-                                             batch_llm_requests)
-                for req in batch_llm_requests:
-                    for _ in range(self.num_extra_kv_tokens):
-                        self.impl.add_token(req.py_request_id)
-                    for _ in range(get_draft_token_length(req)):
-                        self.impl.add_token(req.py_request_id)
-=======
                 try:
                     self.impl.add_sequence_batch(batch_request_infos,
                                                  batch_llm_requests)
-                    for req in batch_ctx_requests:
+                    for req in batch_llm_requests:
                         for _ in range(self.num_extra_kv_tokens):
                             self.impl.add_token(req.py_request_id)
                         for _ in range(get_draft_token_length(req)):
                             self.impl.add_token(req.py_request_id)
->>>>>>> bea76fe0e ([None][fix] PyExecutor: non-fatal KV-cache block-pool exhaustion guard (default on))
 
                         if self.kv_connector_manager is not None:
                             block_ids = self.get_cache_indices(req)
@@ -928,7 +918,7 @@ class KVCacheManager(BaseResourceManager):
                     # whole new-admission batch and let the running generation
                     # requests below proceed.
                     _record_kv_exhausted_requests(scheduled_batch,
-                                                   list(batch_ctx_requests), e)
+                                                  list(batch_llm_requests), e)
 
             # Iterate a snapshot: _record_kv_exhausted_requests mutates
             # scheduled_batch.generation_requests on rejection.
