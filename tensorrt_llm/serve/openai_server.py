@@ -2,6 +2,7 @@
 import array
 import asyncio
 import base64
+import datetime as _dt
 import functools
 import json
 import os
@@ -55,6 +56,7 @@ from tensorrt_llm.llmapi import MultimodalEncoder, SchedulingParams, tracing
 from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
                                               MetadataServerConfig, ServerRole)
 from tensorrt_llm.llmapi.llm import LLM, RequestOutput
+from tensorrt_llm.llmapi.llm_utils import KvCacheRetentionConfig as _KvRetention
 from tensorrt_llm.llmapi.thinking_budget import \
     add_thinking_budget_logits_processor
 from tensorrt_llm.logger import logger
@@ -125,6 +127,20 @@ prom_metrics = defaultdict(float, {
 from .._utils import nvtx_mark, set_prometheus_multiproc_dir
 from .harmony_adapter import (HarmonyAdapter, get_harmony_adapter,
                               maybe_transform_reasoning_effort)
+
+
+def _disk_retention_config(request):
+    """Build a retention config from the request's kv_cache_ttl_seconds.
+
+    Carries only disk_retention_ms; returns None (the stock path) when the field
+    is absent or falsy.
+    """
+    ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
+    if not ttl_s:
+        return None
+    cfg = _KvRetention([])
+    cfg.disk_retention_ms = _dt.timedelta(seconds=ttl_s)
+    return cfg
 
 # yapf: enable
 
@@ -1972,6 +1988,7 @@ class OpenAIServer(_VideoRoutesMixin):
 
             promise = self.generator.generate_async(
                 inputs=generate_inputs,
+                kv_cache_retention_config=_disk_retention_config(request),
                 sampling_params=sampling_params,
                 _postproc_params=postproc_params
                 if self.postproc_worker_enabled else None,
@@ -2123,7 +2140,10 @@ class OpenAIServer(_VideoRoutesMixin):
                 if mm_item_order:
                     prompt["mm_item_order"] = mm_item_order
 
-            promise = self.generator.generate_async(inputs=prompt, )
+            # NB: MultimodalEncoder.generate_async(inputs, sampling_params) takes no
+            # kv_cache_retention_config (and no **kwargs); encoders emit embeddings and hold no
+            # KV cache to retain. Passing it here 500s every mm-encoder request, so omit it.
+            promise = self.generator.generate_async(inputs=prompt)
             asyncio.create_task(self.await_disconnected(raw_request, promise))
 
             response = await create_mm_embedding_response(promise)
@@ -2347,6 +2367,7 @@ class OpenAIServer(_VideoRoutesMixin):
 
                 promise = self.generator.generate_async(
                     inputs=tokens_prompt,
+                    kv_cache_retention_config=_disk_retention_config(request),
                     sampling_params=sampling_params,
                     _postproc_params=postproc_params,
                     streaming=request.stream,
@@ -2514,6 +2535,7 @@ class OpenAIServer(_VideoRoutesMixin):
             # Generate
             promise = self.generator.generate_async(
                 inputs=harmony_tokens,
+                kv_cache_retention_config=_disk_retention_config(request),
                 sampling_params=sampling_params,
                 _postproc_params=postproc_params
                 if self.postproc_worker_enabled else None,
@@ -2656,6 +2678,7 @@ class OpenAIServer(_VideoRoutesMixin):
             )
             promise = self.generator.generate_async(
                 inputs=input_tokens,
+                kv_cache_retention_config=_disk_retention_config(request),
                 sampling_params=sampling_params,
                 streaming=request.stream,
                 _postproc_params=postproc_params
