@@ -1336,7 +1336,9 @@ void CacheSender::sendSync(LlmRequest const& llmRequest)
 
 RequestInfo CacheSender::recvRequestInfo()
 {
-    return mImpl->recvRequestInfo();
+    auto requestInfo = mImpl->recvRequestInfo();
+    TLLM_CHECK(requestInfo.has_value());
+    return *requestInfo;
 }
 
 bool CacheSender::cancelRequest(LlmRequest const& llmRequest)
