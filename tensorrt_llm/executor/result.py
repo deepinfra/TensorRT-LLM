@@ -335,10 +335,23 @@ class GenerationResultBase:
                                       and self.disaggregated_params.request_type
                                       == "generation_only")
                 if is_generation_only:
-                    assert len(output.logprobs) >= output.length - 1, (
-                        f"logprobs length: {len(output.logprobs)} < "
-                        f"output.length - 1: {output.length - 1}")
-                    if len(output.logprobs) < output.length:
+                    # DEEPINFRA: tolerate truncated logprob arrays instead of
+                    # asserting. Under saturation LogProbStorage falls behind
+                    # the token stream (observed: exactly stream_interval-1
+                    # entries short) — the comment above already acknowledges
+                    # the storage races the worker; the assert escalated that
+                    # race to a worker-fatal error via the handler's
+                    # shutdown-on-unknown-exception policy (killed pods
+                    # 2026-07-16 at KV~1.0). A short array only degrades this
+                    # one response's logprob telemetry; never worth a worker.
+                    if len(output.logprobs) < output.length - 1:
+                        logger.warning(
+                            "Disaggregated serving: logprobs truncated "
+                            "(%d entries for %d tokens); LogProbStorage "
+                            "lagged the token stream. Returning the "
+                            "partial array.", len(output.logprobs),
+                            output.length)
+                    elif len(output.logprobs) < output.length:
                         logger.warning(
                             "Disaggregated serving: the response contains "
                             "%d logprob entries instead of %d because "
@@ -348,9 +361,12 @@ class GenerationResultBase:
                             "decode servers to receive complete results.",
                             len(output.logprobs), output.length)
                 else:
-                    assert len(output.logprobs) == output.length, (
-                        f"logprobs length: {len(output.logprobs)} != "
-                        f"output.length: {output.length}")
+                    # DEEPINFRA: warn-not-assert, same rationale as above.
+                    if len(output.logprobs) != output.length:
+                        logger.warning(
+                            "logprobs length %d != output.length %d; "
+                            "returning the partial array.",
+                            len(output.logprobs), output.length)
 
         if response_tensors.generation_logits is not None:
             output.generation_logits = response_tensors.generation_logits[
