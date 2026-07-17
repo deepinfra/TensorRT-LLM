@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+#include <filesystem>
+#include <mutex>
 #include "tensorrt_llm/batch_manager/kvCacheManager.h"
 
 #include "tensorrt_llm/batch_manager/common.h"
@@ -684,7 +686,10 @@ BlockManager::BlockManager(std::vector<SizeType32> const& numKvHeadsPerLayer, Si
             numKvHeadsPerLayer, windowSizePerHead, tokensPerBlock,
             /*isSWA=*/(windowSize < maxSequenceLength) && (windowSize >= 0), allottedPrimaryBlocks,
             allottedSecondaryBlocks,
-            (SizeType32(windowSize) == blocksPerWindow.rbegin()->first) ? blocksInDiskPool : SizeType32{0},
+            // Disk mirrors the host level: every window gets the allocation (window-generic,
+            // matching the upstream secondary split). Layer-first pools (recurrent states) use
+            // the gathered/pitched file IO paths in kvCacheTransferManager.
+            blocksInDiskPool,
             diskCachePath, diskRetainedOnly, diskProtectUnexpired, maxNumSequences, stream, cacheType, secondaryOffloadMinPriority, mEventManager,
             enablePartialReuse, copyOnPartialReuse, kvCacheConnectorManager, mLookupTree, mLoopbackAgent,
             enableIndexerKCache, indexerKCacheQuantBlockSize, indexerKCacheIndexHeadDim, indexerKCacheUseFp4,
@@ -752,7 +757,9 @@ WindowBlockManager::WindowBlockManager(nvinfer1::DataType dtype, SizeType32 wind
     , mNumPrimaryBlocks{blocksInPrimaryPool}
     , mNumSecondaryBlocks{blocksInSecondaryPool}
     , mNumDiskBlocks{blocksInDiskPool}
-    , mDiskCachePath{diskCachePath}
+    , mDiskCachePath{diskCachePath.empty() || blocksInDiskPool <= 0
+          ? diskCachePath
+          : diskCachePath + "/w" + std::to_string(windowSize)}
     , mDiskRetainedOnly{diskRetainedOnly}
     , mDiskProtectUnexpired{diskProtectUnexpired}
     , mBufferManager{std::move(stream)}
@@ -876,6 +883,7 @@ WindowBlockManager::WindowBlockManager(nvinfer1::DataType dtype, SizeType32 wind
     }
     if (blocksInDiskPool > 0)
     {
+        std::filesystem::create_directories(mDiskCachePath);
         TLLM_LOG_INFO(
             "[disk-tier] enabled: %d poolless blocks (windowSize=%d)", blocksInDiskPool, windowSize);
     }
@@ -1193,6 +1201,12 @@ void BlockManager::releasePools()
 
 void WindowBlockManager::releasePools()
 {
+    if (mTransferManager)
+    {
+        // Stop the disk workers before freeing the pools: queued reads / unstaged writes hold raw
+        // GPU dst / host src pointers into them, so a worker running after release is a use-after-free.
+        mTransferManager->shutdownDiskWorkers();
+    }
     for (auto& pool : mPools)
     {
         if (pool.primaryPtr)
@@ -1428,7 +1442,15 @@ BlockPtr WindowBlockManager::reclaimSecondaryBlock()
         }
         return victim;
     }
-    bool const useUnstaged = !mReservedHostBlocks.empty() && mTransferManager->asyncDiskStoreEnabled();
+    bool hasLayerFirstPool = false;
+    for (auto const& pool : mPools)
+    {
+        hasLayerFirstPool = hasLayerFirstPool || pool.layerFirstLayout;
+    }
+    // Unstaged writes read the pool memory as one contiguous range, which layer-first pools
+    // cannot provide; those windows always take the staged (gathered) path.
+    bool const useUnstaged
+        = !mReservedHostBlocks.empty() && mTransferManager->asyncDiskStoreEnabled() && !hasLayerFirstPool;
     SizeType32 const diskSlot = diskTarget->getDiskSlot();
     std::uint64_t unstagedSpillId = 0;
     if (useUnstaged)
@@ -1562,7 +1584,8 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
     mEvictionPolicy->claimBlock(block, priority, durationMs);
     if (auto const diskRetentionMs = sequence.getDiskRetentionMs())
     {
-        block->markRetained(std::chrono::steady_clock::now().time_since_epoch() + *diskRetentionMs);
+        // Anchor the deadline at commit (storeBlocks), not at allocation.
+        block->setPendingRetention(*diskRetentionMs);
     }
     TLLM_LOG_DEBUG("%s::getFreeBlock - Block %d is now acquired by sequence %d", mLogPrefix.c_str(),
         block->getBlockId(), sequence.getRequestId());
@@ -1692,6 +1715,15 @@ void WindowBlockManager::onboardBlock(GenerationRequest& sequence, BlockPtr cons
 
 bool WindowBlockManager::areBlocksReady(LlmRequest::RequestIdType requestId)
 {
+    // Surface a failed async onboard here, on the scheduler thread -- the same path a synchronous disk-read
+    // failure takes. The failed block stays in the pending set, so nothing has forwarded onto its contents;
+    // the reader thread already logged the details.
+    if (mTransferManager->anyReadFailed())
+    {
+        TLLM_THROW(
+            "disk tier: async onboard read failed (see [disk-tier] error log); failing rather than "
+            "serving never-filled KV");
+    }
     // Fast path: with no disk read in flight (the common case) every block is trivially ready, so skip the
     // per-block scan and its mutex entirely. Without this the park scans every block of every context
     // request each step -- an O(context-length) mutex-locked host cost even when nothing is onboarding.
@@ -1755,7 +1787,20 @@ void WindowBlockManager::offloadBlock(
 PrefixReuseSummary BlockManager::analyzePrefixReuse(
     VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const
 {
-    TLLM_CHECK_WITH_INFO(!isVariableWindow(), "analyzePrefixReuse does not work for variable window attention");
+    if (isVariableWindow())
+    {
+        // No single radix tree to walk; an empty summary means "no reuse information",
+        // which every caller already treats as the conservative no-reuse case. Reaching
+        // this line means a call-site guard read isVariableWindow()==false on a manager
+        // that reports true here; log once so the divergence is visible in the field.
+        static std::once_flag onceFlag;
+        std::call_once(onceFlag, [this]() {
+            TLLM_LOG_WARNING(
+                "analyzePrefixReuse reached on a variable-window BlockManager (this=%p, windows=%zu); "
+                "returning empty summary", static_cast<void const*>(this), mWindowBlockManagers.size());
+        });
+        return {};
+    }
     auto const& onlyManager = mWindowBlockManagers.cbegin()->second;
     return onlyManager.analyzePrefixReuse(uniqueTokens, llmRequest);
 }
@@ -1846,8 +1891,13 @@ WindowBlockManager::ReuseMatchResult WindowBlockManager::findReusableBlockMatche
                 }
                 candidateMatches.push_back(ReuseMatch{block, numMatchedTokens, !block->isFull(), false});
             }
-            else if (mIsSWA)
+            else if (mIsSWA || isRecurrentState())
             {
+                // Value-less exact node: for SWA this is an out-of-window anchor; for
+                // recurrent-state chains it is a recycled placeholder (or an evicted
+                // snapshot). Recurrent resume only needs the node path plus the last
+                // surviving real snapshot, so traverse instead of breaking; the claim
+                // phase substitutes a transient placeholder for this slot.
                 candidateMatches.push_back(ReuseMatch{nullptr, numMatchedTokens, false, true});
                 latestMissingAnchorEndToken = std::max(latestMissingAnchorEndToken, candidateMatchedTokens);
             }
@@ -1965,6 +2015,35 @@ WindowBlockManager::ClaimResult WindowBlockManager::claimMatchingBlocks(Generati
     result.shareLastContextBlockAmongBeams = result.numSharedContextBlocks == numContextBlocks;
     auto reuseMatches = findReusableBlockMatches(
         result.blockKeys, mEnablePartialReuse, mCopyOnPartialReuse, sequence.getCurrentPrepopulatedPromptLen());
+    if (isRecurrentState())
+    {
+        // Matches past the last REAL snapshot must not occupy block-table slots:
+        // those positions get written during recompute (interval-boundary state
+        // snapshots), so they need real allocatable blocks from the allocation
+        // loop, not claimed placeholders (a claimed transient placeholder there
+        // leaks kPlaceholderBlockId into the recurrent block table and kills the
+        // event loop). Positions up to the anchor are never rewritten, so
+        // traversal-only hole entries before it remain safe to claim.
+        std::size_t matchesUpToLastReal = 0;
+        for (std::size_t i = 0; i < reuseMatches.matches.size(); ++i)
+        {
+            auto const& m = reuseMatches.matches[i];
+            if (!m.isTraversalOnly && m.block && !m.block->isPlaceholder())
+            {
+                matchesUpToLastReal = i + 1;
+            }
+        }
+        if (reuseMatches.matches.size() > matchesUpToLastReal)
+        {
+            reuseMatches.matches.resize(matchesUpToLastReal);
+            SizeType32 trimmedTokens = 0;
+            for (auto const& m : reuseMatches.matches)
+            {
+                trimmedTokens += m.numMatchedTokens;
+            }
+            reuseMatches.totalMatchedTokens = trimmedTokens;
+        }
+    }
     result.totalMatchedTokens = reuseMatches.totalMatchedTokens;
 
     for (int bi = 0; bi < result.numSharedContextBlocks && bi < static_cast<int>(reuseMatches.matches.size()); ++bi)
@@ -3024,6 +3103,12 @@ std::pair<SizeType32, std::vector<KVCacheBlock::IdType>> WindowBlockManager::sto
             prevBlock->incRefCount();
             pinnedBlockIds.push_back(prevBlock->getBlockId());
         }
+    }
+
+    // Blocks are now committed to the reuse tree: anchor any pending retention duration to now.
+    for (auto const& b : storedBlocks)
+    {
+        b->commitRetention();
     }
 
     if (mEventManager)
