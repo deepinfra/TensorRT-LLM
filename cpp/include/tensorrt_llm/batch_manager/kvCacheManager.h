@@ -2603,9 +2603,14 @@ public:
     [[nodiscard]] KvCacheStats getKvCacheStats() const override
     {
         KvCacheStats kvCacheStats;
-        kvCacheStats.maxNumBlocks = getMaxNumBlocks();
-        kvCacheStats.freeNumBlocks = getNumFreeBlocks();
-        kvCacheStats.usedNumBlocks = getUsedNumBlocks();
+        // gpu_cache_usage_perc must reflect GPU HBM only. getMaxNumBlocks() spans primary +
+        // secondary (host) + poolless disk blocks, while free is primary-only, so used/max would
+        // pin near 100% with the disk tier on. Report the primary pool consistently.
+        auto const primaryBlocks = mBlockManager.getNumPrimaryBlocks();
+        auto const primaryFreeBlocks = getNumFreeBlocks();
+        kvCacheStats.maxNumBlocks = primaryBlocks;
+        kvCacheStats.freeNumBlocks = primaryFreeBlocks;
+        kvCacheStats.usedNumBlocks = primaryBlocks - primaryFreeBlocks;
         kvCacheStats.toksPerBlock = getTokensPerBlock();
         kvCacheStats.allocTotalBlocks = getNumAllocTotalBlocks();
         kvCacheStats.allocNewBlocks = getNumAllocNewBlocks();
