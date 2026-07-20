@@ -1174,8 +1174,16 @@ void WindowBlockManager::allocatePools(bool useUvm)
     {
         mReservedHostBlockTarget = static_cast<SizeType32>(std::stoi(e));
     }
+    bool hasLayerFirstPool = false;
+    for (auto const& pool : mPools)
+    {
+        hasLayerFirstPool = hasLayerFirstPool || pool.layerFirstLayout;
+    }
+    // Layer-first (recurrent-state) windows always take the staged spill path, so the
+    // unstaged reserved-host-block pool would never be used by them -- reserving slots
+    // here only starves the snapshot host tier. Skip the carve-out for those windows.
     if (mNumDiskBlocks > 0 && mReservedHostBlockTarget > 0 && mNumSecondaryBlocks > 0
-        && mTransferManager->asyncDiskStoreEnabled())
+        && mTransferManager->asyncDiskStoreEnabled() && !hasLayerFirstPool)
     {
         auto const avail = mEvictionPolicy->getNumFreeBlocks(kSecondaryLevel);
         SizeType32 const want = std::min<SizeType32>(mReservedHostBlockTarget, std::max(0, avail - 16));
