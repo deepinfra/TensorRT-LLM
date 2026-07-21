@@ -105,11 +105,23 @@ public:
         return mReadInflightCount.load(std::memory_order_acquire) > 0;
     }
 
+    //! \brief Lock-free: true once any async onboard read has failed. The failed block stays in the pending
+    //! set (nothing forwards onto it); areBlocksReady() re-raises the failure on the scheduler thread, the
+    //! same path a synchronous disk-read failure takes.
+    [[nodiscard]] bool anyReadFailed() const noexcept
+    {
+        return mAnyReadFailed.load(std::memory_order_acquire);
+    }
+
     //! \brief True when a reader pool is present, so onboards can be detached from the scheduler thread.
     [[nodiscard]] bool asyncDiskReadEnabled() const
     {
         return mNumDiskReaders >= 1;
     }
+
+    //! \brief Idempotently stop+join all disk workers. MUST run before the pools are released: queued
+    //! reads hold raw GPU dst and unstaged writes raw host src pointers into them (else use-after-free).
+    void shutdownDiskWorkers();
 
     //! \brief Disk tier (unstaged async): spill a host block's bytes by handing the writer the source
     //! pointers directly (no staging memcpy). The caller MUST keep the source host slot pinned until
@@ -197,7 +209,6 @@ private:
         std::vector<std::uint8_t> staged; // staged-memcpy path (used when src == nullptr)
         void const* src{nullptr};         // unstaged path: writer reads this pinned host pointer directly
         std::uint64_t spillId{0};         // >0 => track per-spill completion for the reserved-pool reap
-        bool retained{false};                 // retained spill: bypasses the queue cap, never dropped
     };
     std::vector<std::thread> mDiskWriters;
     std::mutex mDiskMutex;
@@ -221,9 +232,14 @@ private:
         }()};
 
     void diskWriterLoop();
-    void enqueueDiskWrite(std::string filename, void const* src, std::size_t bytes, bool retained);
-    void enqueueDiskWriteUnstaged(
-        std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId, bool retained);
+    void enqueueDiskWrite(std::string filename, void const* src, std::size_t bytes);
+    //! \brief Staged write for layer-first pools: gathers rows of rowBytes at srcPitch
+    //! into one contiguous staging buffer (layer-major file layout).
+    void enqueueDiskWriteGathered(
+        std::string filename, char const* srcBase, std::size_t rowBytes, std::size_t srcPitch, std::size_t rows);
+    void enqueueDiskWriteUnstaged(std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId);
+    // Shared lock/wait/push tail of the two enqueue paths (per-slot serialization + bounded-queue backpressure).
+    void enqueueDiskWriteCommon(DiskWriteJob&& job);
     void waitForDiskSlotWrites(std::string const& filename);
 
     // ---- Disk-tier async ONBOARD: read slot files disk->GPU OFF the scheduler thread ----
@@ -236,7 +252,12 @@ private:
         bool useGds{false};             // GDS DMA (true) vs POSIX read + H2D copy (false)
         std::vector<void*> dsts;        // GPU destination pointer, per pool
         std::vector<std::string> files; // disk slot file, per pool
-        std::vector<std::size_t> bytes; // byte count, per pool
+        std::vector<std::size_t> bytes; // byte count, per pool (rows*rowBytes for layer-first)
+        // Pitched-scatter geometry for layer-first pools. rows==1 means the pool is
+        // block-contiguous and the plain 1D copy applies (rowBytes==bytes, dstPitch unused).
+        std::vector<std::size_t> dstPitch; // bytes between consecutive layer rows in the GPU pool
+        std::vector<std::size_t> rowBytes; // bytes of one layer row
+        std::vector<std::size_t> rows;     // number of layer rows
     };
     std::size_t const mNumDiskReaders{
         [] { auto* e = std::getenv("TLLM_KV_DISK_READERS"); return e ? std::stoul(e) : 0UL; }()};
@@ -250,7 +271,12 @@ private:
     // Lock-free mirror of mPendingBlockReads.size() (updated under mReadMutex on every insert/erase) so
     // areBlocksReady() can skip its per-block scan + the mutex when nothing is in flight (common case).
     std::atomic<std::size_t> mReadInflightCount{0};
+    // Set by a reader thread when an async onboard read fails; polled by areBlocksReady().
+    std::atomic<bool> mAnyReadFailed{false};
     bool mDiskReaderStop{false};
+    // Set once shutdownDiskWorkers() has stopped+joined the disk workers, so releasePools() and the
+    // destructor do not repeat the work. Only touched on the owning thread.
+    bool mDiskWorkersShutdown{false};
 
     void diskReaderLoop();
     void enqueueDiskRead(DiskReadJob job);

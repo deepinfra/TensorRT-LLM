@@ -92,6 +92,34 @@ public:
         return transferManager.mPendingWrites.find(tbk::KVCacheTransferManager::getPendingTransferIndex(block))
             != transferManager.mPendingWrites.end();
     }
+
+    [[nodiscard]] static std::size_t writeQueueSize(tbk::KVCacheTransferManager& transferManager)
+    {
+        std::lock_guard<std::mutex> lock(transferManager.mDiskMutex);
+        return transferManager.mDiskWriteQueue.size();
+    }
+
+    static void enqueueWrite(
+        tbk::KVCacheTransferManager& transferManager, std::string filename, void const* src, std::size_t bytes)
+    {
+        transferManager.enqueueDiskWrite(std::move(filename), src, bytes);
+    }
+
+    static void enqueueWriteUnstaged(tbk::KVCacheTransferManager& transferManager, std::string filename,
+        void const* src, std::size_t bytes, std::uint64_t spillId)
+    {
+        transferManager.enqueueDiskWriteUnstaged(std::move(filename), src, bytes, spillId);
+    }
+
+    // Unblock a producer parked in the enqueue backpressure wait, so the test can join it before teardown.
+    static void requestWriterStop(tbk::KVCacheTransferManager& transferManager)
+    {
+        {
+            std::lock_guard<std::mutex> lock(transferManager.mDiskMutex);
+            transferManager.mDiskWriterStop = true;
+        }
+        transferManager.mDiskQueueCv.notify_all();
+    }
 };
 } // namespace tensorrt_llm::testing
 
@@ -10616,6 +10644,28 @@ private:
     std::filesystem::path mPath;
 };
 
+// Scoped setenv/unsetenv, so a gtest ASSERT early-exit cannot leak the variable into later tests.
+class ScopedEnvVar
+{
+public:
+    ScopedEnvVar(char const* name, char const* value)
+        : mName{name}
+    {
+        setenv(name, value, /*overwrite=*/1);
+    }
+
+    ~ScopedEnvVar()
+    {
+        unsetenv(mName);
+    }
+
+    ScopedEnvVar(ScopedEnvVar const&) = delete;
+    ScopedEnvVar& operator=(ScopedEnvVar const&) = delete;
+
+private:
+    char const* mName;
+};
+
 // Small-pool BlockManager with a disk tier. tokensPerBlock=4; window fits maxBlocksPerSeq.
 std::unique_ptr<BlockManager> makeDiskTierBlockManager(std::shared_ptr<tr::CudaStream> const& stream, std::string const& diskPath,
     bool retainedOnly, SizeType32 blocksInPrimaryPool, SizeType32 blocksInSecondaryPool, SizeType32 blocksInDiskPool,
@@ -10662,6 +10712,11 @@ VecTokens iotaTokens(TokenIdType first, SizeType32 count)
 
 // Adds a sequence; diskTtl set => the request carries a disk retention TTL.
 // Returns the pair; prepopulated length is readable via req->getContextCurrentPosition().
+std::chrono::steady_clock::time_point::duration retentionTick(std::int64_t ms)
+{
+    return std::chrono::duration_cast<std::chrono::steady_clock::time_point::duration>(std::chrono::milliseconds(ms));
+}
+
 DiskTierSeq addDiskTierSequence(BlockManager& blockManager, LlmRequest::RequestIdType id, VecTokens tokens,
     std::optional<std::chrono::milliseconds> diskTtl)
 {
@@ -10737,7 +10792,7 @@ TEST_F(KVCacheManagerTest, DiskTierSpillAllRoundTripTest)
 // lands. Same spill/evict/reuse scenario as DiskTierSpillAllRoundTripTest, only with TLLM_KV_DISK_READERS set.
 TEST_F(KVCacheManagerTest, DiskTierDetachedOnboardReadyTest)
 {
-    setenv("TLLM_KV_DISK_READERS", "4", /*overwrite=*/1);
+    ScopedEnvVar readersEnv{"TLLM_KV_DISK_READERS", "4"};
     auto const stream = std::make_shared<tr::CudaStream>();
     DiskTierDir dir;
     auto blockManagerPtr
@@ -10763,7 +10818,6 @@ TEST_F(KVCacheManagerTest, DiskTierDetachedOnboardReadyTest)
     EXPECT_GE(blockManager.getNumDiskOnboards(), 1u);
 
     releaseDiskTierSequence(blockManager, seqA2);
-    unsetenv("TLLM_KV_DISK_READERS");
 }
 
 // Retained-only mode: unmarked victims are discarded at the gate; marked ones spill.
@@ -10808,12 +10862,54 @@ TEST_F(KVCacheManagerTest, DiskTierExpiryAtSpillTest)
         = makeDiskTierBlockManager(stream, dir.str(), /*retainedOnly=*/true, /*prim=*/4, /*sec=*/2, /*disk=*/8);
     auto& blockManager = *blockManagerPtr;
 
+    blockManager.setRetentionClock(retentionTick(1000));
     auto seqP = addDiskTierSequence(blockManager, 0, iotaTokens(0, 16), std::chrono::milliseconds(50));
     releaseDiskTierSequence(blockManager, seqP);
-    std::this_thread::sleep_for(std::chrono::milliseconds(120)); // TTL dead before eviction
+    blockManager.setRetentionClock(retentionTick(1200)); // TTL dead before eviction
     churnOnce(blockManager, 1, 100);
     EXPECT_EQ(blockManager.getNumDiskSpills(), 0u);
     EXPECT_GE(blockManager.getNumDiskGateDropped(), 2u);
+}
+
+// The disk-retention deadline must be anchored when the block is committed to the reuse tree
+// (storeContextBlocks), not at allocation -- otherwise a long prefill eats into the requested TTL.
+TEST_F(KVCacheManagerTest, DiskTierRetentionAnchoredAtCommitTest)
+{
+    auto const stream = std::make_shared<tr::CudaStream>();
+    DiskTierDir dir;
+    auto blockManagerPtr
+        = makeDiskTierBlockManager(stream, dir.str(), /*retainedOnly=*/false, /*prim=*/4, /*sec=*/2, /*disk=*/8);
+    auto& blockManager = *blockManagerPtr;
+    auto const windowSize = blockManager.getPoolWindowSize(0);
+    auto constexpr ttl = std::chrono::milliseconds(60000);
+
+    auto s = addDiskTierSequence(blockManager, 0, iotaTokens(0, 16), ttl);
+    auto const blockIds = s.seq->getCacheBlockIds(windowSize).at(0); // beam 0
+    ASSERT_FALSE(blockIds.empty());
+
+    // Allocated but not yet committed: no block may carry an absolute deadline.
+    for (auto const bid : blockIds)
+    {
+        EXPECT_FALSE(blockManager.getBlockById(bid, windowSize)->getRetentionExpiry().has_value())
+            << "retention deadline stamped at allocation instead of deferred to commit";
+    }
+
+    // Commit to the reuse tree -> the deadline is anchored at the retention clock + ttl.
+    auto const t0 = retentionTick(5000);
+    blockManager.setRetentionClock(t0);
+    blockManager.storeContextBlocks(*s.seq, *s.req);
+
+    std::size_t stamped = 0;
+    for (auto const bid : blockIds)
+    {
+        auto const expiry = blockManager.getBlockById(bid, windowSize)->getRetentionExpiry();
+        if (expiry.has_value())
+        {
+            ++stamped;
+            EXPECT_EQ(*expiry, t0 + ttl); // clock started at commit, not earlier at allocation
+        }
+    }
+    EXPECT_GT(stamped, 0u) << "commit did not anchor any retention deadline";
 }
 
 // Bug-1 regression: a re-send that REUSES blocks re-stamps them (max-merge extends).
@@ -10826,13 +10922,14 @@ TEST_F(KVCacheManagerTest, DiskTierReuseRestampTest)
     auto& blockManager = *blockManagerPtr;
 
     // Short-TTL cold, then immediate re-send with a long TTL: pure reuse path.
+    blockManager.setRetentionClock(retentionTick(1000));
     auto seqA = addDiskTierSequence(blockManager, 0, iotaTokens(0, 16), std::chrono::milliseconds(50));
     releaseDiskTierSequence(blockManager, seqA);
     auto seqA2 = addDiskTierSequence(blockManager, 1, iotaTokens(0, 16), std::chrono::milliseconds(60000));
     EXPECT_GE(seqA2.req->getContextCurrentPosition(), 12); // reused, not recomputed
     releaseDiskTierSequence(blockManager, seqA2);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(120)); // past the ORIGINAL 50 ms TTL
+    blockManager.setRetentionClock(retentionTick(1200)); // past the ORIGINAL 50 ms TTL
     churnOnce(blockManager, 2, 100);
     // Without the reuse re-stamp the blocks are expired and gated; with it they spill.
     EXPECT_GE(blockManager.getNumDiskSpills(), 2u);
@@ -10840,7 +10937,7 @@ TEST_F(KVCacheManagerTest, DiskTierReuseRestampTest)
     // Control: same shape, no re-send. Expires and is gated.
     auto seqB = addDiskTierSequence(blockManager, 3, iotaTokens(200, 16), std::chrono::milliseconds(50));
     releaseDiskTierSequence(blockManager, seqB);
-    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    blockManager.setRetentionClock(retentionTick(1400)); // past seqB's TTL
     auto const spillsBefore = blockManager.getNumDiskSpills();
     churnOnce(blockManager, 4, 300);
     EXPECT_EQ(blockManager.getNumDiskSpills(), spillsBefore);
@@ -10913,12 +11010,13 @@ TEST_F(KVCacheManagerTest, DiskTierProtectEvictsExpiredTest)
         stream, dir.str(), /*retainedOnly=*/true, /*prim=*/4, /*sec=*/2, /*disk=*/2, /*protectUnexpired=*/true);
     auto& blockManager = *blockManagerPtr;
 
+    blockManager.setRetentionClock(retentionTick(1000));
     auto seqA = addDiskTierSequence(blockManager, 0, iotaTokens(0, 16), std::chrono::milliseconds(50));
     releaseDiskTierSequence(blockManager, seqA);
     churnOnce(blockManager, 1, 100);
     auto const spillsFilled = blockManager.getNumDiskSpills();
     EXPECT_GE(spillsFilled, 2u);
-    std::this_thread::sleep_for(std::chrono::milliseconds(120)); // A's disk blocks now expired
+    blockManager.setRetentionClock(retentionTick(1200)); // A's disk blocks now expired
 
     // New victim: the expired blocks ARE evictable even in protect mode => it spills.
     auto seqB = addDiskTierSequence(blockManager, 2, iotaTokens(200, 16), std::chrono::milliseconds(600000));
@@ -10944,7 +11042,7 @@ float diskPatternValue(int slot, int i)
 // TLLM_KV_DISK_ASYNC_STORE is left unset so spills are synchronous and this isolates the read path.
 void runDiskOnboardByteRoundTrip(char const* readers, int nSlots)
 {
-    setenv("TLLM_KV_DISK_READERS", readers, /*overwrite=*/1);
+    ScopedEnvVar readersEnv{"TLLM_KV_DISK_READERS", readers};
     DiskTierDir dir;
     int constexpr blockSize = 2048; // floats per slot
 
@@ -11013,7 +11111,6 @@ void runDiskOnboardByteRoundTrip(char const* readers, int nSlots)
         EXPECT_EQ(bad, 0) << "readers=" << readers << " slot=" << k << ": disk onboard corrupted " << bad << "/"
                           << blockSize << " elements";
     }
-    unsetenv("TLLM_KV_DISK_READERS");
 }
 } // namespace
 
@@ -11034,4 +11131,275 @@ TEST_F(KVCacheManagerTest, DiskTierAsyncOnboardConcurrentNoMixupTest)
 TEST_F(KVCacheManagerTest, DiskTierSyncOnboardByteExactTest)
 {
     runDiskOnboardByteRoundTrip(/*readers=*/"0", /*nSlots=*/4);
+}
+
+// A failed async spill (unwritable slot file) must be contained on the writer thread: per-slot bookkeeping
+// still runs (the spill id is published for the reserved-pool reap) and the worker keeps serving later jobs.
+// Before the fix the TLLM_CHECK throw escaped the thread entry point and std::terminate'd the process.
+TEST_F(KVCacheManagerTest, DiskTierAsyncWriteFailureContainedTest)
+{
+    ScopedEnvVar asyncStoreEnv{"TLLM_KV_DISK_ASYNC_STORE", "1"};
+    ScopedEnvVar writersEnv{"TLLM_KV_DISK_WRITERS", "1"};
+    DiskTierDir dir;
+    int constexpr blockSize = 256;
+    auto bufferManager = tr::BufferManager(std::make_shared<tr::CudaStream>());
+    auto transferManager = KVCacheTransferManager(bufferManager);
+    auto pool = KVCacheBlockPool(0, /*kvFactor=*/2, 0, 0, 0);
+    pool.primaryPtr = bufferManager.gpu(tr::ITensor::makeShape({2, blockSize}), nvinfer1::DataType::kFLOAT);
+    pool.secondaryPtr = tr::BufferManager::pinned(tr::ITensor::makeShape({2, blockSize}), nvinfer1::DataType::kFLOAT);
+
+    auto waitForSpill = [&](std::uint64_t spillId)
+    {
+        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            auto const done = transferManager.drainCompletedSpills();
+            if (std::find(done.begin(), done.end(), spillId) != done.end())
+            {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return false;
+    };
+
+    // Unwritable destination (missing parent dir): the open fails on the writer thread.
+    auto src = std::make_shared<KVCacheBlock>(0, tk::KVCacheIndex(0, /*isSecondary=*/true));
+    transferManager.spillToFileUnstaged(src, /*diskSlot=*/0, {pool}, dir.str() + "/missing_subdir", /*spillId=*/1);
+    EXPECT_TRUE(waitForSpill(1)) << "failed spill did not publish its id (bookkeeping skipped)";
+
+    // Worker survived: a valid spill afterwards completes normally.
+    auto src2 = std::make_shared<KVCacheBlock>(1, tk::KVCacheIndex(1, /*isSecondary=*/true));
+    transferManager.spillToFileUnstaged(src2, /*diskSlot=*/1, {pool}, dir.str(), /*spillId=*/2);
+    EXPECT_TRUE(waitForSpill(2)) << "writer stopped processing after a failed job";
+
+}
+
+// A failed detached onboard read (missing slot file) must not crash the reader thread; the failure surfaces
+// as a throw from areBlocksReady() on the calling (scheduler) thread, and no request is unparked onto the
+// never-filled block. Before the fix the reader's TLLM_CHECK throw std::terminate'd the process.
+TEST_F(KVCacheManagerTest, DiskTierOnboardReadFailureSurfacesTest)
+{
+    ScopedEnvVar readersEnv{"TLLM_KV_DISK_READERS", "2"};
+    auto const stream = std::make_shared<tr::CudaStream>();
+    DiskTierDir dir;
+    auto blockManagerPtr
+        = makeDiskTierBlockManager(stream, dir.str(), /*retainedOnly=*/false, /*prim=*/4, /*sec=*/2, /*disk=*/8);
+    auto& blockManager = *blockManagerPtr;
+
+    auto seqA = addDiskTierSequence(blockManager, 0, iotaTokens(0, 16), std::nullopt);
+    releaseDiskTierSequence(blockManager, seqA);
+    churnOnce(blockManager, 1, 100); // A's deepest blocks spill to disk
+    ASSERT_GE(blockManager.getNumDiskSpills(), 2u);
+
+    // Break the tier: delete the slot files so the detached onboard reads below fail on the reader threads.
+    for (auto const& entry : fs::directory_iterator(dir.str()))
+    {
+        fs::remove_all(entry.path());
+    }
+
+    // Rematch A's prefix: the disk onboards are handed to the reader pool and fail off-thread.
+    auto seqA2 = addDiskTierSequence(blockManager, 2, iotaTokens(0, 16), std::nullopt);
+
+    bool threw = false;
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (!threw && std::chrono::steady_clock::now() < deadline)
+    {
+        try
+        {
+            (void) blockManager.areBlocksReady(/*requestId=*/2); // false while pending; throws once failed
+        }
+        catch (std::exception const&)
+        {
+            threw = true;
+        }
+        if (!threw)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    EXPECT_TRUE(threw) << "failed onboard was not surfaced on the scheduler thread";
+
+    // Teardown stays clean: the sequence releases without touching the never-filled blocks.
+    releaseDiskTierSequence(blockManager, seqA2);
+}
+
+// shutdownDiskWorkers() must stop+join every disk worker while reads are queued (holding raw GPU dst
+// pointers) and unstaged writes are queued (holding raw host src pointers), so releasePools() can free
+// the pools with no use-after-free -- and it must be idempotent. Passing == no hang/crash reaching the
+// end (and, under ASAN, no worker access to the released pool). Regression test for the shutdown-order
+// bug where workers stopped only in the destructor, after releasePools() had already freed the pools.
+TEST_F(KVCacheManagerTest, DiskTierShutdownWithQueuedWorkTest)
+{
+    ScopedEnvVar readersEnv{"TLLM_KV_DISK_READERS", "4"};
+    ScopedEnvVar writersEnv{"TLLM_KV_DISK_WRITERS", "4"};
+    ScopedEnvVar asyncStoreEnv{"TLLM_KV_DISK_ASYNC_STORE", "1"};
+    DiskTierDir dir;
+    int constexpr blockSize = 2048; // floats per slot
+    int constexpr nSlots = 8;
+
+    auto bufferManager = tr::BufferManager(std::make_shared<tr::CudaStream>());
+    auto transferManager = KVCacheTransferManager(bufferManager); // spawns readers + writers from the env above
+
+    auto pool = KVCacheBlockPool(0, /*kvFactor=*/2, 0, 0, 0);
+    pool.primaryPtr = bufferManager.gpu(tr::ITensor::makeShape({2 * nSlots, blockSize}), nvinfer1::DataType::kFLOAT);
+    bufferManager.setZero(*pool.primaryPtr);
+    pool.secondaryPtr
+        = tr::BufferManager::pinned(tr::ITensor::makeShape({2 * nSlots, blockSize}), nvinfer1::DataType::kFLOAT);
+
+    // Seed host slots and write them to disk (synchronous) so the queued reads below have files to read.
+    float* secBase = tr::bufferCast<float>(*pool.secondaryPtr);
+    for (int k = 0; k < nSlots; ++k)
+    {
+        for (int i = 0; i < blockSize; ++i)
+        {
+            secBase[static_cast<std::size_t>(k) * blockSize + i] = diskPatternValue(k, i);
+        }
+        auto seed = std::make_shared<KVCacheBlock>(k, tk::KVCacheIndex(k, /*isSecondary=*/true));
+        transferManager.spillToFile(seed, /*diskSlot=*/k, {pool}, dir.str());
+    }
+    bufferManager.getStream().synchronize();
+
+    // Queue detached onboard reads: each holds raw GPU dst pointers into the primary pool.
+    std::vector<BlockPtr> reads;
+    for (int k = 0; k < nSlots; ++k)
+    {
+        auto d = std::make_shared<KVCacheBlock>(nSlots + k, tk::KVCacheIndex(nSlots + k, /*isSecondary=*/false));
+        transferManager.loadFromFile(d, /*diskSlot=*/k, {pool}, dir.str(), /*trackBlockId=*/nSlots + k);
+        reads.push_back(d);
+    }
+    // Queue unstaged writes (distinct disk slots): each holds raw host src pointers into the secondary pool.
+    std::vector<BlockPtr> writes;
+    for (int k = 0; k < nSlots; ++k)
+    {
+        auto s = std::make_shared<KVCacheBlock>(2 * nSlots + k, tk::KVCacheIndex(k, /*isSecondary=*/true));
+        transferManager.spillToFileUnstaged(
+            s, /*diskSlot=*/nSlots + k, {pool}, dir.str(), /*spillId=*/static_cast<std::uint64_t>(k + 1));
+        writes.push_back(s);
+    }
+
+    // Stop+join all workers while that work is outstanding. join() waits out any in-flight job against the
+    // still-valid pools; queued jobs are abandoned. After this, no worker can touch pool memory.
+    transferManager.shutdownDiskWorkers();
+    transferManager.shutdownDiskWorkers(); // idempotent: second call is a no-op
+
+    // Safe to free the pools now (the releasePools() order). No worker is mid-transfer into them.
+    pool.primaryPtr->release();
+    pool.secondaryPtr->release();
+
+    // The transfer-manager destructor (at scope end) calls shutdownDiskWorkers() once more -- also a no-op.
+}
+
+// The disk write queue must stay bounded by mDiskWriteQueueMax under sustained spill load: with the retained
+// bypass removed, a producer facing a full queue backpressures instead of growing RAM. Covers staged + unstaged.
+namespace
+{
+void runWriteQueueBoundedTest(bool unstaged)
+{
+    using tensorrt_llm::testing::KVCacheTransferManagerTestAccess;
+    ScopedEnvVar asyncStoreEnv{"TLLM_KV_DISK_ASYNC_STORE", "1"};
+    ScopedEnvVar writersEnv{"TLLM_KV_DISK_WRITERS", "1"}; // one writer drains; the cap must still bound the backlog
+    ScopedEnvVar writeQueueEnv{"TLLM_KV_DISK_WRITE_QUEUE", "4"};
+    std::size_t constexpr cap = 4;
+    std::size_t constexpr burst = 200; // far more than the cap: the producer must block once the queue is full
+
+    DiskTierDir dir;                   // real directory for the writer to drain into (cleaned on exit)
+    std::vector<std::uint8_t> src(256 * 1024, 0xAB); // large enough that the single writer lags the producer
+    auto bufferManager = tr::BufferManager(std::make_shared<tr::CudaStream>());
+    auto transferManager = KVCacheTransferManager(bufferManager);
+
+    // Continuously sample the queue depth while the burst runs and record the peak.
+    std::atomic<std::size_t> observedMax{0};
+    std::atomic<bool> producing{true};
+    std::thread monitor(
+        [&]
+        {
+            while (producing.load())
+            {
+                auto const sz = KVCacheTransferManagerTestAccess::writeQueueSize(transferManager);
+                auto prev = observedMax.load();
+                while (sz > prev && !observedMax.compare_exchange_weak(prev, sz))
+                {
+                }
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            }
+        });
+
+    // Burst far more spills than the cap. Each enqueue blocks while the queue is full, so the backlog can never
+    // exceed mDiskWriteQueueMax no matter how far the single writer falls behind -- the bound the reviewer wants.
+    for (std::size_t k = 0; k < burst; ++k)
+    {
+        auto const fn = dir.str() + "/slot" + std::to_string(k);
+        if (unstaged)
+        {
+            KVCacheTransferManagerTestAccess::enqueueWriteUnstaged(transferManager, fn, src.data(), src.size(), k + 1);
+        }
+        else
+        {
+            KVCacheTransferManagerTestAccess::enqueueWrite(transferManager, fn, src.data(), src.size());
+        }
+    }
+    producing.store(false);
+    monitor.join();
+
+    EXPECT_LE(observedMax.load(), cap) << "write queue exceeded its cap -- spills not backpressured";
+    EXPECT_GT(observedMax.load(), 0u) << "queue never filled -- the burst did not actually stress the cap";
+
+}
+} // namespace
+
+// Staged path: a full write queue backpressures the producer instead of growing RAM without bound.
+TEST_F(KVCacheManagerTest, DiskTierWriteQueueBoundedStagedTest)
+{
+    runWriteQueueBoundedTest(/*unstaged=*/false);
+}
+
+// Unstaged path: same bound.
+TEST_F(KVCacheManagerTest, DiskTierWriteQueueBoundedUnstagedTest)
+{
+    runWriteQueueBoundedTest(/*unstaged=*/true);
+}
+
+// A retained block's deadline entry must be erased when the block leaves the disk: spill->reuse
+// cycles otherwise accumulate entries forever (disk=64 stays roomy, so displacement never runs).
+TEST_F(KVCacheManagerTest, DiskTierDeadlineEntryLeakTest)
+{
+    auto const stream = std::make_shared<tr::CudaStream>();
+    DiskTierDir dir;
+    auto bm = makeDiskTierBlockManager(stream, dir.str(), /*retainedOnly=*/true, /*prim=*/4, /*sec=*/2, /*disk=*/64);
+    auto& blockManager = *bm;
+    for (SizeType32 i = 0; i < 100; ++i)
+    {
+        auto s = addDiskTierSequence(blockManager, 1000 + i, iotaTokens(0, 16), std::chrono::milliseconds(600000));
+        releaseDiskTierSequence(blockManager, s);
+        churnOnce(blockManager, 2000 + i, static_cast<TokenIdType>(100 + i));
+        auto r = addDiskTierSequence(blockManager, 3000 + i, iotaTokens(0, 16), std::chrono::milliseconds(600000));
+        releaseDiskTierSequence(blockManager, r);
+    }
+    EXPECT_LE(blockManager.getDiskDeadlineCount(), static_cast<std::size_t>(64)); // never more entries than disk slots; leaked entries grow past it
+}
+
+// Retention decisions must be identical across TP ranks: anchors and expiry checks use the
+// injected rank-consistent clock, not each rank's wall clock. Two managers driven with the
+// identical op sequence but different real-time pacing must agree on the gate outcome.
+TEST_F(KVCacheManagerTest, DiskTierRetentionClockConsistencyTest)
+{
+    auto const stream = std::make_shared<tr::CudaStream>();
+    DiskTierDir dirA, dirB;
+    auto bmA = makeDiskTierBlockManager(stream, dirA.str(), /*retainedOnly=*/true, /*prim=*/4, /*sec=*/2, /*disk=*/8);
+    auto bmB = makeDiskTierBlockManager(stream, dirB.str(), /*retainedOnly=*/true, /*prim=*/4, /*sec=*/2, /*disk=*/8);
+    for (auto* bm : {bmA.get(), bmB.get()})
+    {
+        bm->setRetentionClock(retentionTick(1000));
+        auto s = addDiskTierSequence(*bm, 1, iotaTokens(0, 16), std::chrono::milliseconds(150));
+        releaseDiskTierSequence(*bm, s);
+        if (bm == bmB.get())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300)); // real-time skew between ranks
+        }
+        bm->setRetentionClock(retentionTick(1100)); // same logical instant on both, inside the TTL
+        churnOnce(*bm, 2, 100);            // retained-only gate decides spill-vs-drop here
+    }
+    EXPECT_EQ(bmA->getDiskDeadlineCount(), bmB->getDiskDeadlineCount());
+    EXPECT_GT(bmA->getDiskDeadlineCount(), 0u);
 }

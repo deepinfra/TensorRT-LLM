@@ -17,6 +17,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 
 #include "tensorrt_llm/batch_manager/kvCacheTransferManager.h"
 
@@ -76,6 +78,51 @@ static bool fileToGpuPosix(tr::ITensor::SharedPtr const& dstPtr, std::string con
     return true;
 }
 
+//! Per-layer geometry of one block inside a layer-first pool. Mirrors copyBlock: the pool is
+//! {numLayers, numBlocks, ...}; a block is numLayers rows of rowBytes at a stride of pitch.
+struct LayerFirstGeom
+{
+    char* base;
+    std::size_t rowBytes;
+    std::size_t pitch;
+    std::size_t rows;
+    std::size_t totalBytes;
+};
+
+static LayerFirstGeom layerFirstBlockGeom(
+    tensorrt_llm::batch_manager::kv_cache_manager::BlockPtr const& block,
+    tensorrt_llm::batch_manager::kv_cache_manager::KVCacheBlockPool const& pool)
+{
+    auto poolPtr = block->isPrimary() ? pool.primaryPtr : pool.secondaryPtr;
+    auto const& shape = poolPtr->getShape();
+    TLLM_CHECK_WITH_INFO(
+        shape.nbDims >= 2, "Expected layer-first KVCache pool to have at least 2 dims, got %d", shape.nbDims);
+    auto const pitch = poolPtr->getSizeInBytes() / static_cast<std::size_t>(pool.numLayers);
+    auto const rowBytes = pitch / static_cast<std::size_t>(shape.d[1]);
+    auto* base = static_cast<char*>(poolPtr->data())
+        + static_cast<std::size_t>(block->getMemoryPoolBlockIndex()) * rowBytes;
+    return {base, rowBytes, pitch, static_cast<std::size_t>(pool.numLayers),
+        rowBytes * static_cast<std::size_t>(pool.numLayers)};
+}
+
+//! POSIX onboard of a layer-first block: read the layer-major slot file and scatter it into the
+//! GPU pool with one pitched copy (the exact inverse of the gathered spill).
+static bool fileToGpuPosixPitched(
+    char* dstBase, std::size_t dstPitch, std::size_t rowBytes, std::size_t rows, std::string const& filename)
+{
+    int fd = ::open(filename.c_str(), O_RDONLY);
+    TLLM_CHECK_WITH_INFO(fd >= 0, "Failed to open '%s' for reading (POSIX pitched)", filename.c_str());
+    auto const numBytes = static_cast<ssize_t>(rowBytes * rows);
+    std::vector<uint8_t> hostBuffer(numBytes);
+    ssize_t bytesRead = ::read(fd, hostBuffer.data(), numBytes);
+    ::close(fd);
+    TLLM_CHECK_WITH_INFO(bytesRead == numBytes, "POSIX pitched read: short/failed read %zd/%zd", bytesRead, numBytes);
+    cudaError_t cpyErr
+        = cudaMemcpy2D(dstBase, dstPitch, hostBuffer.data(), rowBytes, rowBytes, rows, cudaMemcpyHostToDevice);
+    TLLM_CHECK_WITH_INFO(cpyErr == cudaSuccess, "cudaMemcpy2D to device failed, error=%d", cpyErr);
+    return true;
+}
+
 KVCacheTransferManager::KVCacheTransferManager(
     tr::BufferManager const& bufferManager, std::shared_ptr<kvc::BaseLoopbackAgent> loopbackAgent)
     : mBufferManager{bufferManager}
@@ -104,8 +151,15 @@ KVCacheTransferManager::KVCacheTransferManager(
     }
 }
 
-KVCacheTransferManager::~KVCacheTransferManager()
+void KVCacheTransferManager::shutdownDiskWorkers()
 {
+    // Idempotent stop+join of all disk workers. Queued reads hold raw GPU dst pointers and unstaged
+    // writes hold raw host src pointers into the pools, so this must run before the pools are freed.
+    if (mDiskWorkersShutdown)
+    {
+        return;
+    }
+    mDiskWorkersShutdown = true;
     if (!mDiskWriters.empty())
     {
         {
@@ -136,6 +190,11 @@ KVCacheTransferManager::~KVCacheTransferManager()
             }
         }
     }
+}
+
+KVCacheTransferManager::~KVCacheTransferManager()
+{
+    shutdownDiskWorkers();
 }
 
 tr::ITensor::SharedPtr KVCacheTransferManager::computeBlockPointer(
@@ -477,16 +536,25 @@ void KVCacheTransferManager::diskWriterLoop()
         // The slow, writeback-throttle-prone part runs HERE, off the scheduler thread.
         // Unstaged jobs (src != nullptr) read the pinned host slot directly; staged jobs read the copy.
         void const* data = job.src ? job.src : static_cast<void const*>(job.staged.data());
-        int fd = ::open(job.filename.c_str(), O_CREAT | O_WRONLY, 0644);
-        TLLM_CHECK_WITH_INFO(fd >= 0,
-            "[disk-tier] cannot open %s for async write; failing loudly rather than leaving a corrupt slot",
-            job.filename.c_str());
-        auto const written = ::pwrite(fd, data, job.bytes, 0);
-        ::close(fd);
-        TLLM_CHECK_WITH_INFO(written == static_cast<ssize_t>(job.bytes),
-            "[disk-tier] short async write to %s (%zd/%zu); failing loudly rather than leaving a corrupt slot",
-            job.filename.c_str(), static_cast<ssize_t>(written), job.bytes);
+        try
+        {
+            int fd = ::open(job.filename.c_str(), O_CREAT | O_WRONLY, 0644);
+            TLLM_CHECK_WITH_INFO(fd >= 0, "[disk-tier] cannot open %s for async write", job.filename.c_str());
+            auto const written = ::pwrite(fd, data, job.bytes, 0);
+            ::close(fd);
+            TLLM_CHECK_WITH_INFO(written == static_cast<ssize_t>(job.bytes),
+                "[disk-tier] short async write to %s (%zd/%zu)", job.filename.c_str(), static_cast<ssize_t>(written),
+                job.bytes);
+        }
+        catch (std::exception const& e)
+        {
+            // Contain the I/O error here (else it escapes the thread -> std::terminate). The slot is left
+            // unwritten; a later onboard of it fails and aborts that request (see diskReaderLoop).
+            TLLM_LOG_ERROR("[disk-tier] async write to %s failed: %s", job.filename.c_str(), e.what());
+        }
 
+        // Runs whether the write succeeded or failed, so producers waiting on this slot and the reserved-pool
+        // reap are always notified.
         {
             std::lock_guard<std::mutex> lock(mDiskMutex);
             if (auto it = mDiskInflight.find(job.filename); it != mDiskInflight.end() && --it->second <= 0)
@@ -510,59 +578,53 @@ void KVCacheTransferManager::diskWriterLoop()
     }
 }
 
-void KVCacheTransferManager::enqueueDiskWrite(
-    std::string filename, void const* src, std::size_t bytes, bool retained)
+void KVCacheTransferManager::enqueueDiskWrite(std::string filename, void const* src, std::size_t bytes)
 {
     DiskWriteJob job;
     job.filename = std::move(filename);
     job.bytes = bytes;
-    job.retained = retained;
     job.staged.resize(bytes);
     std::memcpy(job.staged.data(), src, bytes); // fast host->host copy; frees the slot
-
-    {
-        std::unique_lock<std::mutex> lock(mDiskMutex);
-        // Per-slot serialization (always) + backpressure. A retained spill must land, so it bypasses the
-        // queue cap (bounded by retained volume); a best-effort spill also waits for room. Best-effort shedding
-        // under saturation happens upstream at the eviction gate, so a best-effort spill reaching here + then
-        // finding the queue full is the rare TOCTOU case.
-        mDiskQueueCv.wait(lock,
-            [this, &job]
-            {
-                bool const slotClear = mDiskInflight.find(job.filename) == mDiskInflight.end();
-                bool const roomOrRetained = job.retained || mDiskWriteQueue.size() < mDiskWriteQueueMax;
-                return (slotClear && roomOrRetained) || mDiskWriterStop;
-            });
-        if (mDiskWriterStop)
-        {
-            return;
-        }
-        ++mDiskInflight[job.filename]; // mark BEFORE the block becomes loadable
-        mDiskWriteQueue.push(std::move(job));
-    }
-    mDiskQueueCv.notify_one();
+    enqueueDiskWriteCommon(std::move(job));
 }
 
 void KVCacheTransferManager::enqueueDiskWriteUnstaged(
-    std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId, bool retained)
+    std::string filename, void const* src, std::size_t bytes, std::uint64_t spillId)
 {
     DiskWriteJob job;
     job.filename = std::move(filename);
     job.bytes = bytes;
     job.src = src; // no staging: the writer reads the pinned host slot directly
     job.spillId = spillId;
-    job.retained = retained;
+    enqueueDiskWriteCommon(std::move(job));
+}
 
+void KVCacheTransferManager::enqueueDiskWriteGathered(
+    std::string filename, char const* srcBase, std::size_t rowBytes, std::size_t srcPitch, std::size_t rows)
+{
+    DiskWriteJob job;
+    job.filename = std::move(filename);
+    job.bytes = rowBytes * rows;
+    job.staged.resize(job.bytes);
+    for (std::size_t l = 0; l < rows; ++l)
+    {
+        std::memcpy(job.staged.data() + l * rowBytes, srcBase + l * srcPitch, rowBytes);
+    }
+    enqueueDiskWriteCommon(std::move(job));
+}
+
+void KVCacheTransferManager::enqueueDiskWriteCommon(DiskWriteJob&& job)
+{
     {
         std::unique_lock<std::mutex> lock(mDiskMutex);
-        // Same per-slot serialization + backpressure as enqueueDiskWrite: retained spills bypass the queue cap
-        // (never stall the scheduler), best-effort spills also wait for room.
+        // Per-slot serialization + bounded-queue backpressure: a retained spill is never dropped (that gate is
+        // upstream at eviction) but still waits here for room, so retained load can't grow RAM unbounded.
         mDiskQueueCv.wait(lock,
             [this, &job]
             {
                 bool const slotClear = mDiskInflight.find(job.filename) == mDiskInflight.end();
-                bool const roomOrRetained = job.retained || mDiskWriteQueue.size() < mDiskWriteQueueMax;
-                return (slotClear && roomOrRetained) || mDiskWriterStop;
+                bool const hasRoom = mDiskWriteQueue.size() < mDiskWriteQueueMax;
+                return (slotClear && hasRoom) || mDiskWriterStop;
             });
         if (mDiskWriterStop)
         {
@@ -710,22 +772,41 @@ void KVCacheTransferManager::diskReaderLoop()
                 buf = pageableFallback.data();
             }
             std::size_t off = 0;
-            for (size_t i = 0; i < job.dsts.size(); ++i)
+            try
             {
-                int fd = ::open(job.files[i].c_str(), O_RDONLY);
-                TLLM_CHECK_WITH_INFO(fd >= 0,
-                    "[disk-tier] cannot open %s for async read; failing loudly rather than serving corrupt KV",
-                    job.files[i].c_str());
-                auto const got = ::read(fd, buf + off, job.bytes[i]);
-                ::close(fd);
-                TLLM_CHECK_WITH_INFO(got == static_cast<ssize_t>(job.bytes[i]),
-                    "[disk-tier] short async read from %s (%zd/%zu); failing loudly rather than serving corrupt KV",
-                    job.files[i].c_str(), static_cast<ssize_t>(got), job.bytes[i]);
-                TLLM_CUDA_CHECK(cudaMemcpyAsync(
-                    job.dsts[i], buf + off, job.bytes[i], cudaMemcpyHostToDevice, stream));
-                off += job.bytes[i];
+                for (size_t i = 0; i < job.dsts.size(); ++i)
+                {
+                    int fd = ::open(job.files[i].c_str(), O_RDONLY);
+                    TLLM_CHECK_WITH_INFO(fd >= 0, "[disk-tier] cannot open %s for async read", job.files[i].c_str());
+                    auto const got = ::read(fd, buf + off, job.bytes[i]);
+                    ::close(fd);
+                    TLLM_CHECK_WITH_INFO(got == static_cast<ssize_t>(job.bytes[i]),
+                        "[disk-tier] short async read from %s (%zd/%zu)", job.files[i].c_str(),
+                        static_cast<ssize_t>(got), job.bytes[i]);
+                    if (i < job.rows.size() && job.rows[i] > 1)
+                    {
+                        // Layer-first pool: the file is layer-major; scatter rows into the pool
+                        // at its layer stride (same pitched form as copyBlock).
+                        TLLM_CUDA_CHECK(cudaMemcpy2DAsync(job.dsts[i], job.dstPitch[i], buf + off, job.rowBytes[i],
+                            job.rowBytes[i], job.rows[i], cudaMemcpyHostToDevice, stream));
+                    }
+                    else
+                    {
+                        TLLM_CUDA_CHECK(
+                            cudaMemcpyAsync(job.dsts[i], buf + off, job.bytes[i], cudaMemcpyHostToDevice, stream));
+                    }
+                    off += job.bytes[i];
+                }
+                TLLM_CUDA_CHECK(cudaStreamSynchronize(stream));
             }
-            TLLM_CUDA_CHECK(cudaStreamSynchronize(stream));
+            catch (std::exception const& e)
+            {
+                // Contain it (a throw escaping this thread -> std::terminate). The block stays pending so no
+                // request forwards onto never-filled KV; areBlocksReady() re-raises this on the scheduler thread.
+                TLLM_LOG_ERROR("[disk-tier] async onboard of block %d failed: %s", job.blockId, e.what());
+                mAnyReadFailed.store(true, std::memory_order_release);
+                continue;
+            }
         }
 
         {
@@ -763,7 +844,13 @@ void KVCacheTransferManager::spillToFile(BlockPtr const& srcHostBlock, SizeType3
     std::vector<KVCacheBlockPool> const& pools, std::string const& directory)
 {
     TLLM_CHECK_WITH_INFO(!directory.empty(), "disk tier requires a directory");
-    bool const retained = srcHostBlock->isRetainedNow(); // retained spill must land -> bypasses the queue cap
+    {
+        // The cache dir can vanish at runtime (operator wipe of the per-window
+        // subdir); recreate before opening so spills keep working. No-op stat
+        // when it already exists; a real filesystem fault still surfaces at open().
+        std::error_code dirEc;
+        std::filesystem::create_directories(directory, dirEc);
+    }
     // The victim's bytes may still be the target of an in-flight async GPU->host copy;
     // wait it out before reading host memory (same event discipline as copyBlock).
     auto const idx = getPendingTransferIndex(srcHostBlock);
@@ -773,8 +860,29 @@ void KVCacheTransferManager::spillToFile(BlockPtr const& srcHostBlock, SizeType3
     }
     for (size_t poolIdx = 0; poolIdx < pools.size(); ++poolIdx)
     {
-        TLLM_CHECK_WITH_INFO(
-            !pools[poolIdx].layerFirstLayout, "disk tier does not support layer-first layout pools");
+        if (pools[poolIdx].layerFirstLayout)
+        {
+            // Layer-first pool (recurrent states): the block is numLayers strided rows; write
+            // them layer-major so the file is contiguous. Async path gathers into staging.
+            auto const geom = layerFirstBlockGeom(srcHostBlock, pools[poolIdx]);
+            auto const filename = diskSlotFilename(directory, diskSlot, poolIdx);
+            if (!mAsyncDiskStore)
+            {
+                int fd = ::open(filename.c_str(), O_CREAT | O_WRONLY, 0644);
+                TLLM_CHECK_WITH_INFO(fd >= 0, "disk tier: cannot open %s", filename.c_str());
+                for (std::size_t l = 0; l < geom.rows; ++l)
+                {
+                    auto const written
+                        = ::pwrite(fd, geom.base + l * geom.pitch, geom.rowBytes, static_cast<off_t>(l * geom.rowBytes));
+                    TLLM_CHECK_WITH_INFO(written == static_cast<ssize_t>(geom.rowBytes),
+                        "disk tier: short write to %s", filename.c_str());
+                }
+                ::close(fd);
+                continue;
+            }
+            enqueueDiskWriteGathered(filename, geom.base, geom.rowBytes, geom.pitch, geom.rows);
+            continue;
+        }
         auto ptr = computeBlockPointer(srcHostBlock, pools, poolIdx);
         auto const filename = diskSlotFilename(directory, diskSlot, poolIdx);
         auto const bytes = static_cast<std::size_t>(ptr->getSizeInBytes());
@@ -790,7 +898,7 @@ void KVCacheTransferManager::spillToFile(BlockPtr const& srcHostBlock, SizeType3
             continue;
         }
         // Async path: copy bytes out (frees the slot immediately) and hand to the writer.
-        enqueueDiskWrite(filename, ptr->data(), bytes, retained);
+        enqueueDiskWrite(filename, ptr->data(), bytes);
     }
 }
 
@@ -798,8 +906,14 @@ void KVCacheTransferManager::spillToFileUnstaged(BlockPtr const& srcHostBlock, S
     std::vector<KVCacheBlockPool> const& pools, std::string const& directory, std::uint64_t spillId)
 {
     TLLM_CHECK_WITH_INFO(!directory.empty(), "disk tier requires a directory");
+    {
+        // The cache dir can vanish at runtime (operator wipe of the per-window
+        // subdir); recreate before opening so spills keep working. No-op stat
+        // when it already exists; a real filesystem fault still surfaces at open().
+        std::error_code dirEc;
+        std::filesystem::create_directories(directory, dirEc);
+    }
     TLLM_CHECK_WITH_INFO(mAsyncDiskStore, "spillToFileUnstaged requires the async writer");
-    bool const retained = srcHostBlock->isRetainedNow(); // retained spill must land -> bypasses the queue cap
     // Same event discipline as spillToFile: the victim's bytes may still be the target of an in-flight
     // GPU->host copy; block until it lands before the writer reads host memory.
     auto const idx = getPendingTransferIndex(srcHostBlock);
@@ -822,7 +936,7 @@ void KVCacheTransferManager::spillToFileUnstaged(BlockPtr const& srcHostBlock, S
         auto const bytes = static_cast<std::size_t>(ptr->getSizeInBytes());
         // The pool buffer outlives the manager, so this raw pointer stays valid after `ptr` (a view)
         // is destroyed -- the writer reads it later off-thread.
-        enqueueDiskWriteUnstaged(filename, ptr->data(), bytes, spillId, retained);
+        enqueueDiskWriteUnstaged(filename, ptr->data(), bytes, spillId);
     }
 }
 
@@ -861,12 +975,25 @@ void KVCacheTransferManager::loadFromFile(BlockPtr const& dstPrimaryBlock, SizeT
         job.useGds = mDiskUseGds;
         for (size_t poolIdx = 0; poolIdx < pools.size(); ++poolIdx)
         {
-            TLLM_CHECK_WITH_INFO(
-                !pools[poolIdx].layerFirstLayout, "disk tier does not support layer-first layout pools");
+            job.files.push_back(diskSlotFilename(directory, diskSlot, poolIdx));
+            if (pools[poolIdx].layerFirstLayout)
+            {
+                // Pitched scatter on the reader; GDS cannot express the strided destination.
+                auto const geom = layerFirstBlockGeom(dstPrimaryBlock, pools[poolIdx]);
+                job.useGds = false;
+                job.dsts.push_back(geom.base);
+                job.bytes.push_back(geom.totalBytes);
+                job.dstPitch.push_back(geom.pitch);
+                job.rowBytes.push_back(geom.rowBytes);
+                job.rows.push_back(geom.rows);
+                continue;
+            }
             auto ptr = computeBlockPointer(dstPrimaryBlock, pools, poolIdx);
             job.dsts.push_back(ptr->data());
-            job.files.push_back(diskSlotFilename(directory, diskSlot, poolIdx));
             job.bytes.push_back(static_cast<std::size_t>(ptr->getSizeInBytes()));
+            job.dstPitch.push_back(0);
+            job.rowBytes.push_back(static_cast<std::size_t>(ptr->getSizeInBytes()));
+            job.rows.push_back(1);
         }
         enqueueDiskRead(std::move(job));
         return;
@@ -886,10 +1013,14 @@ void KVCacheTransferManager::loadFromFile(BlockPtr const& dstPrimaryBlock, SizeT
             }
             std::vector<kvc::FileDesc> fileBlobs;
             std::vector<kvc::MemoryDesc> memoryBlobs;
+            bool anyLayerFirst = false;
+            for (auto const& pool : pools)
+            {
+                anyLayerFirst = anyLayerFirst || pool.layerFirstLayout;
+            }
+            TLLM_CHECK_WITH_INFO(!anyLayerFirst, "GDS onboard does not support layer-first layout pools");
             for (size_t poolIdx = 0; poolIdx < pools.size(); ++poolIdx)
             {
-                TLLM_CHECK_WITH_INFO(
-                    !pools[poolIdx].layerFirstLayout, "disk tier does not support layer-first layout pools");
                 auto ptr = computeBlockPointer(dstPrimaryBlock, pools, poolIdx);
                 fileBlobs.emplace_back(
                     diskSlotFilename(directory, diskSlot, poolIdx), O_RDONLY, 0664, ptr->getSizeInBytes());
@@ -907,8 +1038,13 @@ void KVCacheTransferManager::loadFromFile(BlockPtr const& dstPrimaryBlock, SizeT
     }
     for (size_t poolIdx = 0; poolIdx < pools.size(); ++poolIdx)
     {
-        TLLM_CHECK_WITH_INFO(
-            !pools[poolIdx].layerFirstLayout, "disk tier does not support layer-first layout pools");
+        if (pools[poolIdx].layerFirstLayout)
+        {
+            auto const geom = layerFirstBlockGeom(dstPrimaryBlock, pools[poolIdx]);
+            fileToGpuPosixPitched(
+                geom.base, geom.pitch, geom.rowBytes, geom.rows, diskSlotFilename(directory, diskSlot, poolIdx));
+            continue;
+        }
         auto ptr = computeBlockPointer(dstPrimaryBlock, pools, poolIdx);
         fileToGpuPosix(ptr, diskSlotFilename(directory, diskSlot, poolIdx));
     }

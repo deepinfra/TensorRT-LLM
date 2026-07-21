@@ -426,6 +426,26 @@ public:
         mDiskSlot = diskSlot;
     }
 
+    [[nodiscard]] std::uint64_t getDiskDeadlineSeq() const
+    {
+        return mDiskDeadlineSeq;
+    }
+
+    void setDiskDeadlineSeq(std::uint64_t seq)
+    {
+        mDiskDeadlineSeq = seq;
+    }
+
+    [[nodiscard]] std::chrono::steady_clock::time_point::duration getDiskDeadlineExpiry() const
+    {
+        return mDiskDeadlineExpiry;
+    }
+
+    void setDiskDeadlineExpiry(std::chrono::steady_clock::time_point::duration expiry)
+    {
+        mDiskDeadlineExpiry = expiry;
+    }
+
     //! \brief Exchange tier residency with \p other: pool index and disk slot swap together.
     //! Used by the host->disk spill and the disk->GPU onboard; the tree-resident identity
     //! keeps its node/hash while the physical backing moves.
@@ -442,10 +462,9 @@ public:
         mRetentionExpiry = mRetentionExpiry ? std::max(*mRetentionExpiry, expiry) : expiry;
     }
 
-    [[nodiscard]] bool isRetainedNow() const
+    [[nodiscard]] bool isRetainedNow(std::chrono::steady_clock::time_point::duration now) const
     {
-        return mRetentionExpiry.has_value()
-            && *mRetentionExpiry > std::chrono::steady_clock::now().time_since_epoch();
+        return mRetentionExpiry.has_value() && *mRetentionExpiry > now;
     }
 
     [[nodiscard]] std::optional<std::chrono::steady_clock::time_point::duration> getRetentionExpiry() const
@@ -456,6 +475,24 @@ public:
     void clearRetention()
     {
         mRetentionExpiry = std::nullopt;
+    }
+
+    //! \brief Record the requested disk-retention duration without starting the clock; commitRetention()
+    //! turns it into an absolute deadline when the block is first committed to the reuse tree.
+    void setPendingRetention(std::chrono::milliseconds duration)
+    {
+        mPendingRetentionDuration
+            = mPendingRetentionDuration ? std::max(*mPendingRetentionDuration, duration) : duration;
+    }
+
+    //! \brief Anchor a pending retention duration to now (called when the block is committed / made reusable).
+    void commitRetention(std::chrono::steady_clock::time_point::duration now)
+    {
+        if (mPendingRetentionDuration)
+        {
+            markRetained(now + *mPendingRetentionDuration);
+            mPendingRetentionDuration = std::nullopt;
+        }
     }
 
     //! \brief Times this block's content has been reused (prefix-matched); drives the disk reuse-gate.
@@ -623,8 +660,15 @@ private:
     // Disk cache tier: slot index in the disk file pool; kNoDiskSlot when not disk-resident.
     SizeType32 mDiskSlot{kNoDiskSlot};
 
+    // (expiry, seq) key of this block's entry in the disk-tier deadline set; seq 0 = no entry.
+    std::chrono::steady_clock::time_point::duration mDiskDeadlineExpiry{};
+    std::uint64_t mDiskDeadlineSeq{0};
+
     // Disk-tier retention deadline (steady clock); nullopt = never marked.
     std::optional<std::chrono::steady_clock::time_point::duration> mRetentionExpiry;
+
+    // Requested retention duration, held until commit; commitRetention() converts it to mRetentionExpiry.
+    std::optional<std::chrono::milliseconds> mPendingRetentionDuration;
 
     // How many times this block's content has been reused (prefix-matched). Metadata on the block object,
     // so it survives tier moves like mRetentionExpiry (swapDiskResidency swaps only residency pointers).
@@ -1444,29 +1488,42 @@ public:
         return mDiskOnboards;
     }
 
+    [[nodiscard]] std::size_t getDiskDeadlineCount() const
+    {
+        return mDiskDeadlines.size();
+    }
+
+    void setRetentionClock(std::chrono::steady_clock::time_point::duration now)
+    {
+        mRetentionNow = now;
+    }
+
 private:
 
     //! Disk-tier displacement order among retained blocks: exact earliest deadline;
     //! among equal deadlines, first-spilled first. Upstream releases and evicts chains
     //! leaf-first, so arrival order at the disk is deepest-first and FIFO here equals
-    //! suffix-first within a chain (and LRU-like across requests). Entries are lazy:
-    //! validated against live block state on pop, stale ones discarded.
+    //! suffix-first within a chain (and LRU-like across requests). An entry is erased
+    //! when its block leaves the disk (onboard or displacement).
     struct DiskDeadline
     {
         std::chrono::steady_clock::time_point::duration expiry;
         std::uint64_t seq;
         BlockPtr block;
 
-        bool operator>(DiskDeadline const& other) const
+        bool operator<(DiskDeadline const& other) const
         {
             if (expiry != other.expiry)
             {
-                return expiry > other.expiry;
+                return expiry < other.expiry;
             }
-            return seq > other.seq; // first-arrived pops first among equal deadlines
+            return seq < other.seq; // first-spilled first among equal deadlines
         }
     };
-    std::priority_queue<DiskDeadline, std::vector<DiskDeadline>, std::greater<DiskDeadline>> mDiskDeadlines;
+    std::set<DiskDeadline> mDiskDeadlines;
+
+    // Retention decisions use this rank-consistent clock (leader-broadcast each iteration).
+    std::chrono::steady_clock::time_point::duration mRetentionNow{0};
     std::uint64_t mDiskSpillSeq{0};
 
     // ---- Unstaged async store: reserved host-block pool (env TLLM_KV_DISK_RESERVED_BLOCKS, 0 = off) ----
@@ -1485,6 +1542,9 @@ private:
     // destination is never repurposed mid-read. See releaseBlocks / the areBlocksReady park.
     std::vector<BlockPtr> mReleaseReadPending;
     void reapReadPendingReleases();
+
+    //! \brief Remove \p block's mDiskDeadlines entry, if any.
+    void eraseDiskDeadline(BlockPtr const& block);
     std::uint64_t mUnstagedSpillSeq{0};
 
     //! \brief Pick and claim the disk block to overwrite: empty slots first, then
@@ -2122,6 +2182,24 @@ public:
         return total;
     }
 
+    [[nodiscard]] std::size_t getDiskDeadlineCount() const
+    {
+        std::size_t total = 0;
+        for (auto const& [windowSize, manager] : mWindowBlockManagers)
+        {
+            total += manager.getDiskDeadlineCount();
+        }
+        return total;
+    }
+
+    void setRetentionClock(std::chrono::steady_clock::time_point::duration now)
+    {
+        for (auto& [windowSize, manager] : mWindowBlockManagers)
+        {
+            manager.setRetentionClock(now);
+        }
+    }
+
 private:
     std::map<SizeType32, WindowBlockManager> mWindowBlockManagers;
     std::map<SizeType32, WindowSizeMetadata> mWindowSizeToMetadata;
@@ -2582,9 +2660,14 @@ public:
     [[nodiscard]] KvCacheStats getKvCacheStats() const override
     {
         KvCacheStats kvCacheStats;
-        kvCacheStats.maxNumBlocks = getMaxNumBlocks();
-        kvCacheStats.freeNumBlocks = getNumFreeBlocks();
-        kvCacheStats.usedNumBlocks = getUsedNumBlocks();
+        // gpu_cache_usage_perc must reflect GPU HBM only. getMaxNumBlocks() spans primary +
+        // secondary (host) + poolless disk blocks, while free is primary-only, so used/max would
+        // pin near 100% with the disk tier on. Report the primary pool consistently.
+        auto const primaryBlocks = mBlockManager.getNumPrimaryBlocks();
+        auto const primaryFreeBlocks = getNumFreeBlocks();
+        kvCacheStats.maxNumBlocks = primaryBlocks;
+        kvCacheStats.freeNumBlocks = primaryFreeBlocks;
+        kvCacheStats.usedNumBlocks = primaryBlocks - primaryFreeBlocks;
         kvCacheStats.toksPerBlock = getTokensPerBlock();
         kvCacheStats.allocTotalBlocks = getNumAllocTotalBlocks();
         kvCacheStats.allocNewBlocks = getNumAllocNewBlocks();
@@ -2814,6 +2897,13 @@ public:
     void refreshBlocks() override
     {
         mBlockManager.refreshBlocks();
+    }
+
+    void setRetentionClock(std::int64_t nowNs)
+    {
+        mBlockManager.setRetentionClock(
+            std::chrono::duration_cast<std::chrono::steady_clock::time_point::duration>(
+                std::chrono::nanoseconds(nowNs)));
     }
 
     void flushIterationEvents() override

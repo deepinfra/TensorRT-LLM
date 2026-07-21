@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+#include <filesystem>
+#include <mutex>
 #include "tensorrt_llm/batch_manager/kvCacheManager.h"
 
 #include "tensorrt_llm/batch_manager/common.h"
@@ -684,7 +686,10 @@ BlockManager::BlockManager(std::vector<SizeType32> const& numKvHeadsPerLayer, Si
             numKvHeadsPerLayer, windowSizePerHead, tokensPerBlock,
             /*isSWA=*/(windowSize < maxSequenceLength) && (windowSize >= 0), allottedPrimaryBlocks,
             allottedSecondaryBlocks,
-            (SizeType32(windowSize) == blocksPerWindow.rbegin()->first) ? blocksInDiskPool : SizeType32{0},
+            // Disk mirrors the host level: every window gets the allocation (window-generic,
+            // matching the upstream secondary split). Layer-first pools (recurrent states) use
+            // the gathered/pitched file IO paths in kvCacheTransferManager.
+            blocksInDiskPool,
             diskCachePath, diskRetainedOnly, diskProtectUnexpired, maxNumSequences, stream, cacheType, secondaryOffloadMinPriority, mEventManager,
             enablePartialReuse, copyOnPartialReuse, kvCacheConnectorManager, mLookupTree, mLoopbackAgent,
             enableIndexerKCache, indexerKCacheQuantBlockSize, indexerKCacheIndexHeadDim, indexerKCacheUseFp4,
@@ -752,7 +757,9 @@ WindowBlockManager::WindowBlockManager(nvinfer1::DataType dtype, SizeType32 wind
     , mNumPrimaryBlocks{blocksInPrimaryPool}
     , mNumSecondaryBlocks{blocksInSecondaryPool}
     , mNumDiskBlocks{blocksInDiskPool}
-    , mDiskCachePath{diskCachePath}
+    , mDiskCachePath{diskCachePath.empty() || blocksInDiskPool <= 0
+          ? diskCachePath
+          : diskCachePath + "/w" + std::to_string(windowSize)}
     , mDiskRetainedOnly{diskRetainedOnly}
     , mDiskProtectUnexpired{diskProtectUnexpired}
     , mBufferManager{std::move(stream)}
@@ -876,6 +883,7 @@ WindowBlockManager::WindowBlockManager(nvinfer1::DataType dtype, SizeType32 wind
     }
     if (blocksInDiskPool > 0)
     {
+        std::filesystem::create_directories(mDiskCachePath);
         TLLM_LOG_INFO(
             "[disk-tier] enabled: %d poolless blocks (windowSize=%d)", blocksInDiskPool, windowSize);
     }
@@ -1166,8 +1174,16 @@ void WindowBlockManager::allocatePools(bool useUvm)
     {
         mReservedHostBlockTarget = static_cast<SizeType32>(std::stoi(e));
     }
+    bool hasLayerFirstPool = false;
+    for (auto const& pool : mPools)
+    {
+        hasLayerFirstPool = hasLayerFirstPool || pool.layerFirstLayout;
+    }
+    // Layer-first (recurrent-state) windows always take the staged spill path, so the
+    // unstaged reserved-host-block pool would never be used by them -- reserving slots
+    // here only starves the snapshot host tier. Skip the carve-out for those windows.
     if (mNumDiskBlocks > 0 && mReservedHostBlockTarget > 0 && mNumSecondaryBlocks > 0
-        && mTransferManager->asyncDiskStoreEnabled())
+        && mTransferManager->asyncDiskStoreEnabled() && !hasLayerFirstPool)
     {
         auto const avail = mEvictionPolicy->getNumFreeBlocks(kSecondaryLevel);
         SizeType32 const want = std::min<SizeType32>(mReservedHostBlockTarget, std::max(0, avail - 16));
@@ -1193,6 +1209,12 @@ void BlockManager::releasePools()
 
 void WindowBlockManager::releasePools()
 {
+    if (mTransferManager)
+    {
+        // Stop the disk workers before freeing the pools: queued reads / unstaged writes hold raw
+        // GPU dst / host src pointers into them, so a worker running after release is a use-after-free.
+        mTransferManager->shutdownDiskWorkers();
+    }
     for (auto& pool : mPools)
     {
         if (pool.primaryPtr)
@@ -1299,6 +1321,17 @@ void WindowBlockManager::reapReadPendingReleases()
     }
 }
 
+void WindowBlockManager::eraseDiskDeadline(BlockPtr const& block)
+{
+    auto const seq = block->getDiskDeadlineSeq();
+    if (seq == 0)
+    {
+        return;
+    }
+    mDiskDeadlines.erase(DiskDeadline{block->getDiskDeadlineExpiry(), seq, nullptr});
+    block->setDiskDeadlineSeq(0);
+}
+
 BlockPtr WindowBlockManager::claimDiskTarget()
 {
     // Reclaim onboarded slots whose read has landed before handing out a disk slot, so a slot with an
@@ -1308,7 +1341,7 @@ BlockPtr WindowBlockManager::claimDiskTarget()
     // so getFreeBlock returns empties first and a retained block only when nothing cheaper
     // (empty slot or unmarked cached block) remains.
     auto candidate = std::get<0>(mEvictionPolicy->getFreeBlock(kDiskLevel));
-    if (!candidate->isRetainedNow())
+    if (!candidate->isRetainedNow(mRetentionNow))
     {
         mEvictionPolicy->claimBlock(candidate);
         return candidate;
@@ -1318,26 +1351,32 @@ BlockPtr WindowBlockManager::claimDiskTarget()
     // suffix-first within a chain). Entries are validated against live block state on
     // pop; failures mean the entry describes the past (block left disk, was re-stamped,
     // or is mid-transfer and about to leave) and are discarded.
-    while (!mDiskDeadlines.empty())
+    for (auto it = mDiskDeadlines.begin(); it != mDiskDeadlines.end();)
     {
-        auto const top = mDiskDeadlines.top();
-        mDiskDeadlines.pop();
-        if (top.block->isOnDisk() && !top.block->hasRefs() && mEvictionPolicy->isEnqueued(top.block)
-            && top.block->getRetentionExpiry() == std::optional{top.expiry})
+        if (!it->block->isOnDisk())
         {
-            // Protect mode: earliest deadline still future => all live => refuse.
-            // (Expired blocks sort first, so any would have been evicted above.)
-            if (mDiskProtectUnexpired && top.block->isRetainedNow())
-            {
-                mDiskDeadlines.push(top);
-                return nullptr;
-            }
-            mEvictionPolicy->claimBlock(top.block);
-            return top.block;
+            it = mDiskDeadlines.erase(it);
+            continue;
         }
+        if (it->block->hasRefs() || !mEvictionPolicy->isEnqueued(it->block))
+        {
+            ++it;
+            continue;
+        }
+        // Protect mode: earliest deadline still future => all live => refuse.
+        // (Expired blocks sort first, so any would have been evicted above.)
+        if (mDiskProtectUnexpired && it->block->isRetainedNow(mRetentionNow))
+        {
+            return nullptr;
+        }
+        auto block = it->block;
+        block->setDiskDeadlineSeq(0);
+        mDiskDeadlines.erase(it);
+        mEvictionPolicy->claimBlock(block);
+        return block;
     }
     // Heap drained by stale entries; refuse if the remaining candidate is still live.
-    if (mDiskProtectUnexpired && candidate->isRetainedNow())
+    if (mDiskProtectUnexpired && candidate->isRetainedNow(mRetentionNow))
     {
         return nullptr;
     }
@@ -1377,7 +1416,7 @@ BlockPtr WindowBlockManager::reclaimSecondaryBlock()
     {
         return victim; // disk tier off, nothing reusable to keep, or disk full: same as before
     }
-    if (mDiskRetainedOnly && !victim->isRetainedNow())
+    if (mDiskRetainedOnly && !victim->isRetainedNow(mRetentionNow))
     {
         ++mDiskGateDropped;
         if (mDiskGateDropped == 1 || mDiskGateDropped % 10000 == 0)
@@ -1406,7 +1445,7 @@ BlockPtr WindowBlockManager::reclaimSecondaryBlock()
     // enqueue). Default (unset/0) preserves prior behavior: best-effort spills wait for queue room.
     static bool const kDropOnPressure = []
     { auto const* e = std::getenv("TLLM_KV_DISK_DROP_ON_PRESSURE"); return e && std::atoi(e) != 0; }();
-    if (kDropOnPressure && !victim->isRetainedNow() && mTransferManager->diskWriteQueueFull())
+    if (kDropOnPressure && !victim->isRetainedNow(mRetentionNow) && mTransferManager->diskWriteQueueFull())
     {
         ++mDiskWritePressureDropped;
         if (mDiskWritePressureDropped == 1 || mDiskWritePressureDropped % 10000 == 0)
@@ -1428,7 +1467,15 @@ BlockPtr WindowBlockManager::reclaimSecondaryBlock()
         }
         return victim;
     }
-    bool const useUnstaged = !mReservedHostBlocks.empty() && mTransferManager->asyncDiskStoreEnabled();
+    bool hasLayerFirstPool = false;
+    for (auto const& pool : mPools)
+    {
+        hasLayerFirstPool = hasLayerFirstPool || pool.layerFirstLayout;
+    }
+    // Unstaged writes read the pool memory as one contiguous range, which layer-first pools
+    // cannot provide; those windows always take the staged (gathered) path.
+    bool const useUnstaged
+        = !mReservedHostBlocks.empty() && mTransferManager->asyncDiskStoreEnabled() && !hasLayerFirstPool;
     SizeType32 const diskSlot = diskTarget->getDiskSlot();
     std::uint64_t unstagedSpillId = 0;
     if (useUnstaged)
@@ -1445,12 +1492,15 @@ BlockPtr WindowBlockManager::reclaimSecondaryBlock()
     }
     victim->swapDiskResidency(diskTarget); // victim's identity now disk-resident, tree intact
     victim->setDurationMs(std::nullopt); // keep it out of upstream's expiring-block machinery
-    if (victim->isRetainedNow())
+    if (victim->isRetainedNow(mRetentionNow))
     {
         // Parked at max priority: displacement order among retained blocks is decided by
         // mDiskDeadlines (exact deadline, suffix-first within a chain), not queue order.
         victim->setPriority(executor::KvCacheRetentionConfig::kMaxRetentionPriority);
-        mDiskDeadlines.push({*victim->getRetentionExpiry(), ++mDiskSpillSeq, victim});
+        auto const seq = ++mDiskSpillSeq;
+        victim->setDiskDeadlineSeq(seq);
+        victim->setDiskDeadlineExpiry(*victim->getRetentionExpiry());
+        mDiskDeadlines.insert(DiskDeadline{victim->getDiskDeadlineExpiry(), seq, victim});
     }
     else
     {
@@ -1562,7 +1612,8 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
     mEvictionPolicy->claimBlock(block, priority, durationMs);
     if (auto const diskRetentionMs = sequence.getDiskRetentionMs())
     {
-        block->markRetained(std::chrono::steady_clock::now().time_since_epoch() + *diskRetentionMs);
+        // Anchor the deadline at commit (storeBlocks), not at allocation.
+        block->setPendingRetention(*diskRetentionMs);
     }
     TLLM_LOG_DEBUG("%s::getFreeBlock - Block %d is now acquired by sequence %d", mLogPrefix.c_str(),
         block->getBlockId(), sequence.getRequestId());
@@ -1648,6 +1699,7 @@ void WindowBlockManager::onboardBlock(GenerationRequest& sequence, BlockPtr cons
             ? offloadBlock->getBlockId()
             : static_cast<KVCacheBlock::IdType>(-1);
         mTransferManager->loadFromFile(block, offloadBlock->getDiskSlot(), mPools, mDiskCachePath, trackId);
+        eraseDiskDeadline(offloadBlock);
         offloadBlock->swapDiskResidency(block); // matched identity now GPU-resident (bytes may still be in flight)
         offloadBlock->setPriority(executor::KvCacheRetentionConfig::kDefaultRetentionPriority);
         block->clearRetention();
@@ -1692,6 +1744,15 @@ void WindowBlockManager::onboardBlock(GenerationRequest& sequence, BlockPtr cons
 
 bool WindowBlockManager::areBlocksReady(LlmRequest::RequestIdType requestId)
 {
+    // Surface a failed async onboard here, on the scheduler thread -- the same path a synchronous disk-read
+    // failure takes. The failed block stays in the pending set, so nothing has forwarded onto its contents;
+    // the reader thread already logged the details.
+    if (mTransferManager->anyReadFailed())
+    {
+        TLLM_THROW(
+            "disk tier: async onboard read failed (see [disk-tier] error log); failing rather than "
+            "serving never-filled KV");
+    }
     // Fast path: with no disk read in flight (the common case) every block is trivially ready, so skip the
     // per-block scan and its mutex entirely. Without this the park scans every block of every context
     // request each step -- an O(context-length) mutex-locked host cost even when nothing is onboarding.
@@ -1755,7 +1816,20 @@ void WindowBlockManager::offloadBlock(
 PrefixReuseSummary BlockManager::analyzePrefixReuse(
     VecUniqueTokens const& uniqueTokens, LlmRequest const& llmRequest) const
 {
-    TLLM_CHECK_WITH_INFO(!isVariableWindow(), "analyzePrefixReuse does not work for variable window attention");
+    if (isVariableWindow())
+    {
+        // No single radix tree to walk; an empty summary means "no reuse information",
+        // which every caller already treats as the conservative no-reuse case. Reaching
+        // this line means a call-site guard read isVariableWindow()==false on a manager
+        // that reports true here; log once so the divergence is visible in the field.
+        static std::once_flag onceFlag;
+        std::call_once(onceFlag, [this]() {
+            TLLM_LOG_WARNING(
+                "analyzePrefixReuse reached on a variable-window BlockManager (this=%p, windows=%zu); "
+                "returning empty summary", static_cast<void const*>(this), mWindowBlockManagers.size());
+        });
+        return {};
+    }
     auto const& onlyManager = mWindowBlockManagers.cbegin()->second;
     return onlyManager.analyzePrefixReuse(uniqueTokens, llmRequest);
 }
@@ -1846,8 +1920,13 @@ WindowBlockManager::ReuseMatchResult WindowBlockManager::findReusableBlockMatche
                 }
                 candidateMatches.push_back(ReuseMatch{block, numMatchedTokens, !block->isFull(), false});
             }
-            else if (mIsSWA)
+            else if (mIsSWA || isRecurrentState())
             {
+                // Value-less exact node: for SWA this is an out-of-window anchor; for
+                // recurrent-state chains it is a recycled placeholder (or an evicted
+                // snapshot). Recurrent resume only needs the node path plus the last
+                // surviving real snapshot, so traverse instead of breaking; the claim
+                // phase substitutes a transient placeholder for this slot.
                 candidateMatches.push_back(ReuseMatch{nullptr, numMatchedTokens, false, true});
                 latestMissingAnchorEndToken = std::max(latestMissingAnchorEndToken, candidateMatchedTokens);
             }
@@ -1965,6 +2044,35 @@ WindowBlockManager::ClaimResult WindowBlockManager::claimMatchingBlocks(Generati
     result.shareLastContextBlockAmongBeams = result.numSharedContextBlocks == numContextBlocks;
     auto reuseMatches = findReusableBlockMatches(
         result.blockKeys, mEnablePartialReuse, mCopyOnPartialReuse, sequence.getCurrentPrepopulatedPromptLen());
+    if (isRecurrentState())
+    {
+        // Matches past the last REAL snapshot must not occupy block-table slots:
+        // those positions get written during recompute (interval-boundary state
+        // snapshots), so they need real allocatable blocks from the allocation
+        // loop, not claimed placeholders (a claimed transient placeholder there
+        // leaks kPlaceholderBlockId into the recurrent block table and kills the
+        // event loop). Positions up to the anchor are never rewritten, so
+        // traversal-only hole entries before it remain safe to claim.
+        std::size_t matchesUpToLastReal = 0;
+        for (std::size_t i = 0; i < reuseMatches.matches.size(); ++i)
+        {
+            auto const& m = reuseMatches.matches[i];
+            if (!m.isTraversalOnly && m.block && !m.block->isPlaceholder())
+            {
+                matchesUpToLastReal = i + 1;
+            }
+        }
+        if (reuseMatches.matches.size() > matchesUpToLastReal)
+        {
+            reuseMatches.matches.resize(matchesUpToLastReal);
+            SizeType32 trimmedTokens = 0;
+            for (auto const& m : reuseMatches.matches)
+            {
+                trimmedTokens += m.numMatchedTokens;
+            }
+            reuseMatches.totalMatchedTokens = trimmedTokens;
+        }
+    }
     result.totalMatchedTokens = reuseMatches.totalMatchedTokens;
 
     for (int bi = 0; bi < result.numSharedContextBlocks && bi < static_cast<int>(reuseMatches.matches.size()); ++bi)
@@ -2185,7 +2293,7 @@ SizeType32 WindowBlockManager::onboardAndAllocateBlocks(
         {
             // Reused blocks bypass getFreeBlock, so the disk-retention stamp must also
             // happen here; markRetained max-merges, keeping the later deadline.
-            claimed.block->markRetained(std::chrono::steady_clock::now().time_since_epoch() + *diskRetentionMs);
+            claimed.block->markRetained(mRetentionNow + *diskRetentionMs);
         }
         onboardBlock(sequence, claimed.block, claimResult.mode, claimResult.directory);
         addBlockToAllBeams(claimed.block, sequence);
@@ -3024,6 +3132,12 @@ std::pair<SizeType32, std::vector<KVCacheBlock::IdType>> WindowBlockManager::sto
             prevBlock->incRefCount();
             pinnedBlockIds.push_back(prevBlock->getBlockId());
         }
+    }
+
+    // Blocks are now committed to the reuse tree: anchor any pending retention duration to now.
+    for (auto const& b : storedBlocks)
+    {
+        b->commitRetention(mRetentionNow);
     }
 
     if (mEventManager)

@@ -586,12 +586,21 @@ class KVCacheManager(BaseResourceManager):
                     max_kv_event_entries=self.event_buffer_max_size)
 
         disk_cache_size = getattr(kv_cache_config, "disk_cache_size", None) or 0
-        if disk_cache_size and (mapping.enable_attention_dp or mapping.pp_size > 1):
+        if disk_cache_size and (mapping.enable_attention_dp or mapping.pp_size > 1
+                                or mapping.cp_size > 1):
             raise ValueError(
-                "disk KV-cache tier is not supported with attention-DP or pipeline parallelism "
-                "(cross-rank onboard-readiness sync assumes identical per-rank batches); got "
-                f"enable_attention_dp={mapping.enable_attention_dp}, pp_size={mapping.pp_size}. "
+                "disk KV-cache tier is not supported with attention-DP, pipeline parallelism, "
+                "or context parallelism (cross-rank onboard-readiness sync assumes identical "
+                "per-rank batches and covers only the plain-TP group); got "
+                f"enable_attention_dp={mapping.enable_attention_dp}, pp_size={mapping.pp_size}, "
+                f"cp_size={mapping.cp_size}. "
                 "Disable disk_cache_size or use plain tensor parallelism.")
+        if disk_cache_size and mapping.tp_size > 1 and os.environ.get(
+                "TLLM_KV_DISK_DROP_ON_PRESSURE", "0") not in ("", "0"):
+            raise ValueError(
+                "TLLM_KV_DISK_DROP_ON_PRESSURE is not supported with tensor parallelism: "
+                "the drop decision depends on each rank's write-queue depth at spill time, "
+                "so ranks diverge on which blocks remain reusable. Unset it or use TP=1.")
         blocks_in_disk_pool = 0
         if disk_cache_size:
             max_tokens_disk = disk_cache_size // self.get_cache_bytes_per_token()
@@ -1381,6 +1390,9 @@ class KVCacheManager(BaseResourceManager):
         """True when every KV block this request holds has its disk read landed (detached onboard).
         Always True for requests with no in-flight disk read, so it is cheap for the common case."""
         return self.impl.are_blocks_ready(request.py_request_id)
+
+    def set_retention_clock(self, now_ns: int) -> None:
+        self.impl.set_retention_clock(now_ns)
 
     def get_num_free_blocks(self) -> int:
         if self.is_linear_attention:

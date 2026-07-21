@@ -19,6 +19,8 @@
 #include "tensorrt_llm/batch_manager/utils/inflightBatchingUtils.h"
 #include "tensorrt_llm/common/nvtxUtils.h"
 
+#include <algorithm>
+
 namespace tensorrt_llm::batch_manager
 {
 
@@ -93,8 +95,10 @@ void MicroBatchScheduler::fitDraftTokens(RequestVector& contextsToBeChunked,
                     = std::min(remainingSpaceForDraftTokens, ctxTokensCapacity.value() - numCtxTokens);
                 numCtxTokens += remainingSpaceForDraftTokens;
             }
-            // Discard draft tokens.
-            SizeType32 const draftTokensToDiscard = llmReq->getNumDraftTokens() - remainingSpaceForDraftTokens;
+            // Discard draft tokens. The capacity term above goes negative when the batch
+            // already overshoots ctxTokensCapacity; discard at most what the request has.
+            SizeType32 const draftTokensToDiscard = std::clamp(
+                llmReq->getNumDraftTokens() - remainingSpaceForDraftTokens, 0, llmReq->getNumDraftTokens());
             if (draftTokensToDiscard > 0)
             {
                 TLLM_LOG_DEBUG("Discarding %d draft tokens", draftTokensToDiscard);
