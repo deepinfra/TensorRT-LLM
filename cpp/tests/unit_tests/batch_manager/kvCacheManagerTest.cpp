@@ -10718,7 +10718,7 @@ std::chrono::steady_clock::time_point::duration retentionTick(std::int64_t ms)
 }
 
 DiskTierSeq addDiskTierSequence(BlockManager& blockManager, LlmRequest::RequestIdType id, VecTokens tokens,
-    std::optional<std::chrono::milliseconds> diskTtl)
+    std::optional<std::chrono::milliseconds> diskTtl, std::optional<SizeType32> diskTokenEnd = std::nullopt)
 {
     auto const windowSize = blockManager.getPoolWindowSize(0);
     auto inputTokens = std::make_shared<VecTokens>(std::move(tokens));
@@ -10729,6 +10729,10 @@ DiskTierSeq addDiskTierSequence(BlockManager& blockManager, LlmRequest::RequestI
     if (diskTtl)
     {
         cfg.setDiskRetentionMs(diskTtl);
+        if (diskTokenEnd)
+        {
+            cfg.setDiskRetentionTokenEnd(diskTokenEnd);
+        }
         req->setKvCacheRetentionConfig(cfg);
     }
     // GenerationRequest must carry the retention config too: in production
@@ -10910,6 +10914,84 @@ TEST_F(KVCacheManagerTest, DiskTierRetentionAnchoredAtCommitTest)
         }
     }
     EXPECT_GT(stamped, 0u) << "commit did not anchor any retention deadline";
+}
+
+// Retention breakpoint L (disk_retention_token_end): only blocks whose tokens fall before L carry a
+// retention deadline; blocks at or beyond L are left unretained. Ceil rounding -- a block whose first
+// token is before L is retained whole. Inspects the per-block deadline directly after commit
+// (deterministic, no eviction noise); the trailing write-block is skipped as its commit is deferred.
+TEST_F(KVCacheManagerTest, DiskTierRetentionTokenEndTest)
+{
+    auto const stream = std::make_shared<tr::CudaStream>();
+    DiskTierDir dir;
+    auto blockManagerPtr
+        = makeDiskTierBlockManager(stream, dir.str(), /*retainedOnly=*/false, /*prim=*/4, /*sec=*/2, /*disk=*/8);
+    auto& blockManager = *blockManagerPtr;
+    auto const windowSize = blockManager.getPoolWindowSize(0);
+    auto const tpb = blockManager.getTokensPerBlock(); // 4 -> 16 tokens = 4 blocks, starts 0,4,8,12
+    auto constexpr ttl = std::chrono::milliseconds(60000);
+    auto const t0 = retentionTick(5000);
+
+    // L below a boundary (1 block), mid (2 blocks), and ceil just past a boundary (3 blocks).
+    std::vector<SizeType32> const tokenEnds{4, 8, 9};
+    LlmRequest::RequestIdType id = 0;
+    TokenIdType base = 0;
+    for (auto const L : tokenEnds)
+    {
+        auto s = addDiskTierSequence(blockManager, id++, iotaTokens(base, 16), ttl, /*tokenEnd=*/L);
+        base += 1000; // distinct content so cases never reuse each other's blocks
+        auto const blockIds = s.seq->getCacheBlockIds(windowSize).at(0); // beam 0
+        ASSERT_GE(blockIds.size(), 4u);
+
+        blockManager.setRetentionClock(t0);
+        blockManager.storeContextBlocks(*s.seq, *s.req);
+
+        auto const nBlocks = static_cast<SizeType32>(blockIds.size());
+        for (SizeType32 bi = 0; bi + 1 < nBlocks; ++bi) // skip trailing write-block (deferred commit)
+        {
+            bool const shouldRetain = bi * tpb < L;
+            auto const expiry = blockManager.getBlockById(blockIds[bi], windowSize)->getRetentionExpiry();
+            EXPECT_EQ(expiry.has_value(), shouldRetain)
+                << "L=" << L << " block bi=" << bi << " tokenStart=" << bi * tpb;
+            if (shouldRetain)
+            {
+                EXPECT_EQ(*expiry, t0 + ttl); // retained prefix stamped at the retention clock + ttl
+            }
+        }
+        releaseDiskTierSequence(blockManager, s);
+    }
+}
+
+// Control: an unset breakpoint retains the whole prompt exactly as before (the getFreeBlock guard must
+// not regress the no-L path). At least the non-trailing blocks carry the deadline.
+TEST_F(KVCacheManagerTest, DiskTierRetentionTokenEndUnsetRetainsAllTest)
+{
+    auto const stream = std::make_shared<tr::CudaStream>();
+    DiskTierDir dir;
+    auto blockManagerPtr
+        = makeDiskTierBlockManager(stream, dir.str(), /*retainedOnly=*/false, /*prim=*/4, /*sec=*/2, /*disk=*/8);
+    auto& blockManager = *blockManagerPtr;
+    auto const windowSize = blockManager.getPoolWindowSize(0);
+    auto constexpr ttl = std::chrono::milliseconds(60000);
+    auto const t0 = retentionTick(5000);
+
+    auto s = addDiskTierSequence(blockManager, 0, iotaTokens(0, 16), ttl, /*tokenEnd=*/std::nullopt);
+    auto const blockIds = s.seq->getCacheBlockIds(windowSize).at(0);
+    ASSERT_GE(blockIds.size(), 4u);
+    blockManager.setRetentionClock(t0);
+    blockManager.storeContextBlocks(*s.seq, *s.req);
+
+    auto const nBlocks = static_cast<SizeType32>(blockIds.size());
+    for (SizeType32 bi = 0; bi + 1 < nBlocks; ++bi)
+    {
+        auto const expiry = blockManager.getBlockById(blockIds[bi], windowSize)->getRetentionExpiry();
+        EXPECT_TRUE(expiry.has_value()) << "unset breakpoint must retain block bi=" << bi;
+        if (expiry.has_value())
+        {
+            EXPECT_EQ(*expiry, t0 + ttl);
+        }
+    }
+    releaseDiskTierSequence(blockManager, s);
 }
 
 // Bug-1 regression: a re-send that REUSES blocks re-stamps them (max-merge extends).

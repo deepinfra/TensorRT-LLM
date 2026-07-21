@@ -826,6 +826,11 @@ public:
         return mKvCacheRetentionConfig.getDiskRetentionMs();
     }
 
+    [[nodiscard]] std::optional<SizeType32> getDiskRetentionTokenEnd() const
+    {
+        return mKvCacheRetentionConfig.getDiskRetentionTokenEnd();
+    }
+
     [[nodiscard]] std::string const& getDirectory() const
     {
         return mKvCacheRetentionConfig.getDirectory();

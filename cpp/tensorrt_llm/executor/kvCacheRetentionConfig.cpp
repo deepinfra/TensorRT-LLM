@@ -181,4 +181,14 @@ void KvCacheRetentionConfig::setDiskRetentionMs(std::optional<std::chrono::milli
     mDiskRetentionMs = diskRetentionMs;
 }
 
+std::optional<SizeType32> KvCacheRetentionConfig::getDiskRetentionTokenEnd() const
+{
+    return mDiskRetentionTokenEnd;
+}
+
+void KvCacheRetentionConfig::setDiskRetentionTokenEnd(std::optional<SizeType32> tokenEnd)
+{
+    mDiskRetentionTokenEnd = tokenEnd;
+}
+
 } // namespace tensorrt_llm::executor

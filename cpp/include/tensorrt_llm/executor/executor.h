@@ -635,6 +635,8 @@ public:
     [[nodiscard]] std::string const& getDirectory() const;
     [[nodiscard]] std::optional<std::chrono::milliseconds> getDiskRetentionMs() const;
     void setDiskRetentionMs(std::optional<std::chrono::milliseconds> diskRetentionMs);
+    [[nodiscard]] std::optional<SizeType32> getDiskRetentionTokenEnd() const;
+    void setDiskRetentionTokenEnd(std::optional<SizeType32> tokenEnd);
 
     /// @brief Convert the token range data into an entry per kv block. Returns a tuple of vectors corresponding to the
     /// priorities and durations for each block.
@@ -646,7 +648,8 @@ public:
         return mTokenRangeRetentionConfigs == other.mTokenRangeRetentionConfigs
             && mDecodeRetentionPriority == other.mDecodeRetentionPriority
             && mDecodeDurationMs == other.mDecodeDurationMs && mTransferMode == other.mTransferMode
-            && mDirectory == other.mDirectory && mDiskRetentionMs == other.mDiskRetentionMs;
+            && mDirectory == other.mDirectory && mDiskRetentionMs == other.mDiskRetentionMs
+            && mDiskRetentionTokenEnd == other.mDiskRetentionTokenEnd;
     }
 
 private:
@@ -666,6 +669,10 @@ private:
     /// @brief How long this request's blocks stay eligible for (and protected in) the
     /// disk cache tier. Unset = blocks never enter a retained-only disk tier.
     std::optional<std::chrono::milliseconds> mDiskRetentionMs;
+
+    /// @brief If set, only blocks whose tokens fall before this position are disk-retained
+    /// (a prompt-cache breakpoint). Unset = the whole prompt is retained.
+    std::optional<SizeType32> mDiskRetentionTokenEnd;
 };
 
 /// @brief A class that holds information about the request

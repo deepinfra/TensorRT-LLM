@@ -1612,8 +1612,14 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
     mEvictionPolicy->claimBlock(block, priority, durationMs);
     if (auto const diskRetentionMs = sequence.getDiskRetentionMs())
     {
-        // Anchor the deadline at commit (storeBlocks), not at allocation.
-        block->setPendingRetention(*diskRetentionMs);
+        // Anchor the deadline at commit (storeBlocks), not at allocation. With a retention
+        // token-end (prompt-cache breakpoint) set, the context-allocation caller applies the
+        // stamp scoped to the prefix (it knows the block's token position); getFreeBlock stamps
+        // only in the unscoped whole-sequence case.
+        if (!sequence.getDiskRetentionTokenEnd().has_value())
+        {
+            block->setPendingRetention(*diskRetentionMs);
+        }
     }
     TLLM_LOG_DEBUG("%s::getFreeBlock - Block %d is now acquired by sequence %d", mLogPrefix.c_str(),
         block->getBlockId(), sequence.getRequestId());
@@ -2292,8 +2298,14 @@ SizeType32 WindowBlockManager::onboardAndAllocateBlocks(
         if (auto const diskRetentionMs = sequence.getDiskRetentionMs())
         {
             // Reused blocks bypass getFreeBlock, so the disk-retention stamp must also
-            // happen here; markRetained max-merges, keeping the later deadline.
-            claimed.block->markRetained(mRetentionNow + *diskRetentionMs);
+            // happen here; markRetained max-merges, keeping the later deadline. A retention
+            // token-end (prompt-cache breakpoint) scopes it to the prefix -- ceil rounding: a
+            // block whose first token is before the breakpoint is retained whole.
+            auto const tokenEnd = sequence.getDiskRetentionTokenEnd();
+            if (!tokenEnd.has_value() || bi * mTokensPerBlock < *tokenEnd)
+            {
+                claimed.block->markRetained(mRetentionNow + *diskRetentionMs);
+            }
         }
         onboardBlock(sequence, claimed.block, claimResult.mode, claimResult.directory);
         addBlockToAllBeams(claimed.block, sequence);
@@ -2346,6 +2358,17 @@ SizeType32 WindowBlockManager::onboardAndAllocateBlocks(
                 executor::KvCacheRetentionConfig::kDefaultRetentionPriority),
             claimResult.perBlockRetentions[bi].durationMs, claimResult.mode, claimResult.directory,
             /*wantPlaceholder=*/!shouldAllocate);
+        // Prefix-scoped disk retention for newly allocated context blocks when a breakpoint is set
+        // (the unscoped whole-sequence case is stamped inside getFreeBlock). Ceil: a block whose
+        // first token is before the breakpoint is retained whole.
+        if (auto const diskRetentionMs = sequence.getDiskRetentionMs())
+        {
+            if (auto const tokenEnd = sequence.getDiskRetentionTokenEnd();
+                tokenEnd.has_value() && bi * mTokensPerBlock < *tokenEnd)
+            {
+                freeBlock->setPendingRetention(*diskRetentionMs);
+            }
+        }
         addBlockToAllBeams(freeBlock, sequence);
         TLLM_LOG_DEBUG("%s::onboardAndAllocateBlocks - No match, allocated new block %d for sequence %lu",
             mLogPrefix.c_str(), freeBlock->getBlockId(), sequence.getRequestId());

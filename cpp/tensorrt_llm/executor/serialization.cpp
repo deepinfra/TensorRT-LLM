@@ -1803,6 +1803,7 @@ KvCacheRetentionConfig Serialization::deserializeKvCacheRetentionConfig(std::ist
     auto kvCacheRetentionConfig = KvCacheRetentionConfig{
         tokenRangeRetentionPriorities, decodePriority, decodeDurationMs, transferMode, directory};
     kvCacheRetentionConfig.setDiskRetentionMs(diskRetentionMs);
+    kvCacheRetentionConfig.setDiskRetentionTokenEnd(su::deserialize<std::optional<SizeType32>>(is));
     return kvCacheRetentionConfig;
 }
 
@@ -1814,6 +1815,7 @@ void Serialization::serialize(KvCacheRetentionConfig const& kvCacheRetentionConf
     su::serialize(kvCacheRetentionConfig.getTransferMode(), os);
     su::serialize(kvCacheRetentionConfig.getDirectory(), os);
     su::serialize(durationToInt(kvCacheRetentionConfig.getDiskRetentionMs()), os);
+    su::serialize(kvCacheRetentionConfig.getDiskRetentionTokenEnd(), os);
 }
 
 size_t Serialization::serializedSize(KvCacheRetentionConfig const& config)
@@ -1825,6 +1827,7 @@ size_t Serialization::serializedSize(KvCacheRetentionConfig const& config)
     totalSize += su::serializedSize(config.getTransferMode());
     totalSize += su::serializedSize(config.getDirectory());
     totalSize += su::serializedSize(durationToInt(config.getDiskRetentionMs()));
+    totalSize += su::serializedSize(config.getDiskRetentionTokenEnd());
     return totalSize;
 }
 

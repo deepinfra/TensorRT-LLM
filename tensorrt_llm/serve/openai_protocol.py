@@ -390,6 +390,13 @@ class CompletionRequest(OpenAIBaseModel):
         description=
         "Keep this request's KV cache reusable for this many seconds (disk-tier "
         "retention). 0 or unset means no disk retention.")
+    kv_cache_retention_token_end: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=
+        "Scope disk-tier retention (kv_cache_ttl_seconds) to the prompt prefix: "
+        "retain only the KV for tokens before this position (a prompt-cache "
+        "breakpoint). Unset retains the whole prompt.")
     top_p_min: float = 0.0
     min_p: float = 0.0
     repetition_penalty: float = 1.0
@@ -732,6 +739,13 @@ class ChatCompletionRequest(OpenAIBaseModel):
         description=
         "Keep this request's KV cache reusable for this many seconds (disk-tier "
         "retention). 0 or unset means no disk retention.")
+    kv_cache_retention_token_end: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description=
+        "Scope disk-tier retention (kv_cache_ttl_seconds) to the prompt prefix: "
+        "retain only the KV for tokens before this position (a prompt-cache "
+        "breakpoint). Unset retains the whole prompt.")
     top_p_min: float = 0.0
     min_p: float = 0.0
     repetition_penalty: float = 1.0

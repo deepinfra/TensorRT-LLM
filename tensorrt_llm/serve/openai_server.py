@@ -52,12 +52,16 @@ import datetime as _dt
 
 def _disk_retention_config(request):
     """Translate the request's kv_cache_ttl_seconds into a retention config carrying
-    only disk_retention_ms; None (the stock path) when the field is absent or falsy."""
+    only disk_retention_ms (optionally scoped to a prompt prefix via
+    kv_cache_retention_token_end); None (the stock path) when the field is absent or falsy."""
     ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
     if not ttl_s:
         return None
     cfg = _KvRetention([])
     cfg.disk_retention_ms = _dt.timedelta(seconds=ttl_s)
+    token_end = getattr(request, "kv_cache_retention_token_end", None)
+    if token_end:
+        cfg.disk_retention_token_end = token_end
     return cfg
 
 from tensorrt_llm.sampling_params import GuidedDecodingParams
