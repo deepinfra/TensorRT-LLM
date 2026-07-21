@@ -377,7 +377,14 @@ __global__ void routingMainKernel(KernelParams params)
 
             float scoreNorm = laneIdx < params.mTopK ? smemScoreSigmoid[expertIdx] : 0.F;
             auto redNorm = cg::reduce(warp, scoreNorm, cg::plus<float>{});
-            auto finalScore = OutputT{scoreNorm * params.mRouteScale / redNorm};
+            // Guard against 0/0 -> NaN: when every top-K expert's sigmoid score
+            // underflows to 0 (uniformly very-negative router logits, e.g. from
+            // an outlier-quantized hidden state), redNorm is 0 and the division
+            // produces NaN routing weights that poison the MoE output and
+            // propagate to logits. The Python reference (Deepseekv3RoutingImpl
+            // short path in routing.py) adds the same 1e-20 epsilon.
+            auto redNormSafe = redNorm + 1e-20f;
+            auto finalScore = OutputT{scoreNorm * params.mRouteScale / redNormSafe};
 
             // write expert idx out already
             auto idxTopK = blockIdx.x * params.mTopK + laneIdx;
