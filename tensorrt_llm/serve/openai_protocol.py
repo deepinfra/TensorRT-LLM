@@ -357,6 +357,26 @@ def _response_format_text_config_to_guided_decoding_params(
         resp_format, reasoning_parser=reasoning_parser)
 
 
+class PromptCacheOptions(OpenAIBaseModel):
+    mode: Optional[str] = Field(
+        default=None,
+        description="'explicit' enables disk-tier retention (ttl + breakpoints). "
+        "'implicit' or absent = a regular request with no disk retention.")
+    ttl: Optional[str] = Field(
+        default=None,
+        description="Disk-tier KV retention window, e.g. \"15m\", \"1h\". Unset = no retention.")
+    breakpoint_length_in_tokens: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Retained-prefix length in TOKENS; used directly as the bound, no "
+        "tokenization. Preferred when the token count is already known (pre-tokenized prompts).")
+    breakpoint_length_in_chars: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Retained-prefix length in CHARACTERS (string prompts only); the engine "
+        "tokenizes prompt[:n] to derive the token bound. Ignored for token-id prompts.")
+
+
 class CompletionRequest(OpenAIBaseModel):
     # Ordered by official OpenAI API documentation
     # https://platform.openai.com/docs/api-reference/completions/create
@@ -384,19 +404,11 @@ class CompletionRequest(OpenAIBaseModel):
     # doc: begin-completion-sampling-params
     use_beam_search: bool = False
     top_k: int = 0
-    kv_cache_ttl_seconds: Optional[int] = Field(
+    prompt_cache_options: Optional[PromptCacheOptions] = Field(
         default=None,
-        ge=0,
-        description=
-        "Keep this request's KV cache reusable for this many seconds (disk-tier "
-        "retention). 0 or unset means no disk retention.")
-    kv_cache_retention_token_end: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description=
-        "Scope disk-tier retention (kv_cache_ttl_seconds) to the prompt prefix: "
-        "retain only the KV for tokens before this position (a prompt-cache "
-        "breakpoint). Unset retains the whole prompt.")
+        description="Disk-tier KV retention: {\"ttl\": \"1h\", \"breakpoint_length\": <int>}. "
+        "Chat requests may instead mark the retained boundary with prompt_cache_breakpoint "
+        "{\"mode\": \"explicit\"} on a content part.")
     top_p_min: float = 0.0
     min_p: float = 0.0
     repetition_penalty: float = 1.0
@@ -733,19 +745,11 @@ class ChatCompletionRequest(OpenAIBaseModel):
     best_of: Optional[int] = None
     use_beam_search: bool = False
     top_k: int = 0
-    kv_cache_ttl_seconds: Optional[int] = Field(
+    prompt_cache_options: Optional[PromptCacheOptions] = Field(
         default=None,
-        ge=0,
-        description=
-        "Keep this request's KV cache reusable for this many seconds (disk-tier "
-        "retention). 0 or unset means no disk retention.")
-    kv_cache_retention_token_end: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description=
-        "Scope disk-tier retention (kv_cache_ttl_seconds) to the prompt prefix: "
-        "retain only the KV for tokens before this position (a prompt-cache "
-        "breakpoint). Unset retains the whole prompt.")
+        description="Disk-tier KV retention: {\"ttl\": \"1h\", \"breakpoint_length\": <int>}. "
+        "Chat requests may instead mark the retained boundary with prompt_cache_breakpoint "
+        "{\"mode\": \"explicit\"} on a content part.")
     top_p_min: float = 0.0
     min_p: float = 0.0
     repetition_penalty: float = 1.0

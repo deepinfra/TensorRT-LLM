@@ -50,19 +50,99 @@ from tensorrt_llm.metrics.collector import MetricsCollector
 from tensorrt_llm.llmapi.llm_utils import KvCacheRetentionConfig as _KvRetention
 import datetime as _dt
 
-def _disk_retention_config(request):
-    """Translate the request's kv_cache_ttl_seconds into a retention config carrying
-    only disk_retention_ms (optionally scoped to a prompt prefix via
-    kv_cache_retention_token_end); None (the stock path) when the field is absent or falsy."""
-    ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
+def _parse_ttl(ttl):
+    """'15m'/'1h'/'90s'/int-seconds -> int seconds, or None."""
+    if ttl is None:
+        return None
+    if isinstance(ttl, (int, float)):
+        return int(ttl) or None
+    t = str(ttl).strip().lower()
+    try:
+        if t.endswith("h"):
+            return int(float(t[:-1]) * 3600)
+        if t.endswith("m"):
+            return int(float(t[:-1]) * 60)
+        if t.endswith("s"):
+            return int(float(t[:-1]))
+        return int(t) or None
+    except ValueError:
+        return None
+
+
+def _token_len(tokenizer, text):
+    try:
+        tk = getattr(tokenizer, "tokenizer", None) or tokenizer
+        return len(tk(text).input_ids) or None
+    except Exception:
+        return None
+
+
+def _raw_prompt(p):
+    """The resolved prompt (str or list[int]) out of a prompt_inputs() dict."""
+    if isinstance(p, dict):
+        return p.get("prompt") if p.get("prompt") is not None else p.get("prompt_token_ids")
+    return p
+
+
+def _breakpoint_char_end(messages, rendered):
+    """Char offset in the rendered prompt where the last explicit content-part
+    prompt_cache_breakpoint ends; None if absent or not locatable."""
+    mark = None
+    for msg in messages or []:
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            bp = part.get("prompt_cache_breakpoint") if isinstance(part, dict) \
+                else getattr(part, "prompt_cache_breakpoint", None)
+            mode = (bp.get("mode") if isinstance(bp, dict) else getattr(bp, "mode", None)) if bp else None
+            if mode == "explicit":
+                mark = part.get("text") if isinstance(part, dict) else getattr(part, "text", None)
+    if not mark:
+        return None
+    idx = rendered.find(mark)
+    return idx + len(mark) if idx >= 0 else None
+
+
+def _compute_disk_retention(request, prompt, tokenizer):
+    """Build KvCacheRetentionConfig from prompt_cache_options / prompt_cache_breakpoint.
+    `prompt` is the resolved prompt (str, or list[int] token ids), or None."""
+    opts = getattr(request, "prompt_cache_options", None)
+    if opts is None or getattr(opts, "mode", None) != "explicit":
+        return None  # retention only when explicitly opted in; else a regular request
+    ttl_s = _parse_ttl(getattr(opts, "ttl", None))
     if not ttl_s:
         return None
+    token_end = None
+    scoped = False
+    bl_tokens = getattr(opts, "breakpoint_length_in_tokens", None)
+    bl_chars = getattr(opts, "breakpoint_length_in_chars", None)
+    if bl_tokens:
+        scoped = True
+        token_end = int(bl_tokens)                                  # tokens: direct, NO tokenize
+    elif bl_chars:
+        scoped = True
+        if isinstance(prompt, str):
+            token_end = _token_len(tokenizer, prompt[:bl_chars])    # chars: one tokenize of the prefix
+        # chars given for a non-string (token-id) prompt is unhonorable -> token_end stays None -> dropped
+    elif isinstance(prompt, str):
+        char_end = _breakpoint_char_end(getattr(request, "messages", None), prompt)
+        if char_end is not None:
+            scoped = True
+            token_end = _token_len(tokenizer, prompt[:char_end])    # chat positional breakpoint
+    if scoped and not token_end:
+        return None  # a breakpoint was requested but couldn't be honored -> never over-retain
     cfg = _KvRetention([])
     cfg.disk_retention_ms = _dt.timedelta(seconds=ttl_s)
-    token_end = getattr(request, "kv_cache_retention_token_end", None)
     if token_end:
-        cfg.disk_retention_token_end = token_end
+        cfg.disk_retention_token_end = int(token_end)
     return cfg
+
+
+def _disk_retention_config(request):
+    """Shim for endpoints with no prompt in scope (e.g. /v1/responses): ttl-only,
+    no breakpoint scoping. None unless prompt_cache_options.ttl is set."""
+    return _compute_disk_retention(request, None, None)
 
 from tensorrt_llm.sampling_params import GuidedDecodingParams
 from tensorrt_llm.serve.chat_utils import (load_chat_template,
@@ -1310,9 +1390,11 @@ class OpenAIServer(_VideoRoutesMixin):
                     preprocess_fn, prompt, sampling_params,
                     disaggregated_params)
 
+            _disk_ret = await asyncio.to_thread(
+                _compute_disk_retention, request, _raw_prompt(prompt), self.tokenizer)
             promise = self.generator.generate_async(
                 inputs=generate_inputs,
-                kv_cache_retention_config=_disk_retention_config(request),
+                kv_cache_retention_config=_disk_ret,
                 sampling_params=sampling_params,
                 _postproc_params=postproc_params
                 if self.postproc_worker_enabled else None,
@@ -1617,9 +1699,11 @@ class OpenAIServer(_VideoRoutesMixin):
                 else:
                     tokens_prompt = prompt
 
+                _disk_ret = await asyncio.to_thread(
+                    _compute_disk_retention, request, _raw_prompt(prompt), self.tokenizer)
                 promise = self.generator.generate_async(
                     inputs=tokens_prompt,
-                    kv_cache_retention_config=_disk_retention_config(request),
+                    kv_cache_retention_config=_disk_ret,
                     sampling_params=sampling_params,
                     _postproc_params=postproc_params,
                     streaming=request.stream,
