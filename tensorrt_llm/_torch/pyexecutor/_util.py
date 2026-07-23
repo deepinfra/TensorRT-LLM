@@ -1444,6 +1444,17 @@ class KvCacheCreator:
             return False
 
         sparse_cfg = self._sparse_attention_config
+        # DeepInfra escape hatch: before rc25 a separate draft manager under
+        # sparse attention crashed at warmup (DeepseekV4CacheManager had no
+        # _num_tables on the draft copy), so we folded draft layers into the
+        # unified manager. Upstream #16887 made the separate path work for
+        # DeepSeek-V4 one-model MTP; keep the old behaviour reachable via env.
+        if (sparse_cfg is not None and os.environ.get(
+                "TRTLLM_SPARSE_NO_SEPARATE_DRAFT_KV", "0") == "1"):
+            logger.info(
+                "Sparse attention is enabled and TRTLLM_SPARSE_NO_SEPARATE_DRAFT_KV=1; "
+                "separate draft KV cache is disabled.")
+            return False
         if (sparse_cfg is not None
                 and getattr(sparse_cfg, "algorithm", None) == "deepseek_v4"
                 and self._mapping.pp_size > 1):
