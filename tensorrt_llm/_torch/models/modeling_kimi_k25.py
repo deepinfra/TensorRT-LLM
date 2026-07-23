@@ -1144,6 +1144,28 @@ class KimiK25InputProcessor(BaseMultimodalInputProcessor, BaseMultimodalDummyInp
     def dtype(self) -> torch.dtype:
         return self._dtype
 
+    def _ensure_k25_slow_tokenizer(self) -> None:
+        """Swap in a slow tokenizer for the multimodal path.
+
+        The multimodal prompt is rewritten with media placeholder strings
+        (``<|media_begin|>``/``<|media_pad|>``/``<|media_end|>``) that a fast
+        BPE tokenizer splits into pieces; only the slow tokenizer keeps them
+        as single special tokens. No-op when the current tokenizer is already
+        slow (e.g. the custom TikTokenTokenizer). The slow instance is cached
+        so repeated multimodal requests don't reload it.
+        """
+        if not getattr(self._tokenizer, "is_fast", False):
+            return
+        slow = getattr(self, "_k25_slow_tokenizer", None)
+        if slow is None:
+            slow = AutoTokenizer.from_pretrained(
+                self._model_path,
+                trust_remote_code=True,
+                use_fast=False,
+            )
+            self._k25_slow_tokenizer = slow
+        self._tokenizer = slow
+
     def get_vocab_size(self) -> int:
         """Return the K2.5 vocabulary size (163840)."""
         text_config = getattr(self._config, "text_config", self._config)
