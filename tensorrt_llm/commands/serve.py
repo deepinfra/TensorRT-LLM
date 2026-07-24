@@ -51,6 +51,7 @@ from tensorrt_llm.llmapi.reasoning_parser import (ReasoningParserFactory,
 from tensorrt_llm.logger import logger, severity_map
 from tensorrt_llm.mapping import CpType
 from tensorrt_llm.serve import OpenAIDisaggServer, OpenAIServer
+from tensorrt_llm.serve.kv_events_config import KVEventsConfig
 from tensorrt_llm.serve.tool_parser import ToolParserFactory
 from tensorrt_llm.serve.tool_parser.tool_parser_factory import (
     MODEL_TYPE_TO_TOOL_PARSER, resolve_auto_tool_parser)
@@ -593,7 +594,8 @@ def launch_server(
         allow_request_chat_template: bool = False,
         num_input_processor_workers: int = 8,
         num_media_load_workers: int = 8,
-        multi_frontend_enabled: bool = True):
+        multi_frontend_enabled: bool = True,
+        kv_events_config: Optional[KVEventsConfig] = None):
 
     # Install the SIGUSR1 signal handler for debugging
     signal.signal(signal.SIGUSR1, print_stack_trace)
@@ -674,7 +676,8 @@ def launch_server(
                 chat_template=chat_template,
                 allow_request_chat_template=allow_request_chat_template,
                 input_processor_workers=num_input_processor_workers,
-                media_load_workers=num_media_load_workers)
+                media_load_workers=num_media_load_workers,
+                kv_events_config=kv_events_config)
             _apply_fastapi_middlewares(server.app, middleware)
 
             # Optionally disable GC (default: not disabled)
@@ -1332,6 +1335,22 @@ def launch_visual_gen_server(
     help=
     "Types of agents to schedule. Now Only Support Open Deep Research agent.",
     status="prototype")
+@stability_option(
+    "--kv_events_config",
+    type=str,
+    default=None,
+    help="JSON config for teeing KV-cache events (including token_ids) over "
+    "ZMQ in vLLM wire format, mirroring vLLM's KVEventsConfig. Read-only: does "
+    "not affect the SSE /kv_cache_events path. Keys: enable_kv_cache_events "
+    "(bool, master switch), endpoint (PUB, e.g. tcp://*:5557), "
+    "enable_local_indexer (bool, build in-process recovery state -- radix tree "
+    "+ replay buffer + snapshot -- that consumers query to recover missed "
+    "events), buffer_steps (replay ring-buffer capacity), hwm, max_queue_size, "
+    "topic. replay_endpoint is deprecated and ignored. Disabled unless "
+    "enable_kv_cache_events is true. Example: "
+    '\'{"enable_kv_cache_events": true, "endpoint": "tcp://*:5557", '
+    '"enable_local_indexer": true}\'',
+    status="prototype")
 def serve(model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
           post_processor_hook: Optional[str], host: str, port: int,
           log_level: str, backend: str, max_beam_width: int,
@@ -1355,12 +1374,17 @@ def serve(model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
           telemetry: bool, custom_module_dirs: list[Path],
           chat_template: Optional[str], allow_request_chat_template: bool,
           middleware: tuple[str, ...], grpc: bool, enable_visual_gen: bool,
-          served_model_name: Optional[str], visual_gen_args: Optional[str]):
+          served_model_name: Optional[str], visual_gen_args: Optional[str],
+          kv_events_config: Optional[str]):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
     """
     logger.set_level(log_level)
+
+    # Parse the optional KV-events tee config (vLLM-shaped JSON) once, at the
+    # CLI boundary, so a malformed value fails fast before the engine loads.
+    kv_events_cfg = KVEventsConfig.from_cli(kv_events_config)
 
     if moe_cluster_parallel_size is not None:
         logger.warning(
@@ -1555,7 +1579,8 @@ def serve(model: str, tokenizer: Optional[str], custom_tokenizer: Optional[str],
                 served_model_name=served_model_name,
                 allow_request_chat_template=allow_request_chat_template,
                 num_input_processor_workers=num_input_processor_workers,
-                num_media_load_workers=num_media_load_workers)
+                num_media_load_workers=num_media_load_workers,
+                kv_events_config=kv_events_cfg)
 
     def _serve_visual_gen():
         parsed_visual_gen_args = (VisualGenArgs.from_yaml(visual_gen_args)
