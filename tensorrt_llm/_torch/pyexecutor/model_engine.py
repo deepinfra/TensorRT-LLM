@@ -1802,6 +1802,19 @@ class PyTorchModelEngine(ModelEngine):
         if self.mapping is not None and self.mapping.has_cp_helix():
             effective_max_seq_len = self.max_seq_len // self.mapping.cp_size
 
+        # Optional capture-time seq-len cap. This shrinks ONLY the warmup dummy
+        # request's KV reservation (see _create_cuda_graph_warmup_request) so all
+        # batch-size buckets can be captured even at very large max_seq_len. It
+        # does NOT touch self.max_seq_len, the KV cache manager, or any captured
+        # runtime buffer: the block-offsets table is sized from
+        # kv_cache_manager.max_blocks_per_seq (derived from the full max_seq_len),
+        # so the graph stays valid for full-length runtime decode.
+        capture_max_seq_len = self.cuda_graph_config.max_capture_seq_len if (
+            self.cuda_graph_config is not None) else None
+        if capture_max_seq_len is not None:
+            effective_max_seq_len = min(effective_max_seq_len,
+                                        capture_max_seq_len)
+
         sparse_config = self.sparse_attention_config
         if (isinstance(sparse_config, SeqLenAwareSparseAttentionConfig)
                 and sparse_config.needs_separate_short_long_cuda_graphs()):
