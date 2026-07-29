@@ -183,6 +183,12 @@ class BaseCudaGraphConfig(StrictBaseModel):
         "If true, batches are rounded up to the nearest cuda_graph_batch_size. This is usually a net win for performance."
     )
 
+    max_capture_seq_len: Optional[int] = Field(
+        default=None,
+        description=
+        "If set, caps the sequence length used for CUDA-graph capture warmup KV reservation so all batch-size buckets can be captured even at very large max_seq_len; does not affect runtime max_seq_len or correctness - the captured block table is still sized for the full max_seq_len."
+    )
+
     @model_validator(mode='after')
     def validate_base_cuda_graph_config(self) -> 'BaseCudaGraphConfig':
         """Validate CUDA graph configuration.
