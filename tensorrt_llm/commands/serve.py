@@ -882,6 +882,7 @@ class ChoiceWithAlias(click.Choice):
     "gRPC server accepts pre-tokenized requests and returns raw token IDs.")
 @click.option(
     "--served_model_name",
+    "--served-model-name",
     type=str,
     default=None,
     help=help_info_with_stability_tag(
@@ -1026,8 +1027,11 @@ def serve(
 
         llm_args_extra_dict = {}
         if extra_llm_api_options is not None:
-            with open(extra_llm_api_options, 'r') as f:
-                llm_args_extra_dict = yaml.safe_load(f)
+            if os.path.exists(extra_llm_api_options):
+                with open(extra_llm_api_options, 'r') as f:
+                    llm_args_extra_dict = yaml.safe_load(f)
+            else:
+                llm_args_extra_dict = yaml.safe_load(extra_llm_api_options)
         llm_args = update_llm_args_with_extra_dict(
             llm_args, llm_args_extra_dict, explicit_cli_keys=explicit_cli_keys)
 
