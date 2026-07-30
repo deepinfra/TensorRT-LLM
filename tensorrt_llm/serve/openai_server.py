@@ -31,6 +31,12 @@ from tensorrt_llm._torch.async_llm import AsyncLLM
 from tensorrt_llm._utils import EnergyMonitor
 # yapf: disable
 from tensorrt_llm.executor import CppExecutorError
+import array as _di_array
+from collections import defaultdict as _di_defaultdict
+
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
+prom_metrics = _di_defaultdict(float)
+prom_metrics_file = None
 from tensorrt_llm.executor.postproc_worker import PostprocParams
 from tensorrt_llm.inputs import prompt_inputs
 from tensorrt_llm.inputs.data import TokensPrompt
@@ -742,8 +748,10 @@ class OpenAIServer(_VideoRoutesMixin):
                                methods=["GET"])
         self.app.add_api_route("/version", self.version, methods=["GET"])
         self.app.add_api_route("/v1/models", self.get_model, methods=["GET"])
+        self.app.add_api_route("/metrics", self.metrics, methods=["GET"])
+        self.app.add_api_route("/metrics/", self.metrics, methods=["GET"])
         # TODO: the metrics endpoint only reports iteration stats, not the runtime stats for now
-        self.app.add_api_route("/metrics",
+        self.app.add_api_route("/metrics_json",
                                self.get_iteration_stats,
                                methods=["GET"])
         self.app.add_api_route("/perf_metrics",
@@ -762,7 +770,7 @@ class OpenAIServer(_VideoRoutesMixin):
         # TODO: workaround before ETCD support
         self.app.add_api_route("/kv_cache_events",
                                self.get_kv_cache_events,
-                               methods=["POST"])
+                               methods=["GET", "POST"])
         resource_governor_queue = self.generator._executor.resource_governor_queue
         if resource_governor_queue is not None:
             from .resource_governor import ResourceGovernor
@@ -990,6 +998,85 @@ class OpenAIServer(_VideoRoutesMixin):
     async def get_model(self) -> JSONResponse:
         model_list = ModelList(data=[ModelCard(id=self.model)])
         return JSONResponse(content=model_list.model_dump())
+
+    async def metrics(self) -> Response:
+        """Prod-style prometheus text: counters written by the executor (rank 0)
+        via /dev/shm plus request counters kept in this process, in the exact
+        vllm:* naming the DeepInfra dashboards query."""
+        global prom_metrics_file
+        try:
+            if prom_metrics_file is None:
+                prom_metrics_file = os.open(PROM_METRICS_FILENAME,
+                                            os.O_RDWR | os.O_CREAT)
+            bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
+            if len(bufs) >= 2:
+                keybuf, valbuf = bufs
+                key_list = json.loads(keybuf.decode('UTF-8'))
+                value_list = _di_array.array('d')
+                value_list.frombytes(valbuf)
+                for key, value in zip(key_list, value_list):
+                    prom_metrics[key] = value
+        except Exception:
+            traceback.print_exc()
+
+        all_requests_done = (
+            prom_metrics["request_completed_total"] +
+            prom_metrics["request_cancelled_total"] +
+            prom_metrics["request_failed_total"])
+        # The executor-side gauges freeze when no iterations run; zero them out
+        # so an idle server does not report stale running/waiting counts.
+        if prom_metrics["request_started_total"] == all_requests_done:
+            prom_metrics["num_requests_running"] = 0
+        prom_metrics["num_requests_waiting"] = max(
+            0, prom_metrics["request_started_total"] -
+            (prom_metrics["num_requests_running"] + all_requests_done))
+
+        resp = ''
+        for metric_key, metric_val in prom_metrics.items():
+            separator = ',' if '{' in metric_key else '{'
+            resp += f'vllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
+
+        # Latest iteration stat for cache gauges; consume the tee buffer like
+        # get_iteration_stats does (this endpoint is the sole periodic consumer).
+        last_stat = None
+        if self._iteration_stats_buffer is not None:
+            stats = list(self._iteration_stats_buffer)
+            self._iteration_stats_buffer.clear()
+            if stats:
+                last_stat = stats[-1]
+        else:
+            try:
+                async for stat in self.generator.get_stats_async(0):
+                    last_stat = stat
+            except Exception:
+                pass  # empty stats queue (idle engine); serve the last snapshot
+        if last_stat is not None:
+            self._di_last_stat = last_stat
+        last_stat = getattr(self, "_di_last_stat", None)
+        if last_stat and "kvCacheStats" in last_stat:
+            resp += self.format_kv_cache_stats(last_stat["kvCacheStats"])
+
+        return Response(status_code=200, content=resp,
+                        media_type="text/plain")
+
+    def format_kv_cache_stats(self, kv_cache_stats) -> str:
+        resp = ""
+        if not kv_cache_stats:
+            return resp
+
+        def format_line(name: str, value: float) -> str:
+            return f'vllm:{name}{{model_name="{self.model}"}} {value}\n'
+
+        max_num_blocks = kv_cache_stats["maxNumBlocks"]
+        resp += format_line(
+            'gpu_cache_usage_perc',
+            float(kv_cache_stats["usedNumBlocks"] / max_num_blocks) if max_num_blocks else 0.0)
+        resp += format_line(
+            'gpu_prefix_cache_queries_total',
+            float(kv_cache_stats["missedBlocks"] + kv_cache_stats["reusedBlocks"]))
+        resp += format_line('gpu_prefix_cache_hits_total', float(kv_cache_stats["reusedBlocks"]))
+        resp += format_line('tokens_per_block', float(kv_cache_stats["tokensPerBlock"]))
+        return resp
 
     async def get_iteration_stats(self) -> JSONResponse:
         # When the background collector loop is active it is the sole
@@ -1242,6 +1329,7 @@ class OpenAIServer(_VideoRoutesMixin):
 
     async def openai_chat(self, request: ChatCompletionRequest,
                           raw_request: Request) -> Response:
+        prom_metrics["request_started_total"] += 1
 
         def get_role() -> str:
             if request.add_generation_prompt:
@@ -1249,6 +1337,8 @@ class OpenAIServer(_VideoRoutesMixin):
             else:
                 role = request.messages[-1]["role"]
             return role
+
+        _di_done = [False]
 
         async def chat_stream_generator(
                 promise: RequestOutput,
@@ -1274,10 +1364,18 @@ class OpenAIServer(_VideoRoutesMixin):
                         yield pp_res
                 yield "data: [DONE]\n\n"
                 await self._extract_metrics(res, raw_request)
+                for _out in res.outputs:
+                    if _out.finish_reason is not None:
+                        _di_done[0] = True
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f'request_success_total{{finished_reason="{_out.finish_reason}"'] += 1
                 nvtx_mark("generation ends")
             except:
                 logger.error(traceback.format_exc())
                 raise
+            finally:
+                if not _di_done[0]:
+                    prom_metrics["request_cancelled_total"] += 1
 
         try:
             conversation: List[ConversationMessage] = []
@@ -1418,13 +1516,22 @@ class OpenAIServer(_VideoRoutesMixin):
             else:
                 response = await self._create_chat_response(
                     promise, postproc_params, raw_request, disaggregated_params)
+                for _choice in response.choices:
+                    if _choice.finish_reason is not None:
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f'request_success_total{{finished_reason="{_choice.finish_reason}"'] += 1
                 return JSONResponse(content=response.model_dump())
+        except asyncio.CancelledError:
+            prom_metrics["request_cancelled_total"] += 1
+            raise
         except CppExecutorError:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except Exception as e:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
     async def openai_mm_encoder(self, request: ChatCompletionRequest,
@@ -1533,6 +1640,7 @@ class OpenAIServer(_VideoRoutesMixin):
 
     async def openai_completion(self, request: CompletionRequest,
                                 raw_request: Request) -> Response:
+        prom_metrics["request_started_total"] += 1
 
         async def completion_response(
                 promise: RequestOutput,
@@ -1550,6 +1658,10 @@ class OpenAIServer(_VideoRoutesMixin):
                 # Include prompt token ids for context-only requests
                 pp_result.prompt_token_ids = response.prompt_token_ids
             await self._extract_metrics(response, raw_request)
+            for _choice in pp_result.choices:
+                if _choice.finish_reason is not None:
+                    prom_metrics["request_completed_total"] += 1
+                    prom_metrics[f'request_success_total{{finished_reason="{_choice.finish_reason}"'] += 1
             return pp_result
 
         def merge_completion_responses(
@@ -1584,6 +1696,7 @@ class OpenAIServer(_VideoRoutesMixin):
 
         async def completion_generator(promise: RequestOutput,
                                        params: Optional[PostprocParams]):
+            _di_done = False
             try:
                 async for output in promise:
                     if not self.postproc_worker_enabled:
@@ -1594,6 +1707,11 @@ class OpenAIServer(_VideoRoutesMixin):
                     for pp_res in pp_result:
                         yield pp_res
                 await self._extract_metrics(output, raw_request)
+                for _out in output.outputs:
+                    if _out.finish_reason is not None:
+                        _di_done = True
+                        prom_metrics["request_completed_total"] += 1
+                        prom_metrics[f'request_success_total{{finished_reason="{_out.finish_reason}"'] += 1
             except Exception as e:
                 logger.error(traceback.format_exc())
                 # StreamingResponse commits HTTP 200 before the first
@@ -1609,6 +1727,9 @@ class OpenAIServer(_VideoRoutesMixin):
                     }
                 })
                 yield f"data: {error_data}\n\n"
+            finally:
+                if not _di_done:
+                    prom_metrics["request_cancelled_total"] += 1
                 yield "data: [DONE]\n\n"
 
         async def merge_generators(generators: List[AsyncIterator[Any]]):
@@ -1738,12 +1859,17 @@ class OpenAIServer(_VideoRoutesMixin):
                 response = merge_completion_responses(rsps) if len(
                     rsps) > 1 else rsps[0]
                 return JSONResponse(content=response.model_dump())
+        except asyncio.CancelledError:
+            prom_metrics["request_cancelled_total"] += 1
+            raise
         except CppExecutorError:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             # If internal executor error is raised, shutdown the server
             signal.raise_signal(signal.SIGINT)
         except Exception as e:
             logger.error(traceback.format_exc())
+            prom_metrics["request_failed_total"] += 1
             return self.create_error_response(str(e))
 
     async def chat_harmony(self, request: ChatCompletionRequest,

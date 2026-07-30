@@ -101,13 +101,19 @@ def _logit_bias_to_embedding_bias(
 
 
 class OpenAIBaseModel(BaseModel):
-    # OpenAI API does not allow extra fields & allow to initialize by both alias and field name
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # Prod serving contract: accept-and-ignore unknown fields (deepapi sends
+    # internal extras like stop_words); matches the rc18 production images.
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class StreamOptions(OpenAIBaseModel):
     include_usage: Optional[bool] = True
     continuous_usage_stats: Optional[bool] = False
+    # Accepted for compatibility with the prod serving contract (deepapi sends
+    # stream_interval_ms on buffered streams). Response chunk throttling itself
+    # is not implemented on this build; the fields are validated and ignored.
+    stream_interval: Optional[int] = Field(default=None, gt=0)
+    stream_interval_ms: Optional[int] = Field(default=None, ge=0)
 
 
 class PromptTokensDetails(OpenAIBaseModel):
@@ -480,7 +486,7 @@ class CompletionRequest(OpenAIBaseModel):
 
             # completion-sampling-params
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k),
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
             repetition_penalty=self.repetition_penalty,
@@ -880,7 +886,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             # chat-completion-sampling-params
             best_of=self.best_of,
             use_beam_search=self.use_beam_search,
-            top_k=self.top_k,
+            top_k=max(0, self.top_k),
             top_p=(self.top_p if self.top_p is not None else 1.0),
             top_p_min=self.top_p_min if self.top_p_min > 0 else None,
             min_p=self.min_p,
