@@ -239,7 +239,7 @@ class BaseCudaGraphConfig(StrictBaseModel):
             while batch_sizes[-1] + 64 <= max_batch_size:
                 batch_sizes.append(batch_sizes[-1] + 64)
         else:
-            batch_sizes = list(range(1, 32)) + [32, 64, 128]
+            batch_sizes = list(range(1, max_batch_size + 1))
             # Add powers of 2 up to max_batch_size
             batch_sizes += [
                 2**i for i in range(8, math.ceil(math.log(max_batch_size, 2)))
