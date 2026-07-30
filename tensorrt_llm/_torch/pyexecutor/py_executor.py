@@ -77,6 +77,7 @@ from .request_utils import (RequestBroadcaster, attach_py_objects_to_requests,
                             derive_attention_dp_per_rank_request_cap,
                             get_from_waiting_queue, merge_requests)
 from .resource_manager import (ResourceManager, ResourceManagerType,
+                               kv_exhaustion_nonfatal_enabled,
                                request_context)
 from .sampler import (AsyncWorkerMixin, Sampler, SamplerEvent, SampleState,
                       SampleStateTensors, TRTLLMSampler)
@@ -87,6 +88,18 @@ from .scheduler.adp_router import ADPRouter
 
 if TYPE_CHECKING:
     from ray.actor import ActorHandle
+
+import array as _di_array
+import json as _di_json
+import os as _di_os
+import traceback as _di_traceback
+from collections import defaultdict as _di_defaultdict
+
+# Prod-style prometheus counters, written once per iteration by rank 0 and read
+# by the openai_server /metrics handler in the frontend process via shared memory.
+PROM_METRICS_FILENAME = '/dev/shm/prom_metrics.json'
+prom_metrics = _di_defaultdict(float)
+prom_metrics_file = None
 
 # Environment variable to specify iteration ranges for profiling start/stop.
 # Format: "start1-stop1,start2-stop2,..." or single iterations "iter1,iter2,..."
@@ -395,8 +408,10 @@ class PyExecutor:
         self._disk_onboard_active = bool(
             _kvc is not None and getattr(_kvc, "disk_cache_size", None)
             and int(os.environ.get("TLLM_KV_DISK_READERS", "0") or "0") > 0)
-        self._disk_tier_active = bool(_kvc is not None
-                                      and getattr(_kvc, "disk_cache_size", None))
+        self._disk_tier_active = bool(
+            _kvc is not None and getattr(_kvc, "disk_cache_size", None))
+        self._disk_tier_active = bool(
+            _kvc is not None and getattr(_kvc, "disk_cache_size", None))
         self.max_stats_len = max(self.llm_args.max_stats_len, 1)
         self.max_num_tokens = self.llm_args.max_num_tokens
         self.print_log = self.llm_args.print_iter_log
@@ -470,6 +485,10 @@ class PyExecutor:
             and self.kv_cache_manager.enable_partial_reuse)
 
         self.max_input_len = max_input_len
+        # Requests dropped by the KV-cache exhaustion guard
+        # (TRTLLM_KV_EXHAUSTION_NONFATAL=1), failed one iteration later so no
+        # in-flight overlap forward still references their blocks.
+        self._pending_kv_rejected: List[LlmRequest] = []
         # _executor_loop private data
         self.max_num_active_requests = model_engine.get_max_num_sequences()
         # nvbug-6133201: under attention DP, tighten the per-rank request
@@ -1198,8 +1217,9 @@ class PyExecutor:
 
         calibrator = get_calibrator()
 
+        last_start_time = None
         def profile_step():
-            nonlocal it, enabled, start_time, start_event_1, end_event_1, start_event_2, end_event_2, prev_device_step_time
+            nonlocal it, enabled, start_time, start_event_1, end_event_1, start_event_2, end_event_2, prev_device_step_time, last_start_time
             calibrator.post_step(it)
             if (self.iter_counter in self.profile_stop_iters
                     and not self.is_warmup):
@@ -1295,6 +1315,35 @@ class PyExecutor:
                 if start_event_2 is None:
                     start_event_2 = torch.cuda.Event(enable_timing=True)
                 start_event_2.record()
+
+            # Metrics export must never take down the executor loop.
+            try:
+                global prom_metrics_file
+                if last_start_time is not None and self.dist.rank == 0:
+                    iter_states = self.model_engine.iter_states
+                    total_running = iter_states['num_ctx_requests'] + iter_states['num_generation_tokens'] / (1 + self.model_engine.max_draft_len)
+                    prom_metrics["num_requests_running"] = total_running
+                    prom_metrics["num_requests_swapped"] = total_running - len(self.active_requests)
+                    prom_metrics["iteration_tokens_total_sum"] += iter_states['num_ctx_tokens'] + iter_states['num_generation_tokens']
+                    prom_metrics["iteration_tokens_total_count"] += 1
+                    prom_metrics["time_per_output_token_seconds_sum"] += (start_time - last_start_time)
+                    prom_metrics["time_per_output_token_seconds_count"] += 1
+                    prom_metrics["prompt_tokens_total"] += iter_states['num_ctx_tokens']
+                    prom_metrics["request_prompt_tokens_total_sum"] += iter_states['num_ctx_tokens']
+                    prom_metrics["request_prompt_tokens_total_count"] += 1
+                    prom_metrics["generation_tokens_total"] += iter_states['num_generation_tokens']
+                    prom_metrics["request_generation_tokens_total_sum"] += iter_states['num_generation_tokens']
+                    prom_metrics["request_generation_tokens_total_count"] += 1
+                    if prom_metrics_file is None:
+                        prom_metrics_file = _di_os.open(PROM_METRICS_FILENAME,
+                                                        _di_os.O_RDWR | _di_os.O_CREAT)
+                    _di_os.pwrite(prom_metrics_file, (
+                        _di_json.dumps(list(prom_metrics.keys())).encode('UTF-8') +
+                        b'\0' +
+                        _di_array.array('d', prom_metrics.values()).tobytes()), 0)
+            except Exception:
+                _di_traceback.print_exc()
+            last_start_time = start_time
 
         try:
             yield profile_step
@@ -2154,6 +2203,7 @@ class PyExecutor:
                     self._handle_dynamic_draft_len(scheduled_batch)
 
                     self._sync_retention_clock()
+                    self._sync_retention_clock()
                     self.resource_manager.prepare_resources(scheduled_batch)
                     self._park_requests_awaiting_onboard(scheduled_batch)
 
@@ -2514,8 +2564,21 @@ class PyExecutor:
             return
         now_ns = time.time_ns()
         if self.dist.tp_size > 1 and not self.enable_attention_dp:
-            now_ns = self.dist.tp_allreduce(now_ns if self.dist.tp_rank == 0 else 0,
-                                            op=ReduceOp.MAX)
+            now_ns = self.dist.tp_allreduce(
+                now_ns if self.dist.tp_rank == 0 else 0, op=ReduceOp.MAX)
+        kv.set_retention_clock(now_ns)
+
+    def _sync_retention_clock(self):
+        """All ranks anchor and evaluate retention against the same timestamp."""
+        if not self._disk_tier_active:
+            return
+        kv = getattr(self, "kv_cache_manager", None)
+        if kv is None or not hasattr(kv, "set_retention_clock"):
+            return
+        now_ns = time.time_ns()
+        if self.dist.tp_size > 1 and not self.enable_attention_dp:
+            now_ns = self.dist.tp_allreduce(
+                now_ns if self.dist.tp_rank == 0 else 0, op=ReduceOp.MAX)
         kv.set_retention_clock(now_ns)
 
     def _park_requests_awaiting_onboard(self, scheduled_batch):
@@ -3018,6 +3081,10 @@ class PyExecutor:
                 if self._is_kv_manager_v2 and self._can_pause_for_rebalance():
                     self._maybe_rebalance_kv_pools()
 
+                # Fail any requests the KV-cache exhaustion guard dropped last
+                # iteration (now safe: their in-flight forward has been
+                # consumed). Before scheduling so they are not re-picked.
+                self._drain_kv_rejected_requests()
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
 
@@ -3063,7 +3130,9 @@ class PyExecutor:
                     self._handle_dynamic_draft_len(scheduled_batch)
 
                     self._sync_retention_clock()
+                    self._sync_retention_clock()
                     self.resource_manager.prepare_resources(scheduled_batch)
+                    self._collect_kv_rejected_requests(scheduled_batch)
                     self._park_requests_awaiting_onboard(scheduled_batch)
 
                 if self.kv_connector_manager:
@@ -3418,6 +3487,10 @@ class PyExecutor:
                 if self._is_kv_manager_v2 and self._can_pause_for_rebalance():
                     self._maybe_rebalance_kv_pools()
 
+                # Fail any requests the KV-cache exhaustion guard dropped last
+                # iteration (now safe: their in-flight forward has been
+                # consumed). Before scheduling so they are not re-picked.
+                self._drain_kv_rejected_requests()
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
 
@@ -3461,7 +3534,9 @@ class PyExecutor:
                     self._handle_dynamic_draft_len(scheduled_batch)
 
                     self._sync_retention_clock()
+                    self._sync_retention_clock()
                     self.resource_manager.prepare_resources(scheduled_batch)
+                    self._collect_kv_rejected_requests(scheduled_batch)
                     self._park_requests_awaiting_onboard(scheduled_batch)
 
                 if self.kv_connector_manager:
@@ -5079,6 +5154,40 @@ class PyExecutor:
             error_msg = str(e)
             logger.error(f"Encountered an error in sampling: {error_msg}")
             self._handle_errors(error_msg)
+
+    def _collect_kv_rejected_requests(
+            self, scheduled_batch: ScheduledRequests) -> None:
+        """Move requests dropped by the KV-cache exhaustion guard out of the
+        just-prepared batch into the pending queue.  They are failed at the top
+        of the next iteration (see _drain_kv_rejected_requests) rather than now,
+        so any in-flight overlap forward that referenced their blocks has been
+        consumed before the blocks are freed."""
+        rejected = scheduled_batch.kv_cache_rejected_requests
+        if rejected:
+            self._pending_kv_rejected.extend(rejected)
+            scheduled_batch.kv_cache_rejected_requests = []
+
+    def _drain_kv_rejected_requests(self) -> None:
+        """Fail requests dropped by the KV-cache exhaustion guard, reusing the
+        request-scoped error path (charge_budget=False) so a saturated block
+        pool degrades to a graceful per-request rejection instead of the C++
+        allocation assert killing the executor thread.
+
+        Only runs when the guard is enabled (TRTLLM_KV_EXHAUSTION_NONFATAL=1) --
+        a process-wide, rank-symmetric switch.  When enabled it is entered
+        unconditionally each iteration, even with nothing to reject: under
+        attention DP the response gather inside _handle_errors must be entered
+        by every rank in lockstep (an empty `requests` list is a paired no-op).
+        """
+        if not kv_exhaustion_nonfatal_enabled():
+            return
+        rejected = self._pending_kv_rejected
+        self._pending_kv_rejected = []
+        self._handle_errors(
+            "KV cache block pool exhausted under load; request rejected to keep "
+            "the engine running (TRTLLM_KV_EXHAUSTION_NONFATAL=1).",
+            requests=rejected,
+            charge_budget=False)
 
     def _handle_errors(self,
                        error_msg: Optional[str] = None,
