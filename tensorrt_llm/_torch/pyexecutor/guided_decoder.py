@@ -464,12 +464,22 @@ class CapturableGuidedDecoder(GuidedDecoder):
                  max_num_sequences: int,
                  vocab_size_padded: int,
                  max_num_draft_tokens: int = 0,
-                 rank: int = 0):
+                 rank: int = 0,
+                 unconstrained_draft: bool = False):
         super().__init__(guided_decoding_config=guided_decoding_config,
                          max_num_sequences=max_num_sequences,
                          vocab_size_padded=vocab_size_padded,
                          max_num_draft_tokens=max_num_draft_tokens,
                          rank=rank)
+        # Unconstrained-draft mode (one-model spec workers that sample draft
+        # tokens without per-step grammar bitmasks, e.g. DSpark): the worker
+        # never runs the add_draft_batch/execute_draft_batch rounds, so the
+        # speculative matcher advances of the previous target-verify build are
+        # rolled back here, inside fetch_batch, using the accepted counts
+        # staged by add_batch. Grammar-invalid draft tokens are safe: the
+        # target-verify bitmask chain stops at the first invalid draft, which
+        # then cannot match the masked target argmax and is rejected.
+        self.unconstrained_draft = unconstrained_draft
         # self.requests should be accessed by normal host code;
         # self.requests_hostfunc should be accessed by hostfunc (CUDA callback).
         self.requests_hostfunc: Optional[GuidedRequests] = None
@@ -492,6 +502,7 @@ class CapturableGuidedDecoder(GuidedDecoder):
     def add_batch(self,
                   scheduled_requests: ScheduledRequests,
                   new_tokens: Optional[torch.Tensor] = None,
+                  new_tokens_lens: Optional[torch.Tensor] = None,
                   runtime_draft_len: Optional[int] = None) -> None:
         # See GuidedDecoder.add_batch: the layout must follow the runtime draft
         # length so the captured graph's bitmask matches the target logits.
@@ -501,7 +512,12 @@ class CapturableGuidedDecoder(GuidedDecoder):
             scheduled_requests, num_draft_tokens)
         if new_tokens is not None:
             self.new_tokens.copy_(new_tokens.squeeze(-1), non_blocking=True)
-        self.queue.put((self.requests, new_tokens is not None))
+        if new_tokens_lens is not None:
+            # Slot-indexed accepted counts ([max_num_sequences], same layout as
+            # new_tokens) for the unconstrained-draft rollback in fetch_batch.
+            self.num_accepted_tokens.copy_(new_tokens_lens, non_blocking=True)
+        self.queue.put((self.requests, new_tokens is not None,
+                        new_tokens_lens is not None))
         # self.token_event.record() should be called inside CUDA graph capturing;
         # currently, it is in PyTorchModelEngine._preprocess_inputs.
 
@@ -510,16 +526,48 @@ class CapturableGuidedDecoder(GuidedDecoder):
         # CUDA graph warmup calls model forward for multiple times for one prepared inputs
         if self.queue.empty():
             return
-        self.requests_hostfunc, has_new_tokens = self.queue.get()
-        if not has_new_tokens:
-            return
+        self.requests_hostfunc, has_new_tokens, has_new_tokens_lens = self.queue.get(
+        )
+        if has_new_tokens:
+            for req in self.requests_hostfunc.valid_requests():
+                if req.prev_seq_slot is None:
+                    continue
+                req.new_token, *req.draft_tokens = self.new_tokens[:, req.
+                                                                   seq_slot].tolist(
+                                                                   )
+        if self.unconstrained_draft:
+            # Without staged device counts (non-overlap), the request snapshot's
+            # num_accepted_draft_tokens is already current.
+            self._rollback_previous_build(has_new_tokens_lens)
 
+    def _rollback_previous_build(self, has_new_tokens_lens: bool) -> None:
+        """Roll back the previous build's speculative matcher advances.
+
+        In unconstrained-draft mode there is no drafting loop to host the
+        rollback (see GuidedDecoder._rollback_rejected_tokens), so it runs here,
+        right before the next build, still on the guided-decoder stream.
+        """
+        if self.max_num_draft_tokens <= 0:
+            return
+        nacc_list = (self.num_accepted_tokens.tolist()
+                     if has_new_tokens_lens else None)
         for req in self.requests_hostfunc.valid_requests():
-            if req.prev_seq_slot is None:
+            slot = req.seq_slot
+            if req.prev_seq_slot is None or not req.is_generation_in_progress_state:
+                # Fresh slot (new context request or first generation
+                # iteration): any advanced count belongs to a previous
+                # occupant of this slot and must not be rolled back into the
+                # new request's matcher.
+                self.num_advanced_tokens[slot] = 0
                 continue
-            req.new_token, *req.draft_tokens = self.new_tokens[:, req.
-                                                               seq_slot].tolist(
-                                                               )
+            # Same clamping as fetch_draft_batch: with overlap scheduling, an
+            # EOS inside the draft tokens can make the sampler accept more
+            # tokens than the matcher advanced through.
+            num_accepted = (nacc_list[slot] if nacc_list is not None else
+                            req.num_accepted_draft_tokens + 1)
+            req.num_accepted_draft_tokens = min(
+                num_accepted, self.num_advanced_tokens[slot]) - 1
+        self._rollback_rejected_tokens(self.requests_hostfunc)
 
     @hostfunc
     def build(self) -> List[Tuple[int, str]]:
