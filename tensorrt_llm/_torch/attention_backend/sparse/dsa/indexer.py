@@ -1615,7 +1615,7 @@ class Indexer(nn.Module):
             k_cache = metadata.kv_cache_manager.get_indexer_k_cache_buffers(self.layer_idx)
             indexer_max_seq_len = metadata.get_indexer_max_seq_len()
 
-            if self.use_cute_dsl_paged_mqa_logits:
+            if self.use_cute_dsl_paged_mqa_logits or metadata.use_dsl_paged_mqa_logits_resolved:
                 # DSL kernel design: 1 atom per q (atom = real next_n positions),
                 # kNumNextNAtoms = 1 for any real next_n. The matching schedule
                 # is `scheduler_metadata_buffer` — built in `Indexer.prepare()`

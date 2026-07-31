@@ -1082,6 +1082,37 @@ class DSAtrtllmAttentionMetadata(TrtllmAttentionMetadata):
                     self.host_topk_indices_buffer[gen_range, :], non_blocking=True
                 )
 
+    # Lazily resolved by _auto_enable_dsl_paged_mqa; plain class attributes
+    # (no annotation) so they are not dataclass fields.
+    _auto_dsl_mqa = None
+    use_dsl_paged_mqa_logits_resolved = False
+
+    def _auto_enable_dsl_paged_mqa(self) -> bool:
+        """Auto-route draft lengths fp8_paged_mqa_logits cannot serve natively.
+
+        The non-DSL decode kernel supports next_n in {1, 2, 4} on SM100, so
+        other draft lengths (e.g. DSpark's max_draft_len=5 -> next_n=6) fall
+        back to expanded buffers that re-read each sequence's indexer KV cache
+        (1 + max_draft_tokens) times per step. The CuTe-DSL kernel serves those
+        shapes with a wave-aware atom split (at most 2-3x re-read), so prefer
+        it when available. Opt out with TRTLLM_DSA_AUTO_DSL_MQA=0.
+        """
+        if self._auto_dsl_mqa is None:
+            self._auto_dsl_mqa = (
+                IS_CUTLASS_DSL_AVAILABLE
+                and get_sm_version() >= 100
+                and (self.max_draft_tokens == 2 or self.max_draft_tokens > 3)
+                and os.environ.get("TRTLLM_DSA_AUTO_DSL_MQA", "1") == "1"
+            )
+            if self._auto_dsl_mqa:
+                logger.info(
+                    "DSA indexer: auto-enabling CuTe-DSL paged MQA logits for "
+                    f"max_draft_tokens={self.max_draft_tokens} (avoids the "
+                    "expanded-buffer indexer KV re-read fallback). Disable "
+                    "with TRTLLM_DSA_AUTO_DSL_MQA=0."
+                )
+        return self._auto_dsl_mqa
+
     def prepare_for_spec_decode(self, kv_lens: torch.Tensor):
         # fp8_paged_mqa_logits supports seq_len 1/2/4 on sm100 and 1/2 on
         # sm90. Flatten Q and expand kv_lens and block_table for other MTP
@@ -1089,7 +1120,11 @@ class DSAtrtllmAttentionMetadata(TrtllmAttentionMetadata):
         # TODO:
         # - No distinction between sm90 and sm100 is needed once MTP3 is supported on sm90.
         # - Remove this once fp8_paged_mqa_logits supports an arbitrary number of MTP draft tokens.
-        use_dsl = self.sparse_metadata_params.use_cute_dsl_paged_mqa_logits
+        use_dsl = (
+            self.sparse_metadata_params.use_cute_dsl_paged_mqa_logits
+            or self._auto_enable_dsl_paged_mqa()
+        )
+        self.use_dsl_paged_mqa_logits_resolved = use_dsl
         self.use_expanded_buffers_for_mtp = not use_dsl and (
             (self.max_draft_tokens > 1 and get_sm_version() == 90)
             or (

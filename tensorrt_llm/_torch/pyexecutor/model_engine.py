@@ -1411,7 +1411,9 @@ class PyTorchModelEngine(ModelEngine):
 
         can_run_general_warmup = (
             not is_enc_dec and not self.is_draft_model
-            and not self.mapping.has_cp_helix() and self.guided_decoder is None
+            and not self.mapping.has_cp_helix()
+            and (self.guided_decoder is None or os.environ.get(
+                "TRTLLM_GUIDED_DECODER_ALLOW_TORCH_COMPILE", "0") == "1")
             and not isinstance(kv_cache_manager, MambaHybridCacheManager))
 
         log_mem_snapshot("warmup/before_warmup")
