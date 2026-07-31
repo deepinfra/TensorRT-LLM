@@ -188,9 +188,18 @@ def test_seed_context_windows_preserves_state_across_prefill_chunks():
         def __init__(self):
             self.written_positions = []
 
-        def write_context_windows(self, hidden, positions, windows):
-            self.written_positions.append(positions.clone())
-            windows.add_(1)
+        def write_context_windows_batched(self, hidden, positions, slots, mask, kv_windows):
+            # Record only the real (unmasked) writes, mirroring the writer's
+            # contract that masked entries are no-ops.
+            self.written_positions.append(positions[mask].clone())
+            kv_windows[slots] += 1
+
+    def _ctx_chunk(chunk_len, cached):
+        return types.SimpleNamespace(
+            num_contexts=1,
+            _seq_lens=[chunk_len],
+            kv_cache_params=types.SimpleNamespace(num_cached_tokens_per_seq=[cached]),
+        )
 
     worker = _make_worker()
     draft_model = DraftModel()
@@ -203,20 +212,14 @@ def test_seed_context_windows_preserves_state_across_prefill_chunks():
     )
     worker._lazy_init(draft_model, metadata)
 
-    first_chunk = types.SimpleNamespace(num_contexts=1, _seq_lens=[3])
-    worker._seed_context_windows(
-        draft_model, metadata, first_chunk, torch.tensor([[0, 1, 2]], device="cuda"), 3
-    )
+    worker._seed_context_windows(draft_model, metadata, _ctx_chunk(3, cached=0), 3)
     slot = worker._req_to_slot[100]
     assert int(worker._ctx_len[slot]) == 3
 
     metadata.get_hidden_states = lambda _num_tokens: torch.zeros(
         2, HIDDEN * NCAP, device="cuda", dtype=torch.bfloat16
     )
-    second_chunk = types.SimpleNamespace(num_contexts=1, _seq_lens=[2])
-    worker._seed_context_windows(
-        draft_model, metadata, second_chunk, torch.tensor([[3, 4]], device="cuda"), 2
-    )
+    worker._seed_context_windows(draft_model, metadata, _ctx_chunk(2, cached=3), 2)
 
     assert int(worker._ctx_len[slot]) == 5
     assert [positions.tolist() for positions in draft_model.written_positions] == [

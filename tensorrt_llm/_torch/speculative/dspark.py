@@ -365,38 +365,70 @@ class DSparkWorker(SpecWorkerBase):
         draft_model,
         spec_metadata: "DSparkSpecMetadata",
         attn_metadata,
-        position_ids: torch.Tensor,
         total_target_tokens: int,
     ) -> None:
         """Seed context chunks using their absolute positions.
 
         A request can arrive in multiple prefill chunks. Only its first chunk
         starts at position zero and resets the persistent rolling window;
-        continuation chunks append to the same request slot.
+        continuation chunks append to the same request slot. Chunk geometry
+        comes from host-side metadata (seq lens + cached-token counts), so the
+        seeding adds no device sync, and all requests' windows are written in
+        one batched call.
         """
         captured = spec_metadata.get_hidden_states(total_target_tokens)
-        flat_position_ids = position_ids.reshape(-1)
+        num_cached = attn_metadata.kv_cache_params.num_cached_tokens_per_seq
+        win = self._win
+
+        slots, ends, rows = [], [], []
+        max_keep = 0
         context_offset = 0
         for i in range(attn_metadata.num_contexts):
             chunk_len = int(attn_metadata._seq_lens[i])
-            chunk_positions = flat_position_ids[context_offset : context_offset + chunk_len].long()
             if chunk_len == 0:
-                context_offset += chunk_len
                 continue
-
-            req_id = spec_metadata.request_ids[i]
-            first_position = int(chunk_positions[0].item())
-            slot = self._assign_slot(req_id, reset=first_position == 0)
-            self._ctx_len[slot] = chunk_positions[-1] + 1
-
+            # The chunk's first absolute position equals the tokens already in
+            # the KV cache (previous chunks and/or reused blocks).
+            first_position = int(num_cached[i])
+            slot = self._assign_slot(
+                spec_metadata.request_ids[i], reset=first_position == 0
+            )
+            slots.append(slot)
+            ends.append(first_position + chunk_len)
             if captured is not None:
-                keep = min(self._win, chunk_len)
-                hidden = captured[context_offset + chunk_len - keep : context_offset + chunk_len]
+                keep = min(win, chunk_len)
                 # A prompt token at absolute position p is stored in frame p+1,
                 # matching the generation path's start_pos convention.
-                window_positions = chunk_positions[-keep:] + 1
-                draft_model.write_context_windows(hidden, window_positions, self._kv_windows[slot])
+                rows.append(
+                    (
+                        context_offset + chunk_len - keep,
+                        first_position + chunk_len - keep + 1,
+                        keep,
+                    )
+                )
+                max_keep = max(max_keep, keep)
             context_offset += chunk_len
+
+        if not slots:
+            return
+        slots_cuda = torch.tensor(slots, dtype=torch.long, device="cuda")
+        self._ctx_len[slots_cuda] = torch.tensor(ends, dtype=torch.long, device="cuda")
+        if captured is None or max_keep == 0:
+            return
+
+        j = torch.arange(max_keep)
+        starts = torch.tensor([r[0] for r in rows], dtype=torch.long)
+        pos0 = torch.tensor([r[1] for r in rows], dtype=torch.long)
+        keeps = torch.tensor([r[2] for r in rows], dtype=torch.long)
+        # Keep positions contiguous past each row's valid range so every row
+        # targets distinct window frames: masked entries are read-modify-write
+        # no-ops and must not collide with the row's real writes.
+        idx = (starts.unsqueeze(1) + j).clamp_(max=captured.shape[0] - 1).cuda()
+        pos = (pos0.unsqueeze(1) + j).cuda()
+        valid = (j.unsqueeze(0) < keeps.unsqueeze(1)).cuda()
+        draft_model.write_context_windows_batched(
+            captured[idx], pos, slots_cuda, valid, self._kv_windows
+        )
 
     def _draft_gen_block_batched(
         self,
@@ -663,7 +695,6 @@ class DSparkWorker(SpecWorkerBase):
                 draft_model,
                 spec_metadata,
                 attn_metadata,
-                position_ids,
                 total_target_tokens,
             )
 

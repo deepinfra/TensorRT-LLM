@@ -1,4 +1,5 @@
 import math
+import os
 from dataclasses import dataclass
 from queue import Queue
 from typing import Iterable, List, Optional, Tuple
@@ -496,7 +497,13 @@ class CapturableGuidedDecoder(GuidedDecoder):
         # torch.compile kernels are called with GIL being held;
         # this could cause deadlock with CUDA callback to Python code.
         # See: https://github.com/pytorch/pytorch/issues/163061
-        torch.compiler.set_stance("force_eager")
+        # This global stance also disables torch.compile piecewise CUDA graphs
+        # for the whole engine whenever guided decoding is configured; the env
+        # var below allows experiments that combine both, at the risk of the
+        # GIL/callback deadlock above.
+        if os.environ.get("TRTLLM_GUIDED_DECODER_ALLOW_TORCH_COMPILE",
+                          "0") != "1":
+            torch.compiler.set_stance("force_eager")
 
     @nvtx_range("GuidedDecoder.add_batch")
     def add_batch(self,
