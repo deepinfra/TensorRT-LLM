@@ -54,6 +54,7 @@ class HCState:
 
 
 try:
+    from tensorrt_llm._torch.modules.mhc.mhc_cuda import _fused_hc_mma_supported
     from tensorrt_llm._torch.modules.mhc.mhc_cuda import mhc_fused_hc as mhc_fused_hc_cuda
     from tensorrt_llm._torch.modules.mhc.mhc_cuda import mhc_hc_head_cuda, mhc_post_mapping_cuda
     from tensorrt_llm._torch.modules.mhc.mhc_cuda import (
@@ -63,6 +64,7 @@ try:
     _cuda_available = True
 except Exception as _e:
     _cuda_available = False
+    _fused_hc_mma_supported = None
     mhc_hc_head_cuda = None
     mhc_post_mapping_cuda = None
     mhc_pre_mapping_fused_cuda = None
@@ -103,6 +105,13 @@ class mHC(nn.Module):
             torch.empty((self.mix_hc,), dtype=torch.float32), requires_grad=False
         )
         self.scale = nn.Parameter(torch.empty((3,), dtype=torch.float32), requires_grad=False)
+
+        if _cuda_available:
+            # Resolve (and lru_cache) the host-side MMA capability probe now,
+            # outside any compiled/captured region, so forwards traced by
+            # torch.compile see a python constant instead of the
+            # mhc_fused_hc_mma_enabled host op.
+            _fused_hc_mma_supported()
 
     def pre_mapping(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # x: [b,s,hc,d], hc_fn: [mix_hc,hc*d], hc_scale: [3], hc_base: [mix_hc], y: [b,s,hc,d]
