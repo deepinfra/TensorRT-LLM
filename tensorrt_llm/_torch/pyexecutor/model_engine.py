@@ -3589,6 +3589,7 @@ class PyTorchModelEngine(ModelEngine):
             self.guided_decoder.add_batch(
                 scheduled_requests,
                 new_tokens=new_tokens_device,
+                new_tokens_lens=new_tokens_lens_device,
                 runtime_draft_len=self.runtime_draft_len)
 
         if self._can_use_incremental_update(scheduled_requests,

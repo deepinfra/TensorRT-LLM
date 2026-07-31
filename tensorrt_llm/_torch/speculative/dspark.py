@@ -213,6 +213,17 @@ class DSparkWorker(SpecWorkerBase):
         self._free_slots = deque()  # available slot indices
         self._batch_to_slot: Optional[torch.Tensor] = None  # [max_batch] long, cuda
 
+        # Worker-owned CUDA graphs for the block draft, replayed when the outer
+        # engine runs eagerly (mixed ctx+gen iterations are never captured by the
+        # engine's gen-only graphs, which otherwise leaves the draft's many small
+        # kernels launch-bound). Keyed by padded gen-batch bucket.
+        self._pad_slot: Optional[int] = None  # spare kv_windows row for padded rows
+        self._draft_graphs = {}  # bucket -> (torch.cuda.CUDAGraph, out logits)
+        self._draft_graph_pool = None
+        self._draft_graph_warmed = {}  # bucket -> bool (one eager pass pre-capture)
+        self._draft_graph_disabled = False
+        self._draft_graph_buckets: List[int] = []
+
         # The generation draft path is the batched, host-sync-free
         # ``_draft_gen_block_batched`` + ``DSparkDraftModel.forward_batched`` +
         # ``dspark_attention_forward_batched``: it is correct in eager mode AND safe
@@ -244,19 +255,41 @@ class DSparkWorker(SpecWorkerBase):
         self._win = int(draft_model._attn_params["window_size"])
         head_dim = int(draft_model._attn_params["head_dim"])
 
+        # One spare row (index max_batch) absorbs the window writes of the
+        # padded rows of the draft-graph buckets; it is never handed out as a
+        # request slot.
+        self._pad_slot = max_batch
         self._kv_windows = torch.zeros(
-            (max_batch, num_stages, self._win, head_dim),
+            (max_batch + 1, num_stages, self._win, head_dim),
             dtype=torch.bfloat16,
             device="cuda",
         )
-        self._ctx_len = torch.zeros(max_batch, dtype=torch.long, device="cuda")
+        self._ctx_len = torch.zeros(max_batch + 1, dtype=torch.long, device="cuda")
         self._batch_to_slot = torch.zeros(max_batch, dtype=torch.long, device="cuda")
         self._free_slots = deque(range(max_batch))
         self._req_to_slot = {}
+
+        # Staging buffers for the draft-graph path: the graphed core reads its
+        # per-request inputs from these fixed addresses.
+        self._g_slots = torch.zeros(max_batch, dtype=torch.long, device="cuda")
+        self._g_nacc = torch.ones(max_batch, dtype=torch.long, device="cuda")
+        self._g_bonus = torch.zeros(max_batch, dtype=torch.long, device="cuda")
+        self._g_base = torch.zeros(max_batch, dtype=torch.long, device="cuda")
+        # Same bucket policy as the engine's decode graphs ([1, 2, 4] + multiples
+        # of 8, CudaGraphConfig._generate_cuda_graph_batch_sizes), so the draft
+        # pads num_gens exactly like the target pads its captured batch sizes.
+        self._draft_graph_buckets = sorted(
+            {
+                b
+                for b in [1, 2, 4] + list(range(8, max_batch + 1, 8)) + [max_batch]
+                if b <= max_batch
+            }
+        )
         self._win_inited = True
         logger.info(
             f"DSpark: allocated rolling KV windows "
-            f"[{max_batch}, {num_stages}, {self._win}, {head_dim}]"
+            f"[{max_batch} + 1 pad, {num_stages}, {self._win}, {head_dim}], "
+            f"draft-graph buckets {self._draft_graph_buckets}"
         )
 
     def _assign_slot(self, req_id: int, reset: bool) -> int:
@@ -366,6 +399,37 @@ class DSparkWorker(SpecWorkerBase):
         # processed tokens.
         arange_g = torch.arange(num_gens, device=device)
         base = gen_start + arange_g * Kp1  # [G]
+
+        if self._can_use_draft_graph(spec_metadata, all_rank_num_tokens):
+            block_logits = self._run_draft_block_graphed(
+                draft_model, spec_metadata, slots, nacc, bonus, base, num_gens
+            )
+            if block_logits is not None:
+                return block_logits
+        return self._draft_block_core(
+            draft_model, captured, slots, nacc, bonus, base, all_rank_num_tokens
+        )
+
+    def _draft_block_core(
+        self,
+        draft_model,
+        captured: torch.Tensor,
+        slots: torch.Tensor,
+        nacc: torch.Tensor,
+        bonus: torch.Tensor,
+        base: torch.Tensor,
+        all_rank_num_tokens: Optional[List[int]] = None,
+    ) -> torch.Tensor:
+        """Window back-fill + one-shot block draft, on fixed-size [G] inputs.
+
+        Pure tensor ops: correct eagerly and under CUDA graph capture (either the
+        engine's gen-only decode graph, or the worker-owned draft graph, whose
+        capture passes the staging buffers as ``slots``/``nacc``/``bonus``/``base``
+        and the full-length capture buffer as ``captured``).
+        """
+        K = self.max_draft_len
+        device = nacc.device
+        gidx = nacc - 1  # [G] index of the bonus within each verified prefix
         main_hidden = captured[base + gidx]  # [G, ncap*hidden]
 
         # Fixed-size ([G, K]) masked back-fill of the intermediate accepted tokens
@@ -404,43 +468,93 @@ class DSparkWorker(SpecWorkerBase):
         )
         return block_logits
 
-    def _sample_draft_tokens_guided(
+    def _can_use_draft_graph(self, spec_metadata, all_rank_num_tokens) -> bool:
+        # Replay the worker-owned draft graph only when the engine itself runs
+        # eagerly: never inside the engine's own warmup/capture passes
+        # (is_cuda_graph / an actively capturing stream), and never under ADP
+        # lockstep, where every rank must invoke the draft MoE with the globally
+        # agreed token counts (per-rank bucket padding would desync the
+        # FUSED_COMM phase-flip barrier).
+        return (
+            not self._draft_graph_disabled
+            and all_rank_num_tokens is None
+            and not getattr(spec_metadata, "is_cuda_graph", False)
+            and not torch.cuda.is_current_stream_capturing()
+        )
+
+    def _run_draft_block_graphed(
         self,
-        gen_logits: torch.Tensor,
+        draft_model,
         spec_metadata: "DSparkSpecMetadata",
-        accepted_tokens: torch.Tensor,
-        num_accepted_tokens: torch.Tensor,
-        num_contexts: int,
-        batch_size: int,
-        K: int,
-    ):
-        """
-        Grammar-constrained draft sampling for the guided-decoding path.
-        """
-        vocab = gen_logits.shape[-1]
-        # Lay the block out step-major ([K, batch, vocab]) so each step's slice is
-        # a contiguous [batch, vocab] tensor.
-        if num_contexts > 0:
-            full_logits = gen_logits.new_zeros((K, batch_size, vocab))
-            full_logits[:, num_contexts:, :] = gen_logits.transpose(0, 1)
-        else:
-            full_logits = gen_logits.transpose(0, 1).contiguous()
+        slots: torch.Tensor,
+        nacc: torch.Tensor,
+        bonus: torch.Tensor,
+        base: torch.Tensor,
+        num_gens: int,
+    ) -> Optional[torch.Tensor]:
+        """Replay the block draft as its own CUDA graph (capture on first need).
 
-        gidx = (num_accepted_tokens - 1).clamp(min=0).unsqueeze(1)
-        new_tokens = accepted_tokens.gather(1, gidx).squeeze(1).to(torch.int32)
+        The gen batch is padded up to a bucket size; padded rows draft from the
+        spare ``_pad_slot`` window with ``nacc=1``/``bonus=0``, so their (garbage)
+        logits rows are computed harmlessly and sliced away. Each bucket runs
+        eagerly once (kernel warmup) before being captured. Returns None to fall
+        back to the eager core (oversized batch or a failed capture).
+        """
+        bucket = next((b for b in self._draft_graph_buckets if b >= num_gens), None)
+        if bucket is None:
+            return None
 
-        gen_draft_tokens = []
-        for k in range(K):
-            self.guided_decoder.add_draft_batch(new_tokens, num_accepted_tokens, draft_step=k)
-            step_logits = full_logits[k]
-            self.guided_decoder.execute_draft_batch(step_logits, draft_step=k)
-            step_tokens = self.sample_draft_tokens(
-                step_logits, spec_metadata, batch_size, draft_step=k
+        self._g_slots[:num_gens].copy_(slots)
+        self._g_slots[num_gens:bucket].fill_(self._pad_slot)
+        self._g_nacc[:num_gens].copy_(nacc)
+        self._g_nacc[num_gens:bucket].fill_(1)
+        self._g_bonus[:num_gens].copy_(bonus)
+        self._g_bonus[num_gens:bucket].fill_(0)
+        self._g_base[:num_gens].copy_(base)
+        self._g_base[num_gens:bucket].fill_(0)
+        # The core advances ctx_len for every row it draws, including the padded
+        # rows; pin the pad slot back to 0 so its RoPE position cannot creep past
+        # the frequency table over long-running serving.
+        self._ctx_len[self._pad_slot] = 0
+
+        entry = self._draft_graphs.get(bucket)
+        if entry is None:
+            # The graphed core must index the full-length capture buffer: the
+            # captured gathers keep this address, and per-iteration absolute
+            # indices in _g_base may exceed any single iteration's token count.
+            captured_full = spec_metadata.get_hidden_states(spec_metadata.max_num_tokens)
+            core_args = (
+                draft_model,
+                captured_full,
+                self._g_slots[:bucket],
+                self._g_nacc[:bucket],
+                self._g_bonus[:bucket],
+                self._g_base[:bucket],
             )
-            gen_draft_tokens.append(step_tokens[num_contexts:])
-            new_tokens = step_tokens
-        gen_draft_tokens = torch.stack(gen_draft_tokens, dim=1)
-        return gen_draft_tokens, spec_metadata.draft_probs_last_dim
+            if not self._draft_graph_warmed.get(bucket, False):
+                self._draft_graph_warmed[bucket] = True
+                return self._draft_block_core(*core_args)[:num_gens]
+            graph = torch.cuda.CUDAGraph()
+            try:
+                with torch.cuda.graph(graph, pool=self._draft_graph_pool):
+                    out = self._draft_block_core(*core_args)
+            except Exception as e:
+                # A failed mid-serving capture is not recoverable per-bucket;
+                # permanently fall back to the eager core instead of crashing.
+                logger.warning(
+                    f"DSpark: draft-block CUDA graph capture failed for bucket "
+                    f"{bucket}; falling back to eager draft. Error: {e}"
+                )
+                self._draft_graph_disabled = True
+                return None
+            if self._draft_graph_pool is None:
+                self._draft_graph_pool = graph.pool()
+            entry = (graph, out)
+            self._draft_graphs[bucket] = entry
+
+        graph, out = entry
+        graph.replay()
+        return out[:num_gens]
 
     def _forward_impl(
         self,
@@ -546,24 +660,18 @@ class DSparkWorker(SpecWorkerBase):
                 all_rank_num_tokens=all_rank_draft_tokens,
             )
             if gen_logits is not None:
-                if self.guided_decoder is not None:
-                    gen_draft_tokens, gen_vocab = self._sample_draft_tokens_guided(
-                        gen_logits,
-                        spec_metadata,
-                        accepted_tokens,
-                        num_accepted_tokens,
-                        num_contexts,
-                        batch_size,
-                        K,
-                    )
-                else:
-                    # SpecWorkerBase samples the draft tokens.
-                    gen_draft_tokens = self.sample_draft_tokens(
-                        gen_logits, spec_metadata, batch_size, num_contexts=num_contexts
-                    )
-                    # The context one-hot must match the width the gen scatter just
-                    # published to draft_probs, NOT gen_logits.shape[-1].
-                    gen_vocab = spec_metadata.draft_probs_last_dim
+                # SpecWorkerBase samples the draft tokens. With a guided decoder
+                # configured the drafts stay UNCONSTRAINED: the target-verify
+                # bitmask chain stops at the first grammar-invalid draft token,
+                # which then cannot match the masked target argmax and is
+                # rejected; the matcher rollback runs inside
+                # CapturableGuidedDecoder.fetch_batch (unconstrained_draft).
+                gen_draft_tokens = self.sample_draft_tokens(
+                    gen_logits, spec_metadata, batch_size, num_contexts=num_contexts
+                )
+                # The context one-hot must match the width the gen scatter just
+                # published to draft_probs, NOT gen_logits.shape[-1].
+                gen_vocab = spec_metadata.draft_probs_last_dim
             else:
                 gen_draft_tokens = torch.zeros((num_gens, K), dtype=torch.int32, device="cuda")
                 gen_vocab = None
