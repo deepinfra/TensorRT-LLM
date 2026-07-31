@@ -117,10 +117,12 @@ def test_worker_lazy_init_window_buffers():
     dm = _fake_draft_model(num_stages=3, window_size=128, head_dim=64)
     meta = _make_metadata(max_num_requests=8)
     worker._lazy_init(dm, meta)
-    # max_batch (8) request slots + 1 scratch row for padded / unknown IDs.
+    # max_batch (8) request slots + 1 scratch row for padded / unknown IDs;
+    # the draft-graph buckets reuse the same row as their pad slot.
     assert worker._kv_windows.shape == (9, 3, 128, 64)
     assert worker._ctx_len.shape == (9,)
     assert worker._scratch_slot == 8
+    assert worker._pad_slot == 8
     # Dummy-id floor separates real request ids from CUDA-graph padding ids.
     assert worker._graph_dummy_id_floor == (1 << 64) - 1 - worker.max_draft_len
     # The scratch row is never handed out through the free pool.
@@ -454,3 +456,92 @@ def test_forward_mixed_batch_routes_through_base_entries(monkeypatch):
     # Verified tokens are surfaced unchanged.
     assert torch.equal(out["new_tokens"], accepted)
     assert torch.equal(out["new_tokens_lens"], num_accepted)
+
+
+def _graph_capable_fake_draft_model(num_stages=3, window_size=16, head_dim=8, vocab=32):
+    """Fake draft model whose batched hooks are pure tensor ops (capturable).
+
+    ``forward_batched`` mixes every input (captured hidden, bonus, start_pos and
+    the rolling-window content) into the logits so state divergence between the
+    eager and graphed paths cannot go unnoticed; ``write_context_windows_batched``
+    does the same masked frame write as the real model (torch.where blend, no
+    data-dependent shapes).
+    """
+    dm = types.SimpleNamespace(
+        num_stages=num_stages,
+        block_size=5,
+        _attn_params={"window_size": window_size, "head_dim": head_dim},
+    )
+
+    def write_context_windows_batched(hidden, pos, slots, valid, kv_windows):
+        win = kv_windows.shape[2]
+        frame = pos % win  # [G, K]
+        g = slots.view(-1, 1).expand_as(frame)  # [G, K]
+        val = hidden.float().sum(dim=-1)  # [G, K]
+        cur = kv_windows[g, 0, frame, 0].float()
+        kv_windows[g, 0, frame, 0] = torch.where(valid, val, cur).to(kv_windows.dtype)
+
+    def forward_batched(main_hidden, bonus, start_pos, *, kv_windows, slots, **kwargs):
+        num_gens = main_hidden.shape[0]
+        wsum = kv_windows[slots].float().sum(dim=(1, 2, 3))  # [G]
+        row = main_hidden.float().sum(dim=-1) + bonus.float() + start_pos.float() + wsum
+        offsets = torch.arange(dm.block_size * vocab, device=row.device, dtype=torch.float32)
+        logits = row.view(num_gens, 1, 1) + offsets.view(1, dm.block_size, vocab)
+        return None, None, logits
+
+    dm.write_context_windows_batched = write_context_windows_batched
+    dm.forward_batched = forward_batched
+    return dm
+
+
+def test_draft_gen_block_graphed_matches_eager():
+    """Warm, capture and replay of the worker-owned draft graph reproduce the
+    eager core exactly (logits and window/position state), incl. bucket padding."""
+    worker = _make_worker()
+    dm = _graph_capable_fake_draft_model()
+    meta = _make_metadata(max_num_requests=8, max_num_tokens=64)
+    worker._lazy_init(dm, meta)
+
+    num_contexts, num_gens = 1, 3  # pads up to bucket 4
+    batch_size = num_contexts + num_gens
+    K, Kp1 = 5, 6
+    gen_start = 7  # fake context token count
+    total_target_tokens = gen_start + num_gens * Kp1
+
+    torch.manual_seed(0)
+    meta.captured_hidden_states.normal_()
+    for i, rid in enumerate([11, 22, 33]):
+        assert worker._assign_slot(rid, reset=True) == i
+    worker._batch_to_slot[num_contexts:batch_size] = torch.arange(3, device="cuda")
+    worker._kv_windows.normal_()
+    worker._ctx_len[:3] = torch.tensor([4, 9, 2], device="cuda")
+
+    accepted = torch.randint(0, 31, (batch_size, Kp1), device="cuda")
+    num_accepted = torch.tensor([1, 2, 6, 3], device="cuda", dtype=torch.int32)
+    attn_metadata = types.SimpleNamespace(num_ctx_tokens=gen_start)
+
+    win0, ctx0 = worker._kv_windows.clone(), worker._ctx_len.clone()
+
+    def run_block():
+        return worker._draft_gen_block_batched(
+            dm, meta, attn_metadata, accepted, num_accepted,
+            num_contexts, batch_size, total_target_tokens,
+        )
+
+    def reset_state():
+        worker._kv_windows.copy_(win0)
+        worker._ctx_len.copy_(ctx0)
+
+    # Eager reference (graph path disabled).
+    worker._draft_graph_disabled = True
+    ref = run_block().clone()
+    win_ref, ctx_ref = worker._kv_windows.clone(), worker._ctx_len.clone()
+
+    worker._draft_graph_disabled = False
+    for phase in ("warm", "capture", "replay"):
+        reset_state()
+        got = run_block()
+        assert torch.equal(got, ref), phase
+        assert torch.equal(worker._kv_windows[:3], win_ref[:3]), phase
+        assert torch.equal(worker._ctx_len[:3], ctx_ref[:3]), phase
+    assert 4 in worker._draft_graphs  # bucket 4 was captured

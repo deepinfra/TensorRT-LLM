@@ -812,8 +812,14 @@ def create_py_executor(
                 elif spec_config.spec_dec_mode.support_capturable_guided_decoder(
                 ):
                     # CapturableGuidedDecoder is applicable to one-model speculative decoding.
+                    # DSpark samples its draft block without per-step grammar
+                    # bitmasks (unconstrained drafts); the decoder then only
+                    # rolls back the target-verify matcher advances.
                     success = model_engine.set_guided_decoder(
-                        CapturableGuidedDecoder(**kwargs))
+                        CapturableGuidedDecoder(
+                            **kwargs,
+                            unconstrained_draft=spec_config.spec_dec_mode.
+                            is_dspark()))
                     if not success:
                         raise ValueError(
                             f"Failed to set guided decoder for speculative decoding mode: {spec_config.spec_dec_mode.name}."
