@@ -229,6 +229,31 @@ def _register_fake():
             shape, dtype=out_dtype if out_dtype is not None else mat_a.dtype)
         return ret
 
+    # MHC (multi-head hyper-connection) kernels: void ops writing into
+    # caller-allocated outputs (schemas in cpp/tensorrt_llm/thop/mhcOp.cpp).
+    # The fakes are required for DeepSeek-V4-family decoder layers to trace
+    # under torch.compile (piecewise CUDA graphs); without them dynamo fails
+    # on every layer's mHC boundary.
+    @torch.library.register_fake("trtllm::mhc_big_fuse")
+    def _(*args, **kwargs):
+        return None
+
+    @torch.library.register_fake("trtllm::mhc_gemm_sqrsum_fma")
+    def _(*args, **kwargs):
+        return None
+
+    @torch.library.register_fake("trtllm::mhc_hc_head_apply")
+    def _(*args, **kwargs):
+        return None
+
+    @torch.library.register_fake("trtllm::mhc_post_mapping")
+    def _(*args, **kwargs):
+        return None
+
+    @torch.library.register_fake("trtllm::mhc_fused_hc")
+    def _(*args, **kwargs):
+        return None
+
     @torch.library.register_fake("trtllm::fp4_gemm")
     def _(
         mat1: torch.Tensor,
