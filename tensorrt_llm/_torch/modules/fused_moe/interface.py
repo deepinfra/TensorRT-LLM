@@ -141,6 +141,7 @@ def moe_custom_op(
     output_dtype: Optional[torch.dtype],
     all_rank_num_tokens: Optional[List[int]],
     use_dp_padding: Optional[bool],
+    input_ids: Optional[torch.Tensor],
 ) -> List[torch.Tensor]:
     moe_layer = extract_extra_attrs(layer_idx)
 
@@ -154,6 +155,7 @@ def moe_custom_op(
         output_dtype=output_dtype,
         all_rank_num_tokens=all_rank_num_tokens,
         use_dp_padding=use_dp_padding,
+        input_ids=input_ids,
     )
 
     if do_finalize:
@@ -173,6 +175,7 @@ def _(
     output_dtype,
     all_rank_num_tokens,
     use_dp_padding,
+    input_ids,
 ):
     moe_layer = extract_extra_attrs(layer_idx)
     hidden_states = x if x_sf is None else Fp4QuantizedTensor(
@@ -184,6 +187,7 @@ def _(
         output_dtype=output_dtype,
         all_rank_num_tokens=all_rank_num_tokens,
         use_dp_padding=use_dp_padding,
+        input_ids=input_ids,
     )
 
     if do_finalize:
@@ -832,6 +836,7 @@ class MoE(MoEExecutionContractMixin, MoEWeightOwnerMixin,
                 output_dtype,
                 all_rank_num_tokens,
                 use_dp_padding,
+                kwargs.get("input_ids"),
             )
             if do_finalize:
                 return res[0]
