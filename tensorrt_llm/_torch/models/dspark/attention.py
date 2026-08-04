@@ -31,7 +31,10 @@ the parts that differ from the standard MLA path:
 * :func:`dspark_sparse_attn` — index-gathered attention with an attention sink.
 """
 
+import os
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import Dict, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -256,6 +259,336 @@ def dspark_sparse_attn(
     return out.to(q.dtype)
 
 
+# ---------------------------------------------------------------------------
+# Fused draft attention (trtllm-gen context kernel)
+# ---------------------------------------------------------------------------
+# :func:`dspark_sparse_attn` above is a faithful port, but it materializes an
+# fp32 gather of the whole attended KV and runs un-fused fp32 einsums — per
+# draft stage, per step. The draft's attended-position list is NOT sparse:
+# every query position attends the same set (the valid rolling-window slots
+# followed by all block positions), and RoPE is applied to K *before* storage,
+# so attention is permutation-invariant over keys. The problem therefore
+# reduces to dense non-causal MQA over a compacted per-request KV of length
+# ``min(window, start_pos+1) + block`` with a per-head softmax sink — exactly
+# what the trtllm-gen paged context kernel provides (``causal=False`` +
+# ``sinks``), on this geometry (verified: H512 Dense cubins, bf16 and e4m3).
+#
+# The fused path stages the window + block KV into a tiny synthetic paged pool
+# (pages of ``_FUSED_PAGE_SIZE``; the block table's K row and V row both name
+# the same page, since the draft's K and V are one tensor) and calls the
+# kernel. Everything data-dependent is expressed as device tensors
+# (``seq_lens`` / ``cum_seq_lens_kv``) computed from ``start_pos``; the host
+# ints passed to the kernel (``max_q_len``/``max_kv_len``/``batch_size``) are
+# static per batch size, so the whole path is CUDA-graph-capture-safe, which
+# it must be (the one-engine drafter runs inside the target's graph and inside
+# the worker's own draft graphs).
+#
+# ``TLLM_DSPARK_FUSED_DRAFT_ATTN=0`` disables it (PyTorch path above).
+# ``TLLM_DSPARK_DRAFT_ATTN_FP8=1`` additionally stores the staged KV and Q in
+# e4m3 and runs the fp8 kernel. Scales are fixed at 1.0: e4m3 is a floating
+# point format, so its *relative* precision is scale-independent within range,
+# and the RMS-normed + roped draft Q/KV magnitudes sit orders of magnitude
+# below the ±448 e4m3 range (torch's e4m3 cast saturates rather than producing
+# inf). fp8 mode intentionally inherits fp8-FMHA numerics (e4m3-rounded
+# softmax probabilities in the second GEMM) — the same numerics the fp8
+# target attention has, which is the point: a draft that predicts what the
+# quantized target will actually emit.
+
+_FUSED_PAGE_SIZE = 64  # trtllm-gen tokens_per_block; must be one of {16, 32, 64}
+
+
+@lru_cache(maxsize=None)
+def _fused_draft_attn_enabled(device_index: int) -> bool:
+    """Once-per-device gate: env opt-out, Blackwell+ (trtllm-gen), flashinfer."""
+    if os.environ.get("TLLM_DSPARK_FUSED_DRAFT_ATTN", "1") != "1":
+        return False
+    try:
+        if torch.cuda.get_device_capability(device_index)[0] < 10:
+            return False
+        from ...attention_backend.fmha.flashinfer_trtllm_gen import (  # noqa: F401
+            _trtllm_gen_batch_context_with_kv_cache,
+        )
+    except Exception as e:  # missing flashinfer / kernels: fall back, once, loudly
+        from tensorrt_llm.logger import logger
+
+        logger.warning(
+            f"DSpark fused draft attention unavailable ({e}); using the PyTorch path."
+        )
+        return False
+    return True
+
+
+def _use_fused_draft_attn(device: torch.device) -> bool:
+    # The reference paths are hardware-agnostic (unit tests run them on CPU);
+    # the fused kernel is CUDA-only.
+    if device.type != "cuda":
+        return False
+    index = device.index if device.index is not None else torch.cuda.current_device()
+    return _fused_draft_attn_enabled(index)
+
+
+@lru_cache(maxsize=1)
+def _fused_draft_attn_fp8() -> bool:
+    return os.environ.get("TLLM_DSPARK_DRAFT_ATTN_FP8", "0") == "1"
+
+
+@dataclass
+class _FusedDraftAttnBuffers:
+    """Per-(batch, geometry) persistent tensors for the fused draft attention.
+
+    Created on first (eager) use of a batch size and reused forever after —
+    including from inside captured CUDA graphs, which requires exactly this:
+    stable addresses across replays. Both graph consumers (the engine's
+    generation graphs and the worker's draft graphs) run an eager warmup pass
+    per batch bucket before capturing, so creation happens outside capture.
+    """
+
+    pool: torch.Tensor  # [g*pages, page, head_dim] paged KV (kv dtype)
+    kv_view: torch.Tensor  # [g*pages, 1, page, head_dim] kernel's pool view
+    rows: torch.Tensor  # [g, pages*page, head_dim] per-request row view of pool
+    block_tables: torch.Tensor  # [g, 2, pages] int32; K row == V row (same page)
+    cum_q: torch.Tensor  # [g+1] int32, fixed (block tokens per request)
+    cum_kv: torch.Tensor  # [g+1] int32; [0] stays 0, [1:] rewritten per call
+    workspace: torch.Tensor  # kernel workspace (uint8)
+    out: torch.Tensor  # [g*m, h, head_dim] kernel output (q dtype)
+
+
+_fused_draft_attn_buffers: Dict[Tuple, _FusedDraftAttnBuffers] = {}
+
+
+def _get_fused_draft_attn_buffers(
+    g: int,
+    m: int,
+    h: int,
+    d: int,
+    window_size: int,
+    kv_dtype: torch.dtype,
+    q_dtype: torch.dtype,
+    device: torch.device,
+) -> _FusedDraftAttnBuffers:
+    key = (g, m, h, d, window_size, kv_dtype, q_dtype, device.index)
+    buf = _fused_draft_attn_buffers.get(key)
+    if buf is not None:
+        return buf
+    from ...attention_backend.fmha.flashinfer_trtllm_gen import (
+        _get_context_workspace_size,
+    )
+
+    n_slots = window_size + m
+    pages = -(-n_slots // _FUSED_PAGE_SIZE)  # ceil div
+    pool = torch.zeros(g * pages, _FUSED_PAGE_SIZE, d, dtype=kv_dtype, device=device)
+    # The kernel addresses the pool as pages of stride page*head_dim; the block
+    # table's two rows (K, V) may name the same page — the draft's K and V are
+    # the same tensor, so no duplication is needed.
+    page_ids = torch.arange(g * pages, dtype=torch.int32, device=device).view(g, 1, pages)
+    block_tables = page_ids.expand(g, 2, pages).contiguous()
+    cum_q = torch.arange(0, (g + 1) * m, m, dtype=torch.int32, device=device)
+    cum_kv = torch.zeros(g + 1, dtype=torch.int32, device=device)
+    ws_size = _get_context_workspace_size(
+        q_dtype if kv_dtype != torch.float8_e4m3fn else torch.float8_e4m3fn,
+        g,  # max_num_seq
+        g * m,  # max_num_tokens
+        h,
+        d,
+        0,  # rotary_embedding_dim: RoPE is applied by the draft, not the kernel
+        kv_dtype == torch.float8_e4m3fn,  # fp8_context_fmha
+    )
+    buf = _FusedDraftAttnBuffers(
+        pool=pool,
+        kv_view=pool.view(g * pages, 1, _FUSED_PAGE_SIZE, d),
+        rows=pool.view(g, pages * _FUSED_PAGE_SIZE, d),
+        block_tables=block_tables,
+        cum_q=cum_q,
+        cum_kv=cum_kv,
+        workspace=torch.zeros(max(ws_size, 1), dtype=torch.uint8, device=device),
+        out=torch.empty(g * m, h, d, dtype=q_dtype, device=device),
+    )
+    _fused_draft_attn_buffers[key] = buf
+    return buf
+
+
+def _dspark_fused_sparse_attn(
+    q: torch.Tensor,
+    cache_rows: torch.Tensor,
+    kv_block: torch.Tensor,
+    attn_sink: torch.Tensor,
+    start_pos: torch.Tensor,
+    window_size: int,
+    softmax_scale: float,
+) -> torch.Tensor:
+    """Fused equivalent of the ``dspark_sparse_attn`` tail of the batched path.
+
+    Numerically equivalent to
+    ``dspark_sparse_attn(q, cat([cache_rows, kv_block], 1), attn_sink,
+    get_dspark_topk_idxs_batched(...), softmax_scale)`` at the kernel's
+    precision (bf16 floor; in fp8 mode, fp8-FMHA numerics — see module note).
+
+    Args:
+        q: ``[G, block, h, d]`` roped queries.
+        cache_rows: ``[G, window, d]`` this stage's rolling-window K/V rows
+            (slots ``0..min(start_pos, window-1)`` valid and front-packed;
+            unwritten slots hold zeros).
+        kv_block: ``[G, block, d]`` the current block's K/V.
+        start_pos: ``[G]`` absolute decode positions (device tensor).
+    """
+    from ...attention_backend.fmha.flashinfer_trtllm_gen import (
+        _trtllm_gen_batch_context_with_kv_cache,
+    )
+
+    g, m, h, d = q.shape
+    fp8 = _fused_draft_attn_fp8()
+    kv_dtype = torch.float8_e4m3fn if fp8 else q.dtype
+    buf = _get_fused_draft_attn_buffers(
+        g, m, h, d, window_size, kv_dtype, q.dtype, q.device
+    )
+
+    # Compact per-request KV: valid window slots stay front-packed at [0, n_ctx)
+    # (unwritten slots are zeros and land beyond seq_len), the block is scattered
+    # to [n_ctx, n_ctx + m). Fixed shapes, no host sync -> capture-safe.
+    n_ctx = torch.clamp(start_pos + 1, max=window_size)  # [G]
+    seq_lens = (n_ctx + m).to(torch.int32)
+    rows = buf.rows
+    rows[:, :window_size].copy_(cache_rows)  # quantizes in place when fp8
+    cols = n_ctx.unsqueeze(1) + torch.arange(m, device=q.device)  # [G, m]
+    rows.scatter_(1, cols.unsqueeze(-1).expand(g, m, d), kv_block.to(rows.dtype))
+    torch.cumsum(seq_lens, dim=0, out=buf.cum_kv[1:])  # cum_kv[0] stays 0
+
+    q_in = q.reshape(g * m, h, d)
+    if fp8:
+        q_in = q_in.to(torch.float8_e4m3fn)  # saturating cast; fixed scale 1.0
+    _trtllm_gen_batch_context_with_kv_cache(
+        query=q_in.contiguous(),
+        kv_pool=buf.kv_view,
+        workspace_buffer=buf.workspace,
+        block_tables=buf.block_tables,
+        seq_lens=seq_lens,
+        max_q_len=m,
+        max_kv_len=window_size + m,  # static upper bound; true lens from seq_lens
+        bmm1_scale=softmax_scale,  # fixed q/kv scales of 1.0 fold to just this
+        bmm2_scale=1.0,
+        batch_size=g,
+        cum_seq_lens_q=buf.cum_q,
+        cum_seq_lens_kv=buf.cum_kv,
+        window_left=-1,  # windowing is already handled by the compaction
+        out=buf.out,
+        sinks=attn_sink.float(),
+        enable_pdl=False,
+        kv_scale_pool=None,  # NVFP4-only; fp8 dequant is a no-op at scale 1.0
+        uses_shared_paged_kv_idx=False,
+        causal=False,
+    )
+    return buf.out.view(g, m, h, d)
+
+
+def _reference_sparse_attn_tail(
+    q: torch.Tensor,
+    cache_rows: torch.Tensor,
+    kv_block: torch.Tensor,
+    attn_sink: torch.Tensor,
+    start_pos: torch.Tensor,
+    window_size: int,
+    softmax_scale: float,
+) -> torch.Tensor:
+    """The pure-PyTorch tail the fused path replaces (also its probe reference)."""
+    block = kv_block.shape[1]
+    kv_full = torch.cat([cache_rows, kv_block], dim=1)  # [G, window + block, head_dim]
+    topk = get_dspark_topk_idxs_batched(window_size, block, start_pos)
+    return dspark_sparse_attn(q, kv_full, attn_sink, topk, softmax_scale)
+
+
+# Per-geometry verdict of the one-time numeric self-check: True = fused path in
+# use, False = fell back permanently, absent = not probed yet.
+_fused_geometry_ok: Dict[Tuple, bool] = {}
+
+
+def _fused_or_reference_attn(
+    q: torch.Tensor,
+    cache_rows: torch.Tensor,
+    kv_block: torch.Tensor,
+    attn_sink: torch.Tensor,
+    start_pos: torch.Tensor,
+    window_size: int,
+    softmax_scale: float,
+) -> torch.Tensor:
+    """Fused attention behind a one-time, per-geometry numeric self-check.
+
+    The fused kernel was validated on the production DSpark geometry, but this
+    module also runs other shapes (unit tests, future checkpoints), and a paged
+    fmha driven outside the engine's preprocess has exactly one dangerous
+    failure mode: it *runs* and returns silently wrong numbers. So the first
+    eager call for a geometry computes BOTH paths and enables the fused one
+    only if it reproduces the reference (bf16: max-based; fp8: bulk-based,
+    since fp8-FMHA rounds the softmax probabilities to e4m3, which produces
+    sparse ~1-ULP outliers by design). Rejection returns the already-computed
+    reference result, so the probe wastes nothing; the verdict is cached per
+    geometry, keeping every later call single-path and capture-safe.
+
+    Inside CUDA-graph capture an unprobed geometry uses the reference path
+    (probing there is unsafe); both graph consumers run eager warmup passes
+    per batch bucket, so real deployments are always probed before capture.
+    """
+    g, m, h, d = q.shape
+    fp8 = _fused_draft_attn_fp8()
+    key = (m, h, d, window_size, fp8)
+    ok = _fused_geometry_ok.get(key)
+    if ok:
+        return _dspark_fused_sparse_attn(
+            q, cache_rows, kv_block, attn_sink, start_pos, window_size, softmax_scale
+        )
+    if ok is False or torch.cuda.is_current_stream_capturing():
+        return _reference_sparse_attn_tail(
+            q, cache_rows, kv_block, attn_sink, start_pos, window_size, softmax_scale
+        )
+
+    # First eager call for this geometry: probe.
+    ref = _reference_sparse_attn_tail(
+        q, cache_rows, kv_block, attn_sink, start_pos, window_size, softmax_scale
+    )
+    from tensorrt_llm.logger import logger
+
+    try:
+        fused = _dspark_fused_sparse_attn(
+            q, cache_rows, kv_block, attn_sink, start_pos, window_size, softmax_scale
+        )
+    except Exception as e:
+        _fused_geometry_ok[key] = False
+        logger.warning(
+            f"DSpark fused draft attention rejected for geometry {key} "
+            f"(kernel error: {e}); using the PyTorch path."
+        )
+        return ref
+
+    ref32 = ref.float()
+    rms = float(ref32.pow(2).mean().sqrt())
+    if rms < 1e-6:
+        # Degenerate (e.g. all-zero warmup) inputs cannot support a verdict;
+        # stay unprobed and answer with the reference this time.
+        return ref
+    err = (fused.float() - ref32).abs()
+    max_r = float(err.max()) / rms
+    mean_r = float(err.mean()) / rms
+    # fp8 thresholds are calibrated from measurement, per metric role: the mean
+    # is the discriminator (correct recipe ~2.5e-2 vs O(1) when the kernel is
+    # miscalled — 40x separation), while the max is only a gross-error backstop:
+    # legitimate e4m3-P rounding produces single-element outliers up to ~6e-1
+    # depending on input (scale-independent — e4m3 is floating point), whereas
+    # every observed real failure measures >= 4.8.
+    passed = (mean_r < 5e-2 and max_r < 1.5) if fp8 else (max_r < 5e-2)
+    _fused_geometry_ok[key] = passed
+    if passed:
+        logger.info(
+            f"DSpark fused draft attention enabled for geometry {key} "
+            f"(self-check max={max_r:.2e}, mean={mean_r:.2e} rel-to-rms)."
+        )
+        return fused
+    logger.warning(
+        f"DSpark fused draft attention rejected for geometry {key} "
+        f"(self-check max={max_r:.2e}, mean={mean_r:.2e} rel-to-rms); "
+        "using the PyTorch path."
+    )
+    return ref
+
+
 def _rmsnorm(x: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
     """RMSNorm matching the DeepSpec reference (fp32 reduce, then * weight)."""
     dtype = x.dtype
@@ -450,9 +783,16 @@ def dspark_attention_forward_batched(
     slot_pos = start_pos % window_size  # [G]
     write_target[slots, slot_pos] = main_kv.squeeze(1).to(write_target.dtype)
     cache_rows = write_target[slots]  # [G, window, head_dim]
-    kv_full = torch.cat([cache_rows, kv], dim=1)  # [G, window + block, head_dim]
-    topk = get_dspark_topk_idxs_batched(window_size, block, start_pos)
-    o = dspark_sparse_attn(q, kv_full, attn_sink, topk, softmax_scale)  # [G, block, h, head_dim]
+    if g > 0 and _use_fused_draft_attn(x.device):
+        # Fused trtllm-gen path behind the per-geometry numeric self-check
+        # (see the fused-draft-attention note above).
+        o = _fused_or_reference_attn(
+            q, cache_rows, kv, attn_sink, start_pos, window_size, softmax_scale
+        )  # [G, block, h, head_dim]
+    else:
+        o = _reference_sparse_attn_tail(
+            q, cache_rows, kv, attn_sink, start_pos, window_size, softmax_scale
+        )  # [G, block, h, head_dim]
     o = _rope_last_dims_batched(o, rd, blk_freqs, inverse=True)
 
     # Grouped low-rank O projection.

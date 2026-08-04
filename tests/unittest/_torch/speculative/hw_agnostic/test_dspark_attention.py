@@ -445,3 +445,120 @@ def test_attention_forward_does_not_mutate_kv_cache():
     before = g["kv_cache0"].clone()
     _run(g)
     torch.testing.assert_close(g["kv_cache0"], before)
+
+
+# ---------------------------------------------------------------------------
+# Fused draft attention (trtllm-gen context kernel) — GPU-only
+# ---------------------------------------------------------------------------
+
+
+def _fused_available() -> bool:
+    from tensorrt_llm._torch.models.dspark import attention as attn_mod
+
+    return torch.cuda.is_available() and attn_mod._use_fused_draft_attn(
+        torch.device("cuda", torch.cuda.current_device())
+    )
+
+
+def _make_fused_inputs(seed: int = 11):
+    """Real DSpark V4-Flash draft attention geometry, mixed start_pos regimes."""
+    torch.manual_seed(seed)
+    dev = torch.device("cuda")
+    bf = torch.bfloat16
+    h, d, window, block, g = 64, 512, 128, 5, 8
+    start_pos = torch.tensor([2, 5, 9, 60, 126, 127, 128, 300], device=dev)
+    cache_rows = torch.zeros(g, window, d, dtype=bf, device=dev)
+    for gi in range(g):
+        n = min(int(start_pos[gi]) + 1, window)
+        cache_rows[gi, :n] = (torch.randn(n, d, device=dev) * 0.5).to(bf)
+    return dict(
+        q=(torch.randn(g, block, h, d, device=dev) * 0.7).to(bf),
+        cache_rows=cache_rows,
+        kv_block=(torch.randn(g, block, d, device=dev) * 0.7).to(bf),
+        attn_sink=(torch.randn(h, device=dev) * 0.5).to(bf),
+        start_pos=start_pos,
+        window_size=window,
+        softmax_scale=d**-0.5,
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="fused path is CUDA-only")
+def test_fused_draft_attention_self_check_and_match():
+    """The per-geometry self-check accepts (or cleanly rejects) the fused path,
+    and an accepted fused path reproduces the reference at the bf16 floor."""
+    from tensorrt_llm._torch.models.dspark import attention as attn_mod
+
+    if not _fused_available():
+        pytest.skip("fused draft attention unavailable (pre-Blackwell / no flashinfer)")
+    inputs = _make_fused_inputs()
+    attn_mod._fused_geometry_ok.clear()
+    got = attn_mod._fused_or_reference_attn(**inputs)  # probing call
+    ref = attn_mod._reference_sparse_attn_tail(**inputs)
+    key = (5, 64, 512, 128, attn_mod._fused_draft_attn_fp8())
+    verdict = attn_mod._fused_geometry_ok.get(key)
+    assert verdict is not None, "the probe must record a verdict"
+    err = (got.float() - ref.float()).abs()
+    rel = float(err.max()) / float(ref.float().pow(2).mean().sqrt())
+    if verdict:
+        assert rel < 5e-2  # fused accepted -> kernel output at the bf16 floor
+        # steady state stays on the fused path and matches too
+        again = attn_mod._fused_or_reference_attn(**inputs)
+        rel2 = float((again.float() - ref.float()).abs().max()) / float(
+            ref.float().pow(2).mean().sqrt()
+        )
+        assert rel2 < 5e-2
+    else:
+        torch.testing.assert_close(got, ref)  # rejected -> exact reference
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="fused path is CUDA-only")
+def test_fused_draft_attention_fp8_bulk_criterion(monkeypatch):
+    """fp8 mode: bulk error at the fp8 floor; sparse e4m3-P outliers tolerated."""
+    from tensorrt_llm._torch.models.dspark import attention as attn_mod
+
+    if not _fused_available():
+        pytest.skip("fused draft attention unavailable (pre-Blackwell / no flashinfer)")
+    monkeypatch.setenv("TLLM_DSPARK_DRAFT_ATTN_FP8", "1")
+    attn_mod._fused_draft_attn_fp8.cache_clear()
+    attn_mod._fused_geometry_ok.clear()
+    try:
+        inputs = _make_fused_inputs()
+        got = attn_mod._fused_or_reference_attn(**inputs)
+        ref = attn_mod._reference_sparse_attn_tail(**inputs)
+        key = (5, 64, 512, 128, True)
+        if not attn_mod._fused_geometry_ok.get(key):
+            pytest.skip("fp8 fused path rejected by the self-check on this device")
+        err = (got.float() - ref.float()).abs()
+        rms = float(ref.float().pow(2).mean().sqrt())
+        assert float(err.mean()) / rms < 5e-2  # bulk at the fp8 floor
+        assert float(err.max()) / rms < 1.5  # gross-error backstop
+    finally:
+        attn_mod._fused_draft_attn_fp8.cache_clear()
+        attn_mod._fused_geometry_ok.clear()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="fused path is CUDA-only")
+def test_fused_draft_attention_unprobed_geometry_capture_safe():
+    """Inside CUDA-graph capture, an unprobed geometry must take the reference
+    path (probing there is unsafe) and produce reference numbers on replay."""
+    from tensorrt_llm._torch.models.dspark import attention as attn_mod
+
+    if not _fused_available():
+        pytest.skip("fused draft attention unavailable (pre-Blackwell / no flashinfer)")
+    inputs = _make_fused_inputs()
+    attn_mod._fused_geometry_ok.clear()
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        warm = attn_mod._fused_or_reference_attn(**inputs)  # capture warmup only
+        del warm
+        attn_mod._fused_geometry_ok.clear()  # forget the verdict: unprobed again
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            out = attn_mod._fused_or_reference_attn(**inputs)
+    torch.cuda.current_stream().wait_stream(stream)
+    assert not attn_mod._fused_geometry_ok, "no verdict may be recorded during capture"
+    graph.replay()
+    torch.cuda.synchronize()
+    ref = attn_mod._reference_sparse_attn_tail(**inputs)
+    torch.testing.assert_close(out, ref)
