@@ -122,6 +122,11 @@ prom_metrics = defaultdict(float, {
     "num_requests_waiting": 0,
     "prompt_tokens_total": 0,
     "generation_tokens_total": 0,
+    # Seeded so /metrics always exposes them, even before the first iteration
+    # writes /dev/shm (otherwise a progress check scraping at startup sees no
+    # iteration_tokens_total_sum and reports the engine as making no progress).
+    "iteration_tokens_total_sum": 0,
+    "iteration_tokens_total_count": 0,
 })
 
 from .._utils import nvtx_mark, set_prometheus_multiproc_dir
@@ -234,6 +239,50 @@ async def disconnect_poller(request: Request, result: Any):
         print("Stopping polling loop")
 
 
+# Admission cap: reject new inference requests with 429 once the engine's
+# waiting queue exceeds DI_MAX_WAITING (0 = disabled). Bounds queue latency
+# under overload instead of accumulating requests whose clients have long
+# timed out; the fleet LB retries rejected requests on other pods.
+DI_MAX_WAITING = int(os.environ.get("DI_MAX_WAITING", "0") or 0)
+_admission_state = {"t": 0.0, "waiting": 0.0, "fd": None}
+
+
+def _engine_waiting_estimate() -> float:
+    """Engine waiting-queue depth, derived the same way as /metrics.
+
+    request_started/completed/cancelled/failed_total are in-process counters
+    (incremented by the request handlers); only num_requests_running comes from
+    the worker-written shm metrics file. Cached for 0.5s; fails open on error.
+    """
+    now = time.monotonic()
+    if now - _admission_state["t"] < 0.5:
+        return _admission_state["waiting"]
+    running = prom_metrics["num_requests_running"]
+    try:
+        if _admission_state["fd"] is None:
+            _admission_state["fd"] = os.open(PROM_METRICS_FILENAME, os.O_RDONLY)
+        bufs = os.pread(_admission_state["fd"], 65536, 0).split(b'\0', 1)
+        if len(bufs) >= 2:
+            key_list = json.loads(bufs[0].decode('UTF-8'))
+            value_list = array.array('d')
+            value_list.frombytes(bufs[1])
+            running = dict(zip(key_list,
+                               value_list)).get("num_requests_running",
+                                                running)
+    except OSError:
+        _admission_state["fd"] = None
+    except Exception:
+        pass
+    done = (prom_metrics["request_completed_total"] +
+            prom_metrics["request_cancelled_total"] +
+            prom_metrics["request_failed_total"])
+    waiting = max(
+        0.0, prom_metrics["request_started_total"] - (running + done))
+    _admission_state["t"] = now
+    _admission_state["waiting"] = waiting
+    return waiting
+
+
 def cancel_on_disconnect(model_type: Type[BaseModel]):
     """
     Decorator that will check if the client disconnects,
@@ -244,6 +293,13 @@ def cancel_on_disconnect(model_type: Type[BaseModel]):
 
         @wraps(handler)
         async def cancel_on_disconnect_decorator(self, request: model_type, raw_request: Request):
+            if DI_MAX_WAITING > 0:
+                waiting = _engine_waiting_estimate()
+                if waiting >= DI_MAX_WAITING:
+                    raise HTTPException(
+                        429,
+                        detail=f"engine overloaded: {int(waiting)} requests queued "
+                        f"(cap {DI_MAX_WAITING}); retry another instance")
             sentinel = object()
 
             # Create two tasks, one to poll the request and check if the
@@ -978,8 +1034,12 @@ class OpenAIServer(_VideoRoutesMixin):
         bufs = None
         try:
             if prom_metrics_file is None:
+                # No O_TRUNC: this fd only reads. The executor (py_executor)
+                # rewrites the full snapshot via pwrite(offset=0) each iteration;
+                # truncating here on the first scrape would drop those counters
+                # until the next iteration (and forever if the engine is idle).
                 prom_metrics_file = os.open(PROM_METRICS_FILENAME,
-                                            os.O_RDWR|os.O_CREAT|os.O_TRUNC)
+                                            os.O_RDONLY|os.O_CREAT)
             bufs = os.pread(prom_metrics_file, 65536, 0).split(b'\0', 1)
             if len(bufs) >= 2:
                 keybuf, valbuf = bufs
@@ -1009,10 +1069,11 @@ class OpenAIServer(_VideoRoutesMixin):
         for metric_key, metric_val in prom_metrics.items():
             separator = ',' if '{' in metric_key else '{'
             resp += f'vllm:{metric_key}{separator}model_name="{self.model}"}} {float(metric_val)}\n'
-        await self.get_iteration_stats()
-        if "kvCacheStats" in self.last_iteration_stat:
-            resp += self.format_kv_cache_stats(self.last_iteration_stat["kvCacheStats"])
-
+        # Don't drain iteration stats here: in RPC-orchestrator mode that call
+        # blocks on a wait-for-stat RPC (seconds when the engine is idle) and
+        # times out /metrics scrapes; the vllm:* counters above are already
+        # complete (sourced from the shared-memory snapshot), and the background
+        # _iteration_stats_collector_loop still feeds Prometheus.
         return Response(status_code=200, content=resp)
 
     def format_kv_cache_stats(self, kv_cache_stats) -> str:
