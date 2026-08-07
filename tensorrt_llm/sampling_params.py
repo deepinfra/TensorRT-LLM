@@ -679,36 +679,55 @@ class SamplingParams:
 
         return tllme.OutputConfig(**config_kwargs)
 
+    def _make_guided_decoding_params(
+            self, guide_type: "tllme.GuidedDecodingParams.GuideType",
+            guide: Optional[str]) -> tllme.GuidedDecodingParams:
+        """Construct the executor GuidedDecodingParams binding.
+
+        ``guidance_start_token_id`` is only understood by bindings compiled
+        with the matching executor.h change; stock release bindings take
+        (guide_type, guide) only. Fall back gracefully so a python-patched
+        release container keeps serving guided requests (the start-token
+        offset is then unavailable and guiding begins at the first token).
+        """
+        start_id = self.guided_decoding.guidance_start_token_id
+        try:
+            return tllme.GuidedDecodingParams(guide_type, guide, start_id)
+        except TypeError:
+            if start_id is not None:
+                logger.warning(
+                    "This tensorrt_llm binding was built without "
+                    "guidance_start_token_id support; ignoring "
+                    f"guidance_start_token_id={start_id} and guiding from the "
+                    "first generated token.")
+            return tllme.GuidedDecodingParams(guide_type, guide)
+
     def _get_guided_decoding_params(self) -> tllme.GuidedDecodingParams:
         if self.guided_decoding is None:
             return None
 
         if self.guided_decoding.json_object:
-            return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.JSON, None, self.guided_decoding.guidance_start_token_id,
-            )
+            return self._make_guided_decoding_params(
+                tllme.GuidedDecodingParams.GuideType.JSON, None)
         elif self.guided_decoding.json is not None:
             json_schema = self.guided_decoding.json
             if isinstance(json_schema, BaseModel):
                 json_schema = json_schema.model_json_schema()
             if isinstance(json_schema, dict):
                 json_schema = json.dumps(json_schema)
-            return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.JSON_SCHEMA, json_schema, self.guided_decoding.guidance_start_token_id
-            )
+            return self._make_guided_decoding_params(
+                tllme.GuidedDecodingParams.GuideType.JSON_SCHEMA, json_schema)
         elif self.guided_decoding.regex is not None:
-            return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.REGEX, self.guided_decoding.regex, self.guided_decoding.guidance_start_token_id
-            )
+            return self._make_guided_decoding_params(
+                tllme.GuidedDecodingParams.GuideType.REGEX,
+                self.guided_decoding.regex)
         elif self.guided_decoding.grammar is not None:
-            return tllme.GuidedDecodingParams(
-                tllme.GuidedDecodingParams.GuideType.EBNF_GRAMMAR, self.guided_decoding.grammar, self.guided_decoding.guidance_start_token_id
-            )
+            return self._make_guided_decoding_params(
+                tllme.GuidedDecodingParams.GuideType.EBNF_GRAMMAR,
+                self.guided_decoding.grammar)
         elif self.guided_decoding.structural_tag is not None:
-            return tllme.GuidedDecodingParams(
+            return self._make_guided_decoding_params(
                 tllme.GuidedDecodingParams.GuideType.STRUCTURAL_TAG,
-                self.guided_decoding.structural_tag,
-                self.guided_decoding.guidance_start_token_id,
-            )
+                self.guided_decoding.structural_tag)
         else:
             return None
