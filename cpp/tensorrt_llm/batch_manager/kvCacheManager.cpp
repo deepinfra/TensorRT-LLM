@@ -2192,16 +2192,7 @@ std::shared_ptr<KVCacheBlock> WindowBlockManager::findBlocksInReuseTreeByBlockKe
     BlockKey const& blockKey, bool pinBlocks, std::vector<KVCacheBlock::IdType>& pinnedBlockIds)
 {
     std::lock_guard<std::recursive_mutex> lock(mLookupTree->getMutex());
-    auto blockedUniqueTokens
-        = chopVectorIntoBlocks<UniqueToken>(blockKey.uniqueTokens, blockKey.uniqueTokens.size(), mTokensPerBlock, true);
-
-    std::vector<BlockKey> blockKeys;
-    blockKeys.reserve(blockedUniqueTokens.size());
-    for (auto const& blockedUniqueTokensList : blockedUniqueTokens)
-    {
-        blockKeys.emplace_back(blockKey.usesExtraIds, blockKey.loraTaskId, blockedUniqueTokensList, blockKey.extraKeys,
-            blockKey.cacheSalt);
-    }
+    auto const blockKeys = splitIntoPerBlockKeys(blockKey);
     auto searchRoot = mCachedBlocksRoot;
     std::vector<BlockPtr> pinnedInScope;
     for (auto const& blockKey : blockKeys)
@@ -2238,6 +2229,56 @@ std::shared_ptr<KVCacheBlock> WindowBlockManager::findBlocksInReuseTreeByBlockKe
         searchRoot = std::move(matchingBlock);
     }
     return searchRoot;
+}
+
+std::vector<BlockKey> WindowBlockManager::splitIntoPerBlockKeys(BlockKey const& blockKey) const
+{
+    auto blockedUniqueTokens
+        = chopVectorIntoBlocks<UniqueToken>(blockKey.uniqueTokens, blockKey.uniqueTokens.size(), mTokensPerBlock, true);
+
+    std::vector<BlockKey> blockKeys;
+    blockKeys.reserve(blockedUniqueTokens.size());
+    for (auto const& blockedUniqueTokensList : blockedUniqueTokens)
+    {
+        blockKeys.emplace_back(blockKey.usesExtraIds, blockKey.loraTaskId, blockedUniqueTokensList, blockKey.extraKeys,
+            blockKey.cacheSalt);
+    }
+    return blockKeys;
+}
+
+TransferPrefixMatch WindowBlockManager::matchTransferablePrefix(
+    BlockKey const& blockKey, bool pinBlocks, std::vector<KVCacheBlock::IdType>& pinnedBlockIds)
+{
+    std::lock_guard<std::recursive_mutex> lock(mLookupTree->getMutex());
+    auto searchRoot = mCachedBlocksRoot;
+    TransferPrefixMatch match;
+    for (auto const& perBlockKey : splitIntoPerBlockKeys(blockKey))
+    {
+        auto [partialMatch, numMatched, matchingBlock] = searchRoot != nullptr
+            ? searchRoot->findMatchingBlock(perBlockKey, true, true)
+            : std::make_tuple(false, 0, nullptr);
+
+        // Same acceptance test as findBlocksInReuseTreeByBlockKeyImpl, so a read-only match never
+        // reports a block that the pinning walk would go on to reject (isPlaceholder first:
+        // isPrimary asserts on placeholders). Unlike that walk, a miss stops here instead of
+        // discarding the blocks already matched.
+        bool const fullyMatched
+            = matchingBlock != nullptr && numMatched == static_cast<SizeType32>(perBlockKey.uniqueTokens.size());
+        if (!fullyMatched || matchingBlock->isPlaceholder() || !matchingBlock->isPrimary())
+        {
+            break;
+        }
+
+        if (pinBlocks)
+        {
+            pinBlock(matchingBlock);
+            pinnedBlockIds.push_back(matchingBlock->getBlockId());
+        }
+        match.lastBlock = matchingBlock;
+        ++match.numBlocks;
+        searchRoot = std::move(matchingBlock);
+    }
+    return match;
 }
 
 std::shared_ptr<KVCacheBlock> WindowBlockManager::findBlocksInReuseTreeByBlockKeys(

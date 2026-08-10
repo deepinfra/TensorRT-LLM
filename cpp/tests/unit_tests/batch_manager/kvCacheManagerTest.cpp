@@ -763,6 +763,79 @@ TEST_F(KVCacheManagerTest, FindBlocksInReuseTreeByBlockKeysTest)
     EXPECT_EQ(prev1->getPrevBlock(), nullptr);
 }
 
+TEST_F(KVCacheManagerTest, MatchTransferablePrefixStopsAtFirstMiss)
+{
+    using namespace tensorrt_llm::batch_manager::kv_cache_manager;
+    auto constexpr numLayers = 2;
+    auto constexpr numKvHeads = 2;
+    auto constexpr sizePerHead = 16;
+    auto constexpr tokensPerBlock = 8;
+    auto constexpr blocksInPrimaryPool = 16;
+    auto constexpr blocksInSecondaryPool = 0;
+    auto constexpr maxNumSequences = 8;
+    auto constexpr beamWidth = 1;
+    auto constexpr maxAttentionWindow = 4096;
+    auto const stream = std::make_shared<tr::CudaStream>();
+    tr::SamplingConfig const samplingConfig{beamWidth};
+    bool constexpr isStreaming{false};
+
+    BlocksPerWindow const blocksPerWindow{{maxAttentionWindow, {blocksInPrimaryPool, blocksInSecondaryPool}}};
+    KVCacheManager kvCacheManager(numLayers, numKvHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
+        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, tensorrt_llm::DataType::kHALF, 0, stream,
+        maxAttentionWindow, maxAttentionWindow, true);
+    kvCacheManager.allocatePools(false);
+
+    // Leave a 24-token chain behind in the reuse tree, held by nothing else.
+    auto storedTokens = std::make_shared<VecTokens>();
+    for (SizeType32 i = 0; i < 24; ++i)
+    {
+        storedTokens->push_back(i);
+    }
+    LlmRequest::RequestIdType const requestId{0};
+    auto llmRequest = std::make_shared<LlmRequest>(requestId, 0, storedTokens, samplingConfig, isStreaming);
+    kvCacheManager.addSequenceBatch(
+        {{{requestId, static_cast<SizeType32>(storedTokens->size()), beamWidth}}}, {std::ref(*llmRequest)});
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest);
+    (void) kvCacheManager.removeSequence(requestId, llmRequest);
+    auto const freeBlocks = kvCacheManager.getNumFreeBlocks();
+
+    BlockKey const storedKey{*storedTokens};
+    std::vector<SizeType32> matchedIds;
+    auto const stored = kvCacheManager.matchTransferablePrefix(storedKey, maxAttentionWindow, false, matchedIds);
+    ASSERT_GT(stored.numBlocks, 0);
+    ASSERT_NE(stored.lastBlock, nullptr);
+    EXPECT_TRUE(matchedIds.empty());
+    EXPECT_EQ(kvCacheManager.getNumFreeBlocks(), freeBlocks);
+
+    // A longer prompt sharing that prefix is what the all-or-nothing lookup cannot serve: it
+    // rejects the request outright, while the prefix match still reports every usable block.
+    auto extendedTokens = *storedTokens;
+    for (SizeType32 i = 24; i < 40; ++i)
+    {
+        extendedTokens.push_back(i);
+    }
+    BlockKey const extendedKey{extendedTokens};
+    EXPECT_EQ(kvCacheManager.findBlocksInReuseTreeByBlockKey(extendedKey, maxAttentionWindow), nullptr);
+    auto const extended = kvCacheManager.matchTransferablePrefix(extendedKey, maxAttentionWindow, false, matchedIds);
+    EXPECT_EQ(extended.numBlocks, stored.numBlocks);
+    EXPECT_EQ(extended.lastBlock, stored.lastBlock);
+
+    VecTokens const unrelatedTokens{900, 901, 902, 903, 904, 905, 906, 907};
+    BlockKey const unrelatedKey{unrelatedTokens};
+    auto const unrelated = kvCacheManager.matchTransferablePrefix(unrelatedKey, maxAttentionWindow, false, matchedIds);
+    EXPECT_EQ(unrelated.numBlocks, 0);
+    EXPECT_EQ(unrelated.lastBlock, nullptr);
+
+    // Pinning a short match keeps what it matched rather than rolling the pins back.
+    std::vector<SizeType32> pinnedIds;
+    auto const pinned = kvCacheManager.matchTransferablePrefix(extendedKey, maxAttentionWindow, true, pinnedIds);
+    EXPECT_EQ(pinned.numBlocks, stored.numBlocks);
+    EXPECT_EQ(static_cast<SizeType32>(pinnedIds.size()), pinned.numBlocks);
+    EXPECT_LT(kvCacheManager.getNumFreeBlocks(), freeBlocks);
+    kvCacheManager.unpinBlocksById(pinnedIds);
+    EXPECT_EQ(kvCacheManager.getNumFreeBlocks(), freeBlocks);
+}
+
 #ifdef ENABLE_FP4
 TEST_F(KVCacheManagerTest, FP4BlockScaleManagementTest)
 {

@@ -90,6 +90,14 @@ using BlocksPerWindow = std::map<SizeType32, std::tuple<SizeType32, SizeType32>>
 using MmKey = tensorrt_llm::executor::MmKey;
 using WindowSizeType = SizeType32;
 
+//! \brief How many leading blocks of a requested chain the reuse tree can currently serve to a
+//! cache transfer, and the last of them. numBlocks is 0 and lastBlock null when nothing matches.
+struct TransferPrefixMatch
+{
+    BlockPtr lastBlock;
+    SizeType32 numBlocks{0};
+};
+
 template <typename T>
 using OptionalRef = tensorrt_llm::common::OptionalRef<T>;
 
@@ -1275,6 +1283,14 @@ public:
     [[nodiscard]] std::shared_ptr<KVCacheBlock> findBlocksInReuseTreeByBlockKeys(
         std::vector<BlockKey> const& blockKeys);
 
+    //! \brief Walk the leading blocks of blockKey, stopping at the first one that is absent or
+    //! not transferable (a transfer reads primary-pool buffers, so offloaded and placeholder
+    //! blocks are misses). With pinBlocks set, each matched block is pinned and its id appended
+    //! to pinnedBlockIds, and the caller owns unpinning them; otherwise the walk takes no
+    //! references and the result may be stale as soon as it is returned.
+    [[nodiscard]] TransferPrefixMatch matchTransferablePrefix(
+        BlockKey const& blockKey, bool pinBlocks, std::vector<KVCacheBlock::IdType>& pinnedBlockIds);
+
     //! \brief Unpin blocks by block ids directly
     void unpinBlocksById(std::vector<KVCacheBlock::IdType> const& blockIds);
 
@@ -1305,6 +1321,11 @@ private:
     //! \brief Shared implementation of the findBlocksInReuseTreeByBlockKey overloads.
     [[nodiscard]] std::shared_ptr<KVCacheBlock> findBlocksInReuseTreeByBlockKeyImpl(
         BlockKey const& blockKey, bool pinBlocks, std::vector<KVCacheBlock::IdType>& pinnedBlockIds);
+
+    //! \brief Split a BlockKey spanning many tokens, as carried in a transfer request, into the
+    //! per-block keys the reuse tree is keyed by: one per tokensPerBlock chunk, sharing the
+    //! sequence-level fields. A short trailing chunk becomes its own key.
+    [[nodiscard]] std::vector<BlockKey> splitIntoPerBlockKeys(BlockKey const& blockKey) const;
 
     //! \brief Walk the reuse tree with precomputed per-block keys (no lock; callers must hold mLookupTree->getMutex()).
     [[nodiscard]] std::shared_ptr<KVCacheBlock> searchReuseTree(std::vector<BlockKey> const& blockKeys);
@@ -1890,6 +1911,12 @@ public:
         return mWindowBlockManagers.at(windowSize).findBlocksInReuseTreeByBlockKey(blockKey, pinnedBlockIds);
     }
 
+    [[nodiscard]] TransferPrefixMatch matchTransferablePrefix(
+        BlockKey const& blockKey, SizeType32 windowSize, bool pinBlocks, std::vector<KVCacheBlock::IdType>& pinnedBlockIds)
+    {
+        return mWindowBlockManagers.at(windowSize).matchTransferablePrefix(blockKey, pinBlocks, pinnedBlockIds);
+    }
+
     [[nodiscard]] std::shared_ptr<KVCacheBlock> findBlocksInReuseTreeByBlockKeys(
         std::vector<BlockKey> const& blockKeys, SizeType32 windowSize)
     {
@@ -2267,6 +2294,12 @@ public:
     //! \brief Pinning lookup: pins matched blocks and records their ids for unpinBlocksById.
     [[nodiscard]] virtual std::shared_ptr<KVCacheBlock> findBlocksInReuseTreeByBlockKey(
         BlockKey const& blockKey, SizeType32 windowSize, std::vector<KVCacheBlock::IdType>& pinnedBlockIds)
+        = 0;
+
+    //! \brief Longest transferable prefix of blockKey, stopping at the first block the reuse tree
+    //! cannot serve. Pins the matched blocks when pinBlocks is set, including on a short match.
+    [[nodiscard]] virtual TransferPrefixMatch matchTransferablePrefix(
+        BlockKey const& blockKey, SizeType32 windowSize, bool pinBlocks, std::vector<KVCacheBlock::IdType>& pinnedBlockIds)
         = 0;
 
     [[nodiscard]] virtual std::shared_ptr<KVCacheBlock> findBlocksInReuseTreeByBlockKeys(
@@ -2717,6 +2750,12 @@ public:
         BlockKey const& blockKey, SizeType32 windowSize, std::vector<KVCacheBlock::IdType>& pinnedBlockIds) override
     {
         return mBlockManager.findBlocksInReuseTreeByBlockKey(blockKey, windowSize, pinnedBlockIds);
+    }
+
+    TransferPrefixMatch matchTransferablePrefix(BlockKey const& blockKey, SizeType32 windowSize, bool pinBlocks,
+        std::vector<KVCacheBlock::IdType>& pinnedBlockIds) override
+    {
+        return mBlockManager.matchTransferablePrefix(blockKey, windowSize, pinBlocks, pinnedBlockIds);
     }
 
     std::shared_ptr<KVCacheBlock> findBlocksInReuseTreeByBlockKeys(
