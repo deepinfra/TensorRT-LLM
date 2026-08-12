@@ -20,6 +20,7 @@
 #include "tensorrt_llm/batch_manager/cacheFormatter.h"
 #include "tensorrt_llm/batch_manager/common.h"
 #include "tensorrt_llm/batch_manager/kvCacheUtils.h"
+#include "tensorrt_llm/common/cudaUtils.h"
 #include "tensorrt_llm/common/envUtils.h"
 #include "tensorrt_llm/common/logger.h"
 #include "tensorrt_llm/common/tllmDataType.h"
@@ -292,7 +293,8 @@ RequestInfo::RequestInfo(LlmRequest::RequestIdType requestId, executor::DataTran
 bool RequestInfo::operator==(RequestInfo const& rhs) const
 {
     return mRequestId == rhs.mRequestId && mIndexFromEnd == rhs.mIndexFromEnd && mLastBlockKey == rhs.mLastBlockKey
-        && mIsArbitraryTransfer == rhs.mIsArbitraryTransfer && mTransState == rhs.mTransState;
+        && mIsArbitraryTransfer == rhs.mIsArbitraryTransfer && mAllowPartialMatch == rhs.mAllowPartialMatch
+        && mTransState == rhs.mTransState;
 }
 
 LlmRequest::RequestIdType RequestInfo::getRequestId() const noexcept
@@ -312,6 +314,7 @@ void RequestInfo::serialize(RequestInfo const& requestInfo, std::ostream& os)
     su::serialize(requestInfo.mIndexFromEnd, os);
     su::serialize(requestInfo.mLastBlockKey, os);
     su::serialize(requestInfo.mIsArbitraryTransfer, os);
+    su::serialize(requestInfo.mAllowPartialMatch, os);
     su::serialize(requestInfo.mTransState, os);
 }
 
@@ -322,9 +325,11 @@ RequestInfo RequestInfo::deserialize(std::istream& is)
     auto indexFromEnd = su::deserialize<decltype(mIndexFromEnd)>(is);
     auto lastBlockKey = su::deserialize<decltype(mLastBlockKey)>(is);
     auto isArbitraryTransfer = su::deserialize<decltype(mIsArbitraryTransfer)>(is);
+    auto allowPartialMatch = su::deserialize<decltype(mAllowPartialMatch)>(is);
     auto transState = su::deserialize<decltype(mTransState)>(is);
     auto requestInfo = RequestInfo{requestId, std::move(transState), indexFromEnd, lastBlockKey};
     requestInfo.setIsArbitraryTransfer(isArbitraryTransfer);
+    requestInfo.setAllowPartialMatch(allowPartialMatch);
     return requestInfo;
 }
 
@@ -336,6 +341,7 @@ std::size_t RequestInfo::serializedSize(RequestInfo const& requestInfo)
     totalSize += su::serializedSize(requestInfo.mIndexFromEnd);
     totalSize += su::serializedSize(requestInfo.mLastBlockKey);
     totalSize += su::serializedSize(requestInfo.mIsArbitraryTransfer);
+    totalSize += su::serializedSize(requestInfo.mAllowPartialMatch);
     totalSize += su::serializedSize(requestInfo.mTransState);
     return totalSize;
 }
@@ -640,6 +646,22 @@ public:
         }
     }
 
+    void sendGrantedBlocks(LlmRequest::RequestIdType requestId, int32_t grantedBlocks)
+    {
+        TransferSession* session = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(mMtxForMap);
+            auto it = mRequestToSession.find(requestId);
+            TLLM_CHECK(it != mRequestToSession.end());
+            session = std::addressof(it->second);
+        }
+        for (auto const* connection : session->getConnections())
+        {
+            connection->send(executor::kv_cache::DataContext{TransceiverTag::kGRANTED_BLOCKS_TAG}, &grantedBlocks,
+                sizeof(grantedBlocks));
+        }
+    }
+
     ~Impl()
     {
         terminate();
@@ -879,22 +901,57 @@ private:
         mCacheTransferLayer.format(*session);
     }
 
-    // Pin the requested chain in the reuse tree; an empty result means no full match.
-    // The caller must unpin once the transfer settles.
-    std::vector<kv_cache_manager::KVCacheBlock::IdType> pinReuseTreeBlocks(RequestIdType requestId)
+    struct ReuseTreeGrant
+    {
+        std::vector<kv_cache_manager::KVCacheBlock::IdType> pinnedBlockIds;
+        int32_t grantedBlocks{0};
+    };
+
+    // Pin the blocks this transfer will read; empty pinnedBlockIds means the request cannot be
+    // served. With allowPartialMatch, the longest available prefix is granted and the session's
+    // requested chain is rewritten to end at it, so the formatter resolves exactly the granted
+    // blocks. The caller must unpin once the transfer settles.
+    ReuseTreeGrant pinReuseTreeBlocks(RequestIdType requestId, bool allowPartialMatch)
     {
         std::unique_lock<std::mutex> lk(mMtxForMap);
         auto it = mRequestToSession.find(requestId);
-        auto const& lastBlockKey = it->second.getLastBlockKey();
+        TLLM_CHECK(it != mRequestToSession.end());
+        auto& session = it->second;
+        auto const& lastBlockKey = session.getLastBlockKey();
         auto* cacheManager = mCacheTransferLayer.getCacheManager();
         auto windowSize = cacheManager->getBlockManager().getWindowSizesMetadata().begin()->first;
         std::vector<kv_cache_manager::KVCacheBlock::IdType> pinnedIds;
-        auto lastBlock = cacheManager->findBlocksInReuseTreeByBlockKey(lastBlockKey, windowSize, pinnedIds);
-        if (lastBlock == nullptr)
+
+        // Partial grants rewrite the requested chain via BlockKey::shorten, which rejects keys
+        // carrying multimodal extra keys; those requests keep the all-or-nothing behaviour.
+        if (!allowPartialMatch || !lastBlockKey.extraKeys.empty())
         {
+            auto lastBlock = cacheManager->findBlocksInReuseTreeByBlockKey(lastBlockKey, windowSize, pinnedIds);
+            if (lastBlock == nullptr)
+            {
+                return {};
+            }
+            return {std::move(pinnedIds), session.getIndexFromEnd() + 1};
+        }
+
+        auto const tokensPerBlock = cacheManager->getBlockManager().getTokensPerBlock();
+        auto const requestedBlocks
+            = common::ceilDiv(static_cast<int32_t>(lastBlockKey.uniqueTokens.size()), tokensPerBlock);
+        auto const alreadyHeld = requestedBlocks - (session.getIndexFromEnd() + 1);
+        auto const matched
+            = cacheManager->matchTransferablePrefix(lastBlockKey, windowSize, /*pinBlocks=*/true, pinnedIds).numBlocks;
+        auto const granted = matched - alreadyHeld;
+        if (alreadyHeld < 0 || granted <= 0)
+        {
+            cacheManager->unpinBlocksById(pinnedIds);
             return {};
         }
-        return pinnedIds;
+        if (matched < requestedBlocks)
+        {
+            session.setLastBlockKey(lastBlockKey.shorten(matched * tokensPerBlock));
+        }
+        session.setIndexFromEnd(granted - 1);
+        return {std::move(pinnedIds), granted};
     }
 
     void response() noexcept
@@ -938,22 +995,39 @@ private:
                     if (count == 0)
                     {
                         mRemainSendCount.erase(countIt);
-                        auto pinnedIds = pinReuseTreeBlocks(reqId);
-                        if (pinnedIds.empty())
+                        auto const allowPartialMatch = requestInfo->allowPartialMatch();
+                        bool const partialOnAgent = allowPartialMatch
+                            && dynamic_cast<executor::kv_cache::AgentConnectionManager*>(mManager) != nullptr;
+                        if (partialOnAgent)
                         {
                             TLLM_LOG_ERROR(
-                                "Requested blocks do not exist in the source's reuse tree (request id: %lu). Notifying "
-                                "receiver.",
+                                "Partial-match transfers are not supported on the agent backend (request id: %lu). "
+                                "Notifying receiver.",
                                 reqId);
+                        }
+                        auto grant = partialOnAgent ? ReuseTreeGrant{} : pinReuseTreeBlocks(reqId, allowPartialMatch);
+                        if (grant.pinnedBlockIds.empty())
+                        {
+                            if (!partialOnAgent)
+                            {
+                                TLLM_LOG_ERROR(
+                                    "Requested blocks do not exist in the source's reuse tree (request id: %lu). "
+                                    "Notifying receiver.",
+                                    reqId);
+                            }
                             sendReadySignal(reqId, false);
                             discardTransferState(reqId);
                         }
                         else
                         {
                             sendReadySignal(reqId, true);
+                            if (allowPartialMatch)
+                            {
+                                sendGrantedBlocks(reqId, grant.grantedBlocks);
+                            }
                             std::promise<void> promise;
                             // Id-only response: the reuse-tree path has no LlmRequest.
-                            Response resp{reqId, std::move(promise), std::move(pinnedIds)};
+                            Response resp{reqId, std::move(promise), std::move(grant.pinnedBlockIds)};
                             if (dynamic_cast<executor::kv_cache::AgentConnectionManager*>(mManager) != nullptr)
                             {
                                 sendAndRemoveResponse(reqId, std::move(resp));
@@ -1258,6 +1332,8 @@ public:
         // The state's provenance marks llmRequest-agnostic transfers: only
         // getSerializedDataTransceiverState sets it; context responses leave it unset.
         requestInfo.setIsArbitraryTransfer(contextState.isArbitraryTransferState());
+        requestInfo.setAllowPartialMatch(
+            contextState.isArbitraryTransferState() && llmRequest.getKvCacheTransferAllowPartial());
 
         auto* agentConnectionManager = dynamic_cast<executor::kv_cache::AgentConnectionManager*>(mManager);
         std::vector<BufferIndexHolder> recvHolders;
@@ -1669,6 +1745,25 @@ private:
                 }
                 TLLM_THROW("KV cache receive request %zu received inconsistent ready signals from its context peers",
                     requestId);
+            }
+
+            if (llmRequest.getKvCacheTransferAllowPartial()
+                && llmRequest.getDataTransceiverState().isArbitraryTransferState())
+            {
+                phase = "granted-blocks";
+                auto const& connections = session->getConnections();
+                int32_t grantedBlocks{0};
+                for (size_t i = 0; i < connections.size(); i++)
+                {
+                    int32_t granted{0};
+                    connections.at(i)->recv(
+                        DataContext{TransceiverTag::kGRANTED_BLOCKS_TAG}, &granted, sizeof(granted));
+                    TLLM_CHECK_WITH_INFO(i == 0 || granted == grantedBlocks,
+                        "Counterparts granted different block counts (%d vs %d) for request %zu", grantedBlocks,
+                        granted, requestId);
+                    grantedBlocks = granted;
+                }
+                llmRequest.setKvCacheTransferGrantedBlocks(grantedBlocks);
             }
 
             phase = "transfer-completion-notification";

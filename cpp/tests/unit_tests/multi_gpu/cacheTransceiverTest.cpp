@@ -318,8 +318,12 @@ protected:
             sinkTokenLength, stream, maxAttentionWindow, maxAttentionWindow, enableBlockReuse, CacheType::kSELF,
             std::nullopt, nullptr, true);
         auto attentionLayerNumPerPP = std::vector<SizeType32>{numLayers};
-        mCacheState = std::make_unique<texec::kv_cache::CacheState>(
-            numLayers, numHeads, sizePerHead, tokensPerBlock, 1, 1, 1, attentionLayerNumPerPP, dataType);
+        // The receive path selects its block-range branch from the peer state's reuse flags, so
+        // the advertised CacheState must match the manager's configuration.
+        mCacheState = std::make_unique<texec::kv_cache::CacheState>(numLayers, numHeads, sizePerHead, tokensPerBlock,
+            1, 1, 1, attentionLayerNumPerPP, dataType, texec::kv_cache::CacheState::AttentionType::kDEFAULT,
+            /*kvFactor=*/2, /*enableAttentionDP=*/false, /*DPrank=*/0, /*DPsize=*/0,
+            /*enableBlockReuse=*/enableBlockReuse, /*enablePartialReuse=*/enableBlockReuse);
 
         if (tensorrt_llm::common::getEnvUseUCXKvCache())
         {
@@ -423,17 +427,24 @@ protected:
 
     // Generation-only request whose DataTransceiverState carries the arbitrary-transfer
     // provenance marker, as getSerializedDataTransceiverState would produce.
-    auto makeArbitraryLlmRequest(SizeType32 length, LlmRequest::RequestIdType arbitraryId)
+    auto makeArbitraryLlmRequest(VecTokens tokens, LlmRequest::RequestIdType arbitraryId, bool allowPartial = false)
     {
         constexpr SizeType32 maxNewTokens{1};
-        texec::Request request{VecTokens(length, length), maxNewTokens};
+        texec::Request request{std::move(tokens), maxNewTokens};
         auto state = std::make_unique<texec::DataTransceiverState>();
         state->setCommState(*mContextCommState);
         state->setCacheState(*mCacheState);
         state->setIsArbitraryTransferState(true);
         auto stats = texec::ContextPhaseParams({}, arbitraryId, state.release(), std::nullopt);
         request.setContextPhaseParams(std::move(stats));
-        return std::make_unique<LlmRequest>(arbitraryId, std::move(request));
+        auto llmRequest = std::make_unique<LlmRequest>(arbitraryId, std::move(request));
+        llmRequest->setKvCacheTransferAllowPartial(allowPartial);
+        return llmRequest;
+    }
+
+    auto makeArbitraryLlmRequest(SizeType32 length, LlmRequest::RequestIdType arbitraryId)
+    {
+        return makeArbitraryLlmRequest(VecTokens(length, length), arbitraryId);
     }
 
     void addRequestAndTransportCache(std::shared_ptr<LlmRequest> const& llmRequest)
@@ -601,6 +612,100 @@ TEST_F(SymmetricalCacheTest, ArbitraryTransferTest)
             {{{missRequest->mRequestId, missRequest->getNumTokens(beamIdx), beamWidth}}}, {std::ref(*missRequest)});
         auto missFuture = mRequester->receiveAsync(missRequest);
         EXPECT_THROW(missFuture.get(), tensorrt_llm::common::TllmException);
+    }
+    // The sender must not tear down while the receiver's transfers are in flight.
+    tensorrt_llm::mpi::MpiComm::world().barrier();
+}
+
+TEST_F(SymmetricalCacheTest, PartialArbitraryTransferTest)
+{
+    auto worldSize = setUpCommunicator();
+    if (worldSize != 2)
+    {
+        GTEST_SKIP() << "mpirun 2 processes is required to run this test.";
+    }
+    setUpCacheManager(/*enableBlockReuse=*/true);
+    setUpCacheTransceiver();
+
+    // The sender stores a 3-block chain (tokensPerBlock = 8); receivers ask for a 5-block chain
+    // extending it.
+    constexpr SizeType32 storedLen = 24;
+    constexpr SizeType32 extendedLen = 40;
+    constexpr SizeType32 storedBlocks = 3;
+    constexpr LlmRequest::RequestIdType arbitraryId = 5001;
+    auto constexpr beamIdx{0};
+    auto constexpr beamWidth{1};
+
+    if (isSender)
+    {
+        auto request = makeLlmRequest(storedLen);
+        mManager->addSequenceBatch(
+            {{{request->mRequestId, request->getNumTokens(beamIdx), beamWidth}}}, {std::ref(*request)});
+        auto blockRange = BlockRange::fromAllBlockIds(*mManager, request->mRequestId);
+        for (auto const& windowSize : blockRange.getWindowSizes())
+        {
+            auto blockRangeForWindow = blockRange.getBlockRangeForWindow(windowSize);
+            for (auto it = blockRangeForWindow.begin(); it != blockRangeForWindow.end(); ++it)
+            {
+                TLLM_CUDA_CHECK(cudaMemset(it->data(), request->getPromptLen(), it->getSizeInBytes()));
+            }
+        }
+        tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*request);
+        // A completed context request carries one generated token beyond the prompt;
+        // without it, storeBlocksForReuse drops the trailing prompt token and the
+        // final block never enters the reuse tree.
+        request->addNewToken(0, beamIdx);
+        mManager->removeSequence(request->mRequestId, request);
+    }
+    else
+    {
+        VecTokens extendedTokens(extendedLen, storedLen);
+        std::fill(extendedTokens.begin() + storedLen, extendedTokens.end(), storedLen + 1);
+
+        // Without partial matching, a request extending the stored chain is rejected outright.
+        std::shared_ptr<LlmRequest> strictRequest = makeArbitraryLlmRequest(extendedTokens, arbitraryId);
+        mManager->addSequenceBatch(
+            {{{strictRequest->mRequestId, strictRequest->getNumTokens(beamIdx), beamWidth}}},
+            {std::ref(*strictRequest)});
+        auto strictFuture = mRequester->receiveAsync(strictRequest);
+        EXPECT_THROW(strictFuture.get(), tensorrt_llm::common::TllmException);
+
+        // With partial matching, the stored prefix is granted, transferred, and reported.
+        std::shared_ptr<LlmRequest> request
+            = makeArbitraryLlmRequest(extendedTokens, arbitraryId + 1, /*allowPartial=*/true);
+        mManager->addSequenceBatch(
+            {{{request->mRequestId, request->getNumTokens(beamIdx), beamWidth}}}, {std::ref(*request)});
+        auto future = mRequester->receiveAsync(request);
+        future.get();
+        TLLM_CUDA_CHECK(cudaDeviceSynchronize());
+        EXPECT_EQ(request->getKvCacheTransferGrantedBlocks(), storedBlocks);
+        auto blockRange = BlockRange::fromAllBlockIds(*mManager, request->mRequestId);
+        for (auto const& windowSize : blockRange.getWindowSizes())
+        {
+            auto blockRangeForWindow = blockRange.getBlockRangeForWindow(windowSize);
+            SizeType32 blockIdx = 0;
+            for (auto it = blockRangeForWindow.begin(); it != blockRangeForWindow.end(); ++it, ++blockIdx)
+            {
+                if (blockIdx >= storedBlocks)
+                {
+                    break;
+                }
+                std::vector<uint8_t> bytes(it->getSizeInBytes());
+                TLLM_CUDA_CHECK(cudaMemcpy(bytes.data(), it->data(), it->getSizeInBytes(), cudaMemcpyDeviceToHost));
+                EXPECT_TRUE(
+                    std::all_of(bytes.begin(), bytes.end(), [](uint8_t i) { return i == (storedLen & 0xff); }));
+            }
+        }
+
+        // A chain sharing nothing with the stored one is rejected even with partial matching.
+        VecTokens unrelatedTokens(16, 999);
+        std::shared_ptr<LlmRequest> unrelatedRequest
+            = makeArbitraryLlmRequest(unrelatedTokens, arbitraryId + 2, /*allowPartial=*/true);
+        mManager->addSequenceBatch(
+            {{{unrelatedRequest->mRequestId, unrelatedRequest->getNumTokens(beamIdx), beamWidth}}},
+            {std::ref(*unrelatedRequest)});
+        auto unrelatedFuture = mRequester->receiveAsync(unrelatedRequest);
+        EXPECT_THROW(unrelatedFuture.get(), tensorrt_llm::common::TllmException);
     }
     // The sender must not tear down while the receiver's transfers are in flight.
     tensorrt_llm::mpi::MpiComm::world().barrier();

@@ -279,10 +279,23 @@ BlockRange getBlockRangeForReceiving(BaseKVCacheManager* cacheManager, LlmReques
         auto const reusedBlocks
             = std::min<SizeType32>(static_cast<SizeType32>((prepopulatedTokens / tokensPerBlock)), usedBlocks);
 
-        std::vector<SizeType32> newBlockIds;
-        if (reusedBlocks < usedBlocks)
+        // A partial-tolerant transfer receives only the prefix the sender granted. A grant outside
+        // what was requested means the peers disagree about the chain; fail the transfer rather
+        // than receive by a count that has already proven unreliable.
+        auto endBlocks = usedBlocks;
+        if (llmRequest.hasKvCacheTransferGrant())
         {
-            newBlockIds.assign(allBlockIds.begin() + reusedBlocks, allBlockIds.begin() + usedBlocks);
+            auto const grantedBlocks = llmRequest.getKvCacheTransferGrantedBlocks();
+            TLLM_CHECK_WITH_INFO(grantedBlocks >= 1 && reusedBlocks + grantedBlocks <= usedBlocks,
+                "Sender granted %d blocks but [%d, %d) were requested (request id: %lu)", grantedBlocks, reusedBlocks,
+                usedBlocks, llmRequest.mRequestId);
+            endBlocks = reusedBlocks + grantedBlocks;
+        }
+
+        std::vector<SizeType32> newBlockIds;
+        if (reusedBlocks < endBlocks)
+        {
+            newBlockIds.assign(allBlockIds.begin() + reusedBlocks, allBlockIds.begin() + endBlocks);
         }
         else
         {

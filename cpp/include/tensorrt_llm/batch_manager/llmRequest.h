@@ -1922,6 +1922,31 @@ public:
                 .count());
     }
 
+    void setKvCacheTransferAllowPartial(bool allowPartial)
+    {
+        mKvCacheTransferAllowPartial = allowPartial;
+    }
+
+    [[nodiscard]] bool getKvCacheTransferAllowPartial() const
+    {
+        return mKvCacheTransferAllowPartial;
+    }
+
+    void setKvCacheTransferGrantedBlocks(SizeType32 grantedBlocks)
+    {
+        mKvCacheTransferGrantedBlocks = grantedBlocks;
+    }
+
+    [[nodiscard]] SizeType32 getKvCacheTransferGrantedBlocks() const
+    {
+        return mKvCacheTransferGrantedBlocks;
+    }
+
+    [[nodiscard]] bool hasKvCacheTransferGrant() const
+    {
+        return mKvCacheTransferGrantedBlocks >= 0;
+    }
+
     void updateKvCacheSize(size_t targetBufferSize) const
     {
         mPerfMetrics.timingMetrics.kvCacheSize += targetBufferSize;
@@ -2259,6 +2284,11 @@ protected:
     // Performance metrics. Should be updatable even from a const LlmRequest reference.
     bool mReturnPerfMetrics{false};
     mutable executor::RequestPerfMetrics mPerfMetrics;
+
+    // Arbitrary KV cache transfer: opt in to receiving fewer leading blocks than requested, and
+    // the block count the sender granted (-1 until a partial-tolerant transfer reports one).
+    bool mKvCacheTransferAllowPartial{false};
+    SizeType32 mKvCacheTransferGrantedBlocks{-1};
 
     // Guided decoding params.
     std::optional<executor::GuidedDecodingParams> mGuidedDecodingParams{std::nullopt};

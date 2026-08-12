@@ -158,6 +158,16 @@ public:
         return mLastBlockKey;
     }
 
+    void setLastBlockKey(BlockKey lastBlockKey)
+    {
+        mLastBlockKey = std::move(lastBlockKey);
+    }
+
+    void setIndexFromEnd(int32_t indexFromEnd)
+    {
+        mIndexFromEnd = indexFromEnd;
+    }
+
     [[nodiscard]] std::vector<SizeType32> const& getCounterPartRanks() const
     {
         return mCounterPartRanks;
@@ -197,6 +207,7 @@ struct TransceiverTag
     static constexpr int32_t kINFO_SIZE_TAG{22};
     static constexpr int32_t kINFO_TAG{32};
     static constexpr int32_t kREADY_SIGNAL_TAG{42};
+    static constexpr int32_t kGRANTED_BLOCKS_TAG{44};
 };
 
 // Used to store the information that needs to be sent to the context executor to ensure the generation
@@ -246,6 +257,18 @@ public:
         mIsArbitraryTransfer = isArbitraryTransfer;
     }
 
+    /// @brief Serve the longest available prefix of the requested chain instead of rejecting the
+    /// request when part of it is missing. Only receivers that can compute the remainder may set it.
+    [[nodiscard]] bool allowPartialMatch() const noexcept
+    {
+        return mAllowPartialMatch;
+    }
+
+    void setAllowPartialMatch(bool allowPartialMatch) noexcept
+    {
+        mAllowPartialMatch = allowPartialMatch;
+    }
+
     /// @brief Serialization.
     /// @param requestInfo Request information to be serialized.
     /// @param os The output stream to which the serialization result points.
@@ -271,6 +294,9 @@ private:
 
     // True for arbitrary (llmRequest-agnostic) transfers served from the sender's reuse tree.
     bool mIsArbitraryTransfer{false};
+
+    // True when the sender may serve fewer blocks than requested rather than rejecting the request.
+    bool mAllowPartialMatch{false};
 
     // The state of the data transceiver.
     executor::DataTransceiverState mTransState;
