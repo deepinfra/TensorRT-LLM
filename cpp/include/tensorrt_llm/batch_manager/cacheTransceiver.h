@@ -227,6 +227,15 @@ struct RequestStatuses
     std::unordered_set<LlmRequest::RequestIdType> errorRequestIds;
 };
 
+struct PeerPullStatuses
+{
+    /// Pulls that completed on every rank, with the smallest block count any rank was granted.
+    /// Blocks beyond the minimum are recomputed by prefill.
+    std::unordered_map<LlmRequest::RequestIdType, SizeType32> completedRequestGrants;
+    /// Pulls that failed on at least one rank; the receiver falls back to local compute.
+    std::unordered_set<LlmRequest::RequestIdType> failedRequestIds;
+};
+
 class BaseCacheTransceiver
 {
 public:
@@ -254,6 +263,22 @@ public:
 
     /// Get the serialized DataTransceiverState (CacheState + CommState) for this transceiver.
     [[nodiscard]] virtual std::vector<char> getSerializedDataTransceiverState() const
+    {
+        return {};
+    }
+
+    /// Pull the longest available prefix of llmRequest's prompt from the peer named by its
+    /// DataTransceiverState, without treating it as a disaggregated generation request: no
+    /// request state is changed, and completion is reported via checkPeerPullStatus.
+    virtual void requestPeerKvAsync(std::shared_ptr<LlmRequest> llmRequest)
+    {
+        TLLM_THROW("requestPeerKvAsync is not supported by this cache transceiver");
+    }
+
+    /// Nonblocking poll of peer KV pulls. A request is reported only once every rank has
+    /// resolved its transfer: completed with the minimum granted block count across ranks when
+    /// all ranks succeeded, failed otherwise.
+    [[nodiscard]] virtual PeerPullStatuses checkPeerPullStatus()
     {
         return {};
     }
@@ -310,6 +335,10 @@ public:
 
     [[nodiscard]] std::vector<char> getSerializedDataTransceiverState() const override;
 
+    void requestPeerKvAsync(std::shared_ptr<LlmRequest> llmRequest) override;
+
+    [[nodiscard]] PeerPullStatuses checkPeerPullStatus() override;
+
     [[nodiscard]] bool hasPoisonedTransferBuffer() const override;
     /// Return a human-readable dump of transceiver state for debugging hangs.
     std::string getStatusDump() const;
@@ -360,6 +389,10 @@ private:
     // request while a C++ status check still dereferences it.
     std::vector<std::pair<std::shared_ptr<LlmRequest>, std::future<void>>> mSenderFutures;
     std::vector<std::pair<std::shared_ptr<LlmRequest>, std::future<void>>> mRequesterFutures;
+    std::vector<std::pair<std::shared_ptr<LlmRequest>, std::future<void>>> mPeerPullFutures;
+    // Locally resolved pulls awaiting cross-rank consensus: request id -> (request, succeeded).
+    std::unordered_map<LlmRequest::RequestIdType, std::pair<std::shared_ptr<LlmRequest>, bool>>
+        mPeerPullsAwaitingConsensus;
     // Dedup timeout logs separately from accepted cancellation requests so a
     // backend that initially declines cancellation is retried on later polls.
     std::unordered_set<LlmRequest::RequestIdType> mTimedOutSenderIds;

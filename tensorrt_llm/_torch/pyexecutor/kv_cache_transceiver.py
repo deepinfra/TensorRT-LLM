@@ -261,6 +261,16 @@ class KvCacheTransceiver(ABC):
         """Get the serialized DataTransceiverState (CacheState + CommState)."""
         return b""
 
+    def request_peer_kv_async(self, req: LlmRequest):
+        """Start pulling the longest available prompt prefix from the peer named by the
+        request's DataTransceiverState. The request's state is left untouched."""
+        raise NotImplementedError
+
+    def check_peer_pull_status(self) -> tuple[dict[int, int], list[int]]:
+        """Nonblocking poll of peer KV pulls, reported only once resolved on every rank:
+        ({request_id: granted_blocks}, [failed request_ids])."""
+        return {}, []
+
     def get_status_dump(self) -> str:
         """Return a human-readable dump of transceiver state for debugging hangs."""
         return ""
@@ -382,6 +392,12 @@ class BindKvCacheTransceiver(KvCacheTransceiver):
 
     def get_data_transceiver_state(self) -> bytes:
         return self.impl.get_serialized_data_transceiver_state()
+
+    def request_peer_kv_async(self, req: LlmRequest):
+        return self.impl.request_peer_kv_async(req)
+
+    def check_peer_pull_status(self) -> tuple[dict[int, int], list[int]]:
+        return self.impl.check_peer_pull_status()
 
     def get_disaggregated_params(self):
         # Cpp kv cache transceiver will set the disaggregated params to context response

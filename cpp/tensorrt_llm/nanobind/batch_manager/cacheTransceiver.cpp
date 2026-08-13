@@ -120,6 +120,25 @@ void tb::CacheTransceiverBindings::initBindings(nb::module_& m)
             nb::call_guard<nb::gil_scoped_release>())
         .def("check_gen_transfer_complete", &BaseCacheTransceiver::checkGenTransferComplete)
         .def("cancel_request", &BaseCacheTransceiver::cancelRequest)
+        .def("request_peer_kv_async", &BaseCacheTransceiver::requestPeerKvAsync)
+        .def("check_peer_pull_status",
+            [](tb::BaseCacheTransceiver& self)
+            {
+                PeerPullStatuses result;
+                {
+                    nb::gil_scoped_release release;
+                    result = self.checkPeerPullStatus();
+                }
+
+                nb::dict completedRequestGrants;
+                for (auto const& [requestId, grantedBlocks] : result.completedRequestGrants)
+                {
+                    completedRequestGrants[nb::int_(requestId)] = nb::int_(grantedBlocks);
+                }
+                auto failedRequestIds
+                    = std::vector<int64_t>(result.failedRequestIds.begin(), result.failedRequestIds.end());
+                return nb::make_tuple(completedRequestGrants, failedRequestIds);
+            })
         .def("has_poisoned_transfer_buffer", &BaseCacheTransceiver::hasPoisonedTransferBuffer);
 
     nb::enum_<executor::kv_cache::CacheState::AttentionType>(m, "AttentionType")

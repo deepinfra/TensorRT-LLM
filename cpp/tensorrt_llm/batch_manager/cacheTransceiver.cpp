@@ -959,6 +959,28 @@ void CacheTransceiver::requestAndReceiveAsync(std::shared_ptr<LlmRequest> llmReq
     publishStatusSnapshot();
 }
 
+void CacheTransceiver::requestPeerKvAsync(std::shared_ptr<LlmRequest> llmRequest)
+{
+    TLLM_CHECK(llmRequest);
+    TLLM_CHECK_WITH_INFO(llmRequest->getContextPhaseParams().has_value()
+            && llmRequest->getDataTransceiverState().isArbitraryTransferState(),
+        "Peer KV pull requires a DataTransceiverState exported by the source instance");
+
+    auto const requestId = llmRequest->mRequestId;
+    if (std::find_if(mPeerPullFutures.begin(), mPeerPullFutures.end(),
+            [requestId](auto const& pair) { return pair.first->mRequestId == requestId; })
+            != mPeerPullFutures.end()
+        || mPeerPullsAwaitingConsensus.find(requestId) != mPeerPullsAwaitingConsensus.end())
+    {
+        TLLM_LOG_WARNING("Request ID %zu already has a peer KV pull in flight.", requestId);
+        return;
+    }
+
+    llmRequest->setKvCacheTransferStart(LlmRequest::getSteadyClockNow());
+    auto future = mCacheReceiver->receiveAsync(llmRequest);
+    mPeerPullFutures.emplace_back(std::move(llmRequest), std::move(future));
+}
+
 std::vector<LlmRequest::RequestIdType> gatherRequestIds(
     std::shared_ptr<CacheTransceiverComm> const& mComm, std::vector<LlmRequest::RequestIdType> const& requestIds)
 {
@@ -1378,6 +1400,103 @@ RequestStatuses CacheTransceiver::checkContextTransferStatus(
 
     publishStatusSnapshot();
     return requestsStatus;
+}
+
+PeerPullStatuses CacheTransceiver::checkPeerPullStatus()
+{
+    PeerPullStatuses statuses;
+    // Pull membership is identical on every rank (all ranks issue pulls for the same requests),
+    // so an empty poll is a rank-consistent fact and skipping the gather below is safe.
+    if (mPeerPullFutures.empty() && mPeerPullsAwaitingConsensus.empty())
+    {
+        return statuses;
+    }
+
+    // Step 1: collect locally finished transfers. A future can be read only once, while the
+    // request may become reportable only on a later poll (other ranks finish at their own pace),
+    // so outcomes wait in mPeerPullsAwaitingConsensus in between. A failed transfer surfaces as
+    // an exception on the future; one that completed without recording a grant would resume the
+    // request with an unknown amount of KV, so it counts as failed too.
+    for (auto it = mPeerPullFutures.begin(); it != mPeerPullFutures.end();)
+    {
+        auto& [request, future] = *it;
+        if (future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+        {
+            ++it;
+            continue;
+        }
+        bool succeeded{false};
+        try
+        {
+            future.get();
+            succeeded = request->hasKvCacheTransferGrant();
+        }
+        catch (std::exception const& err)
+        {
+            TLLM_LOG_INFO("Peer KV pull for request %lu failed; falling back to local compute: %s",
+                request->mRequestId, err.what());
+        }
+        request->setKvCacheTransferEnd(LlmRequest::getSteadyClockNow());
+        mPeerPullsAwaitingConsensus.emplace(request->mRequestId, std::make_pair(std::move(request), succeeded));
+        it = mPeerPullFutures.erase(it);
+    }
+
+    // Step 2: share local outcomes across ranks as flat (id, succeeded, granted) triples, riding
+    // the same u64 all-gather the disagg status checks use.
+    std::vector<LlmRequest::RequestIdType> localTriples;
+    localTriples.reserve(mPeerPullsAwaitingConsensus.size() * 3);
+    for (auto const& [requestId, entry] : mPeerPullsAwaitingConsensus)
+    {
+        auto const& [request, succeeded] = entry;
+        localTriples.push_back(requestId);
+        localTriples.push_back(succeeded ? 1 : 0);
+        localTriples.push_back(
+            succeeded ? static_cast<LlmRequest::RequestIdType>(request->getKvCacheTransferGrantedBlocks()) : 0);
+    }
+
+    auto syncComm = mCacheState->getParallelConfig().mEnableAttentionDP ? mGroupDataComm : mGroupComm;
+    bool const needsConsensus = syncComm && syncComm->getSize() > 1;
+    auto const allTriples = needsConsensus ? gatherRequestIds(syncComm, localTriples) : localTriples;
+    int const requiredRanks = needsConsensus ? syncComm->getSize() : 1;
+
+    // Step 3: report a request only once every rank has resolved it - ranks execute the forward
+    // pass in lockstep, so resuming a request on different iterations would desynchronize them.
+    // Success requires success on every rank, and the usable prefix is the smallest grant any
+    // rank received; blocks beyond it are recomputed by prefill, wasteful but never wrong.
+    struct Tally
+    {
+        int ranks{0};
+        bool allSucceeded{true};
+        SizeType32 minGranted{std::numeric_limits<SizeType32>::max()};
+    };
+    std::unordered_map<LlmRequest::RequestIdType, Tally> tallies;
+    TLLM_CHECK(allTriples.size() % 3 == 0);
+    for (size_t i = 0; i < allTriples.size(); i += 3)
+    {
+        auto& tally = tallies[allTriples[i]];
+        tally.ranks++;
+        tally.allSucceeded = tally.allSucceeded && allTriples[i + 1] != 0;
+        tally.minGranted = std::min(tally.minGranted, static_cast<SizeType32>(allTriples[i + 2]));
+    }
+
+    for (auto const& [requestId, tally] : tallies)
+    {
+        auto it = mPeerPullsAwaitingConsensus.find(requestId);
+        if (tally.ranks != requiredRanks || it == mPeerPullsAwaitingConsensus.end())
+        {
+            continue;
+        }
+        if (tally.allSucceeded)
+        {
+            statuses.completedRequestGrants.emplace(requestId, tally.minGranted);
+        }
+        else
+        {
+            statuses.failedRequestIds.insert(requestId);
+        }
+        mPeerPullsAwaitingConsensus.erase(it);
+    }
+    return statuses;
 }
 
 void CacheTransceiver::checkGenTransferStatus(std::optional<int> const& atLeastRequestNum)
