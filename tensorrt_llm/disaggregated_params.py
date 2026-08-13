@@ -54,6 +54,9 @@ class DisaggregatedParams:
     # carried through so worker-side consumers (e.g. the ADP router) can see
     # the same id the disagg orchestrator routed on.
     conversation_id: Optional[str] = None
+    # Peer KV pull: DataTransceiverState exported by the source instance whose reuse tree holds
+    # this prompt's prefix. Unlike opaque_state, valid on a normal aggregated request.
+    kv_pull_state: Optional[bytes] = None
 
     # E-P Disaggregated Params
     multimodal_embedding_handles: Optional[List[Dict[str, Any]]] = (
@@ -80,6 +83,9 @@ class DisaggregatedParams:
             self.ctx_dp_rank,
             self.ctx_info_endpoint,
         )
+
+    def get_kv_pull_context_phase_params(self, request_id: int) -> tllme.ContextPhaseParams:
+        return tllme.ContextPhaseParams([], request_id, self.kv_pull_state, None, None, None)
 
     def get_request_type(self) -> tllme.RequestType:
         if self.request_type == "context_only":

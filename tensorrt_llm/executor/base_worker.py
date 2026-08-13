@@ -417,6 +417,11 @@ class BaseWorker(GenerationExecutor):
             if request_type == tllm.RequestType.REQUEST_TYPE_GENERATION_ONLY:
                 context_phase_params = request.disaggregated_params.get_context_phase_params(
                 )
+            elif (request_type
+                  == tllm.RequestType.REQUEST_TYPE_CONTEXT_AND_GENERATION
+                  and request.disaggregated_params.kv_pull_state is not None):
+                context_phase_params = request.disaggregated_params.get_kv_pull_context_phase_params(
+                    request.id)
 
         assert request.id is not None
 

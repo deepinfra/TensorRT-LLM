@@ -792,6 +792,11 @@ class PyExecutor:
         # Set of request IDs that are currently in flight across all micro batches.
         # The scheduler will avoid scheduling requests that are already in flight.
         self.inflight_req_ids = ReqIdsSet()
+        # Peer KV pulls in flight, by request id. Parked in inflight_req_ids while the
+        # transfer runs; membership is identical on every rank.
+        self._peer_pull_inflight = {}
+        self._peer_pull_max_inflight = int(
+            os.environ.get("TRTLLM_PEER_PULL_MAX_INFLIGHT", "16"))
 
         # Encoder-decoder models execute the encoder and decoder in separate
         # iterations in both executor loops. PP usage is very rare for these
@@ -2590,6 +2595,8 @@ class PyExecutor:
                 if self.kv_cache_transceiver:
                     self._check_disagg_ctx_schedulable_status(new_requests)
                     self._check_disagg_gen_transfer_status()
+                    self._handle_peer_pull_requests(new_requests)
+                    self._check_peer_pull_status()
 
                 if self.enable_iter_perf_stats:
                     iter_stats = self._get_init_iter_stats(
@@ -3660,6 +3667,8 @@ class PyExecutor:
             self._check_disagg_ctx_schedulable_status(new_requests)
             self._check_disagg_gen_transfer_status()
             self._check_kv_transfer_timeout()
+            self._handle_peer_pull_requests(new_requests)
+            self._check_peer_pull_status()
 
         iter_stats = None
         if self.enable_iter_perf_stats:
@@ -6290,6 +6299,68 @@ class PyExecutor:
 
             # Trigger KV cache exchange for new disagg_gen_init_requests
             self._recv_disagg_gen_cache(fitting_disagg_gen_init_requests)
+
+    @nvtx_range("_handle_peer_pull_requests")
+    def _handle_peer_pull_requests(self, new_requests):
+        """Park new requests carrying a peer KV pull spec and start their transfers.
+
+        A CONTEXT_INIT request with context phase params is a pull spec by construction:
+        classic disaggregated requests never combine the two. Parking is by request id in
+        inflight_req_ids, so the request stays an ordinary context request throughout.
+        """
+        pull_requests = []
+        for req in new_requests:
+            if (req.state != LlmRequestState.CONTEXT_INIT
+                    or req.context_phase_params is None):
+                continue
+            if (req.py_beam_width > 1 or self.kv_connector_manager is not None
+                    or getattr(self.model_engine, "enable_spec_decode", False)
+                    or getattr(req, "py_multimodal_data", None)
+                    or len(self._peer_pull_inflight)
+                    >= self._peer_pull_max_inflight):
+                logger.debug(
+                    f"Peer KV pull skipped for request {req.py_request_id}; "
+                    "prefilling locally.")
+                continue
+            pull_requests.append(req)
+
+        if not pull_requests:
+            return
+
+        # Allocate the destination blocks before asking: the receive path derives its block
+        # ranges from the request's own block table, and the local reuse hit it discovers here
+        # is what the transfer subtracts.
+        peer_pull_to_prepare = ScheduledRequests()
+        peer_pull_to_prepare.context_requests_last_chunk = pull_requests
+        self.resource_manager.resource_managers[
+            ResourceManagerType.KV_CACHE_MANAGER].prepare_resources(
+                peer_pull_to_prepare)
+        for req in pull_requests:
+            req.py_peer_pull_allocated = True
+            self.inflight_req_ids.insert(req.py_request_id)
+            self._peer_pull_inflight[req.py_request_id] = req
+            self.kv_cache_transceiver.request_peer_kv_async(req)
+
+    @nvtx_range("_check_peer_pull_status")
+    def _check_peer_pull_status(self):
+        """Resume requests whose peer KV pull resolved on every rank.
+
+        Completed pulls already carry the advanced prepopulated length; failed pulls resume
+        unchanged and prefill locally. Either way resuming is just unparking the id.
+        """
+        if not self._peer_pull_inflight:
+            return
+        completed, failed = self.kv_cache_transceiver.check_peer_pull_status()
+        for req_id, granted_blocks in completed.items():
+            if self._peer_pull_inflight.pop(req_id, None) is None:
+                continue
+            self.inflight_req_ids.erase(req_id)
+            logger.debug(f"Peer KV pull for request {req_id} granted "
+                         f"{granted_blocks} blocks.")
+        for req_id in failed:
+            if self._peer_pull_inflight.pop(req_id, None) is None:
+                continue
+            self.inflight_req_ids.erase(req_id)
 
     @nvtx_range("_prepare_disagg_gen_transmission_complete")
     def _prepare_disagg_gen_transmission_complete(self, scheduled_batch):

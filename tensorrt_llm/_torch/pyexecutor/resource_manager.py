@@ -805,6 +805,8 @@ class KVCacheManager(BaseResourceManager):
         if not req.is_first_context_chunk or not self._kv_connector_should_add_sequence(
                 req):
             return None
+        if getattr(req, "py_peer_pull_allocated", False):
+            return None
         return req.prompt_len
 
     def prepare_resources(self, scheduled_batch: ScheduledRequests):

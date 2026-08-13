@@ -204,6 +204,7 @@ class DisaggregatedParams(OpenAIBaseModel):
     ctx_info_endpoint: Optional[str] = None
     schedule_style: Optional[DisaggScheduleStyle] = None
     conversation_id: Optional[str] = None
+    encoded_kv_pull_state: Optional[str] = None
     ctx_usage: Optional[UsageInfo] = None
     # TODO(TRTLLM-12407): Multimodal E/PD over trtllm-serve needs these protocol fields too:
     # encoder embedding handles, multimodal hashes, and optional mRoPE handles.
@@ -1530,6 +1531,7 @@ def to_disaggregated_params(
         schedule_style=tllm_disagg_params.schedule_style,
         ctx_usage=ctx_usage,
         conversation_id=tllm_disagg_params.conversation_id,
+        encoded_kv_pull_state=encode_opaque_state(tllm_disagg_params.kv_pull_state),
     )
 
 
@@ -1555,6 +1557,7 @@ def to_llm_disaggregated_params(
         schedule_style=disaggregated_params.schedule_style,
         ctx_usage=None if ctx_usage is None else ctx_usage.model_dump(),
         conversation_id=disaggregated_params.conversation_id,
+        kv_pull_state=decode_opaque_state(disaggregated_params.encoded_kv_pull_state),
     )
 
 

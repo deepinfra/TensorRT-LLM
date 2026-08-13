@@ -977,6 +977,7 @@ void CacheTransceiver::requestPeerKvAsync(std::shared_ptr<LlmRequest> llmRequest
     }
 
     llmRequest->setKvCacheTransferStart(LlmRequest::getSteadyClockNow());
+    llmRequest->setKvCacheTransferAllowPartial(true);
     auto future = mCacheReceiver->receiveAsync(llmRequest);
     mPeerPullFutures.emplace_back(std::move(llmRequest), std::move(future));
 }
@@ -1437,7 +1438,9 @@ PeerPullStatuses CacheTransceiver::checkPeerPullStatus()
                 request->mRequestId, err.what());
         }
         request->setKvCacheTransferEnd(LlmRequest::getSteadyClockNow());
-        mPeerPullsAwaitingConsensus.emplace(request->mRequestId, std::make_pair(std::move(request), succeeded));
+        // Read before std::move(request): argument evaluations are indeterminately sequenced.
+        auto const resolvedRequestId = request->mRequestId;
+        mPeerPullsAwaitingConsensus.emplace(resolvedRequestId, std::make_pair(std::move(request), succeeded));
         it = mPeerPullFutures.erase(it);
     }
 
@@ -1454,8 +1457,14 @@ PeerPullStatuses CacheTransceiver::checkPeerPullStatus()
             succeeded ? static_cast<LlmRequest::RequestIdType>(request->getKvCacheTransferGrantedBlocks()) : 0);
     }
 
-    auto syncComm = mCacheState->getParallelConfig().mEnableAttentionDP ? mGroupDataComm : mGroupComm;
-    bool const needsConsensus = syncComm && syncComm->getSize() > 1;
+    // On a single-rank instance the group comms may be unconstructed (RPC orchestrator
+    // workers); decide from the parallel config before touching them.
+    auto const& parallelConfig = mCacheState->getParallelConfig();
+    bool const singleRank = parallelConfig.mTensorParallelism * parallelConfig.mPipelineParallelism
+            * parallelConfig.mContextParallelism
+        == 1;
+    auto syncComm = parallelConfig.mEnableAttentionDP ? mGroupDataComm : mGroupComm;
+    bool const needsConsensus = !singleRank && syncComm && syncComm->getSize() > 1;
     auto const allTriples = needsConsensus ? gatherRequestIds(syncComm, localTriples) : localTriples;
     int const requiredRanks = needsConsensus ? syncComm->getSize() : 1;
 
@@ -1488,6 +1497,14 @@ PeerPullStatuses CacheTransceiver::checkPeerPullStatus()
         }
         if (tally.allSucceeded)
         {
+            // Advance the prefill start past the pulled blocks, mirroring the receive-side start
+            // block; capped so the engine still prefills at least one token.
+            auto const& request = it->second.first;
+            auto const tokensPerBlock = mCacheState->getModelConfig().mTokensPerBlock;
+            auto const reusedBlocks = request->getPrepopulatedPromptLen() / tokensPerBlock;
+            auto const newPrepopulatedLen = std::min(
+                (reusedBlocks + tally.minGranted) * tokensPerBlock, request->getPromptLen() - 1);
+            request->setPrepopulatedPromptLen(newPrepopulatedLen, tokensPerBlock);
             statuses.completedRequestGrants.emplace(requestId, tally.minGranted);
         }
         else
