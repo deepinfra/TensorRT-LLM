@@ -1399,6 +1399,12 @@ SizeType32 WindowBlockManager::loadOrAllocateBlocks(std::vector<BlockKey> const&
                 TLLM_LOG_DEBUG("%s::loadOrAllocateBlocks - Matched full block %d", mLogPrefix.c_str(), matchingBlockId);
                 searchRoot = matchingBlock;
             }
+            if (auto const diskRetentionMs = sequence.getDiskRetentionMs())
+            {
+                // Reused blocks bypass getFreeBlock, so re-stamp the disk-retention TTL here;
+                // markRetained max-merges, keeping the later deadline.
+                matchingBlock->markRetained(std::chrono::steady_clock::now().time_since_epoch() + *diskRetentionMs);
+            }
             onboardBlock(sequence, matchingBlock, mode, directory);
             addBlockToAllBeams(matchingBlock, sequence);
             // TODO: only add once for reused blocks
