@@ -1674,6 +1674,16 @@ class KvCacheConfig(StrictBaseModel, PybindMirror):
     )
     onboard_blocks: bool = Field(
         default=True, description="Controls if blocks are onboarded.")
+    disk_cache_size: Optional[int] = Field(
+        default=None,
+        description=
+        "Size of the disk KV cache in bytes (per rank). Enables the disk cache tier when positive."
+    )
+    disk_cache_path: Optional[str] = Field(
+        default=None,
+        description=
+        "Directory for disk KV cache files. Required when `disk_cache_size` is positive."
+    )
     disk_cache_retained_only: bool = Field(
         default=False,
         description=
