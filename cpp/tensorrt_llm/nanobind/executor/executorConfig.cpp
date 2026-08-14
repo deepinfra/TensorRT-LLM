@@ -112,11 +112,12 @@ void initConfigBindings(nb::module_& m)
             self.getSinkTokenLength(), self.getFreeGpuMemoryFraction(), self.getHostCacheSize(),
             self.getOnboardBlocks(), self.getCrossKvCacheFraction(), self.getSecondaryOffloadMinPriority(),
             self.getEventBufferMaxSize(), self.getEnablePartialReuse(), self.getCopyOnPartialReuse(), self.getUseUvm(),
-            self.getAttentionDpEventsGatherPeriodMs(), self.getMaxGpuTotalBytes());
+            self.getAttentionDpEventsGatherPeriodMs(), self.getMaxGpuTotalBytes(),
+            self.getDiskCacheSize(), self.getDiskCachePath());
     };
     auto kvCacheConfigSetstate = [](tle::KvCacheConfig& self, nb::tuple const& state)
     {
-        if (state.size() != 15)
+        if (state.size() != 17)
         {
             throw std::runtime_error("Invalid state!");
         }
@@ -127,6 +128,8 @@ void initConfigBindings(nb::module_& m)
             nb::cast<std::optional<tle::RetentionPriority>>(state[8]), nb::cast<size_t>(state[9]),
             nb::cast<bool>(state[10]), nb::cast<bool>(state[11]), nb::cast<bool>(state[12]),
             nb::cast<SizeType32>(state[13]), std::nullopt, nb::cast<uint64_t>(state[14]));
+        self.setDiskCacheSize(nb::cast<std::optional<size_t>>(state[15]));
+        self.setDiskCachePath(nb::cast<std::string>(state[16]));
     };
     nb::class_<tle::KvCacheConfig>(m, "KvCacheConfig")
         .def(nb::init<bool, std::optional<SizeType32> const&, std::optional<std::vector<SizeType32>> const&,
@@ -152,6 +155,10 @@ void initConfigBindings(nb::module_& m)
             &tle::KvCacheConfig::setFreeGpuMemoryFraction)
         .def_prop_rw("host_cache_size", &tle::KvCacheConfig::getHostCacheSize, &tle::KvCacheConfig::setHostCacheSize)
         .def_prop_rw("onboard_blocks", &tle::KvCacheConfig::getOnboardBlocks, &tle::KvCacheConfig::setOnboardBlocks)
+        .def_prop_rw(
+            "disk_cache_size", &tle::KvCacheConfig::getDiskCacheSize, &tle::KvCacheConfig::setDiskCacheSize)
+        .def_prop_rw(
+            "disk_cache_path", &tle::KvCacheConfig::getDiskCachePath, &tle::KvCacheConfig::setDiskCachePath)
         .def_prop_rw("cross_kv_cache_fraction", &tle::KvCacheConfig::getCrossKvCacheFraction,
             &tle::KvCacheConfig::setCrossKvCacheFraction)
         .def_prop_rw("secondary_offload_min_priority", &tle::KvCacheConfig::getSecondaryOffloadMinPriority,

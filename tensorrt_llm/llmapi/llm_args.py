@@ -1727,7 +1727,7 @@ class KvCacheConfig(StrictBaseModel, PybindMirror):
                                   description="The number of tokens per block.")
 
     def _to_pybind(self):
-        return _KvCacheConfig(
+        config = _KvCacheConfig(
             enable_block_reuse=self.enable_block_reuse,
             max_tokens=self.max_tokens,
             max_attention_window=self.max_attention_window,
@@ -1744,6 +1744,10 @@ class KvCacheConfig(StrictBaseModel, PybindMirror):
             attention_dp_events_gather_period_ms=self.
             attention_dp_events_gather_period_ms,
             max_gpu_total_bytes=self.max_gpu_total_bytes)
+        if self.disk_cache_size:
+            config.disk_cache_size = self.disk_cache_size
+            config.disk_cache_path = self.disk_cache_path or ""
+        return config
 
     @field_validator('free_gpu_memory_fraction')
     @classmethod

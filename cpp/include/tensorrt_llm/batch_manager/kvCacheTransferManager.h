@@ -55,6 +55,14 @@ public:
     //! \brief Synchronize bufferManager stream with internal streams. This method ensures that prefill and decode
     //! kernels for next step will wait for offloading and onboarding work that has already been scheduled. This method
     //! must be called after last call to KVCacheManager::addSequence in every step.
+    //! \brief Disk tier: write a host-resident block's bytes to its slot files (synchronous POSIX).
+    void spillToFile(BlockPtr const& srcHostBlock, SizeType32 diskSlot,
+        std::vector<KVCacheBlockPool> const& pools, std::string const& directory);
+
+    //! \brief Disk tier: read slot files into a GPU-resident block (synchronous POSIX).
+    void loadFromFile(BlockPtr const& dstPrimaryBlock, SizeType32 diskSlot,
+        std::vector<KVCacheBlockPool> const& pools, std::string const& directory);
+
     void syncTransfers();
 
 private:
