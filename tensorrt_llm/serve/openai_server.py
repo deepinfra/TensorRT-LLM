@@ -917,7 +917,7 @@ class OpenAIServer:
             _kv_retention = None
             _ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
             if _ttl_s:
-                _kv_retention = _KvRetention([])
+                _kv_retention = _KvRetention([], directory="")
                 _kv_retention.disk_retention_ms = _dt.timedelta(seconds=_ttl_s)
             promise = self.llm.generate_async(
                 inputs=prompt,
@@ -1297,7 +1297,7 @@ class OpenAIServer:
             _kv_retention = None
             _ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
             if _ttl_s:
-                _kv_retention = _KvRetention([])
+                _kv_retention = _KvRetention([], directory="")
                 _kv_retention.disk_retention_ms = _dt.timedelta(seconds=_ttl_s)
             promise = self.llm.generate_async(
                 inputs=harmony_tokens,
