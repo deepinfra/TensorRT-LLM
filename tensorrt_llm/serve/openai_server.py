@@ -1300,7 +1300,6 @@ class OpenAIServer:
                 _kv_retention = _KvRetention([])
                 _kv_retention.disk_retention_ms = _dt.timedelta(seconds=_ttl_s)
             promise = self.llm.generate_async(
-                kv_cache_retention_config=_kv_retention,
                 inputs=harmony_tokens,
                 kv_cache_retention_config=_kv_retention,
                 sampling_params=sampling_params,
