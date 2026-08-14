@@ -686,8 +686,8 @@ std::unique_ptr<kv_cache_manager::KVCacheManager> TrtGptModelInflightBatching::c
     auto const sizePerHead = mModelConfig.getSizePerHead();
 
     auto kvCacheManager = std::make_unique<KVCacheManager>(numKvHeadsPerLayer, sizePerHead, tokensPerBlock,
-        blocksPerWindow, /*blocksInDiskPool=*/0, /*diskCachePath=*/std::string{}, getMaxNumSequences(),
-        getMaxBeamWidth(), maxAttentionWindowVec, tempAttentionWindowInputs,
+        blocksPerWindow, /*blocksInDiskPool=*/0, /*diskCachePath=*/std::string{}, /*diskRetainedOnly=*/false,
+        getMaxNumSequences(), getMaxBeamWidth(), maxAttentionWindowVec, tempAttentionWindowInputs,
         kvDtype, getSinkTokenLen(), mRuntime->getStreamPtr(),
         kvCacheType == KvCacheType::kCROSS ? mModelConfig.getMaxEncoderLen() : getMaxSequenceLen(), enableBlockReuse,
         kvCacheConfig.getOnboardBlocks(), kvCacheType, kvCacheConfig.getSecondaryOffloadMinPriority(),

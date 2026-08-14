@@ -48,6 +48,8 @@ from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
 from tensorrt_llm.llmapi.llm import RequestOutput
 from tensorrt_llm.logger import logger
 from tensorrt_llm.metrics.collector import MetricsCollector
+from tensorrt_llm.llmapi.llm_utils import KvCacheRetentionConfig as _KvRetention
+import datetime as _dt
 from tensorrt_llm.serve.chat_utils import (load_chat_template,
                                            parse_chat_messages_coroutines)
 from tensorrt_llm.serve.cluster_storage import create_cluster_storage_client
@@ -912,8 +914,14 @@ class OpenAIServer:
 
             trace_headers = (None if raw_request is None else tracing.extract_trace_headers(raw_request.headers))
 
+            _kv_retention = None
+            _ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
+            if _ttl_s:
+                _kv_retention = _KvRetention([])
+                _kv_retention.disk_retention_ms = _dt.timedelta(seconds=_ttl_s)
             promise = self.llm.generate_async(
                 inputs=prompt,
+                kv_cache_retention_config=_kv_retention,
                 sampling_params=sampling_params,
                 _postproc_params=postproc_params if self.postproc_worker_enabled else None,
                 streaming=request.stream,
@@ -1286,8 +1294,15 @@ class OpenAIServer:
             )
 
             # Generate
+            _kv_retention = None
+            _ttl_s = getattr(request, "kv_cache_ttl_seconds", None)
+            if _ttl_s:
+                _kv_retention = _KvRetention([])
+                _kv_retention.disk_retention_ms = _dt.timedelta(seconds=_ttl_s)
             promise = self.llm.generate_async(
+                kv_cache_retention_config=_kv_retention,
                 inputs=harmony_tokens,
+                kv_cache_retention_config=_kv_retention,
                 sampling_params=sampling_params,
                 _postproc_params=postproc_params if self.postproc_worker_enabled else None,
                 streaming=bool(request.stream),
