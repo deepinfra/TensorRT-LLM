@@ -41,7 +41,8 @@ except Exception:
     pass
 PY
 )
-      if [ -n "$DIR" ]; then ARGS+=("--extra_llm_api_options=$OUT"); else ARGS+=("$a"); fi
+      # rc1 serve does json.loads() on the value (JSON string), not a file path -> pass the rewritten JSON inline
+      if [ -n "$DIR" ]; then ARGS+=("--extra_llm_api_options=$(cat "$OUT")"); else ARGS+=("$a"); fi
       ;;
     *) ARGS+=("$a") ;;
   esac
