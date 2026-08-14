@@ -1088,8 +1088,12 @@ BlockPtr WindowBlockManager::getFreeBlock(GenerationRequest& sequence, executor:
     if (!block->getUniqueTokens().empty() && canOffload && mEvictionPolicy->getNumFreeBlocks(kSecondaryLevel) > 0
         && mOnboardBlocks)
     {
-        // Offload block in primary memory before repurposing
-        auto offloadBlock = std::get<0>(mEvictionPolicy->getFreeBlock(kSecondaryLevel));
+        // Offload block in primary memory before repurposing. reclaimSecondaryBlock spills the
+        // reclaimed host block to the disk tier (host->disk) instead of discarding it.
+        auto offloadBlock = reclaimSecondaryBlock();
+        // Claim both blocks BEFORE the swap so getCacheLevel() sees the correct pre-swap level (#11879).
+        mEvictionPolicy->claimBlock(block);
+        mEvictionPolicy->claimBlock(offloadBlock);
         mTransferManager->offload(block, offloadBlock, mPools, 0, mode, directory);
         // swap linear block offsets (i.e. make block the offload block)
         block->swapMemoryPoolBlockOffset(offloadBlock);
