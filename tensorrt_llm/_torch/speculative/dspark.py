@@ -111,6 +111,8 @@ class DSparkSpecMetadata(SpecMetadata):
                 if rid not in current:
                     slot = worker._req_to_slot.pop(rid)
                     worker._ctx_len[slot] = 0
+                    worker._valid_len[slot] = 0
+                    worker._position_initialized[slot] = False
                     worker._kv_windows[slot].zero_()
                     worker._free_slots.append(slot)
             # Assign a persistent rolling-window slot to every real generation
@@ -225,6 +227,8 @@ class DSparkWorker(SpecWorkerBase):
         self._win_inited = False
         self._kv_windows: Optional[torch.Tensor] = None  # [max_batch, num_stages, win, hd]
         self._ctx_len: Optional[torch.Tensor] = None  # [max_batch] abs decode position
+        self._valid_len: Optional[torch.Tensor] = None  # [max_batch] written window entries
+        self._position_initialized: Optional[torch.Tensor] = None  # [max_batch] bool
         self._win = 0
 
         # Slot management. ``_req_to_slot`` (python dict) + ``_free_slots`` are the
@@ -313,6 +317,8 @@ class DSparkWorker(SpecWorkerBase):
             device="cuda",
         )
         self._ctx_len = torch.zeros(num_rows, dtype=torch.long, device="cuda")
+        self._valid_len = torch.zeros(num_rows, dtype=torch.long, device="cuda")
+        self._position_initialized = torch.zeros(num_rows, dtype=torch.bool, device="cuda")
         self._batch_to_slot = torch.zeros(max_batch, dtype=torch.long, device="cuda")
         self._free_slots = deque(range(max_batch))
         self._req_to_slot = {}
@@ -323,6 +329,7 @@ class DSparkWorker(SpecWorkerBase):
         self._g_nacc = torch.ones(max_batch, dtype=torch.long, device="cuda")
         self._g_bonus = torch.zeros(max_batch, dtype=torch.long, device="cuda")
         self._g_base = torch.zeros(max_batch, dtype=torch.long, device="cuda")
+        self._g_inpos = torch.zeros(max_batch, dtype=torch.long, device="cuda")
         # Same bucket policy as the engine's decode graphs ([1, 2, 4] + multiples
         # of 8, CudaGraphConfig._generate_cuda_graph_batch_sizes), so the draft
         # pads num_gens exactly like the target pads its captured batch sizes.
@@ -346,6 +353,8 @@ class DSparkWorker(SpecWorkerBase):
         if reset and req_id in self._req_to_slot:
             old = self._req_to_slot.pop(req_id)
             self._ctx_len[old] = 0
+            self._valid_len[old] = 0
+            self._position_initialized[old] = False
             self._kv_windows[old].zero_()
             self._free_slots.append(old)
         if req_id not in self._req_to_slot:
@@ -357,6 +366,8 @@ class DSparkWorker(SpecWorkerBase):
             slot = self._free_slots.popleft()
             self._req_to_slot[req_id] = slot
             self._ctx_len[slot] = 0
+            self._valid_len[slot] = 0
+            self._position_initialized[slot] = False
             self._kv_windows[slot].zero_()
         return self._req_to_slot[req_id]
 
@@ -380,13 +391,14 @@ class DSparkWorker(SpecWorkerBase):
         num_cached = attn_metadata.kv_cache_params.num_cached_tokens_per_seq
         win = self._win
 
-        slots, ends, rows = [], [], []
+        slots, ends, rows, chunk_lens = [], [], [], []
         max_keep = 0
         context_offset = 0
         for i in range(attn_metadata.num_contexts):
             chunk_len = int(attn_metadata._seq_lens[i])
             if chunk_len == 0:
                 continue
+            chunk_lens.append(chunk_len)
             # The chunk's first absolute position equals the tokens already in
             # the KV cache (previous chunks and/or reused blocks).
             first_position = int(num_cached[i])
@@ -413,7 +425,16 @@ class DSparkWorker(SpecWorkerBase):
             return
         slots_cuda = torch.tensor(slots, dtype=torch.long, device="cuda")
         self._ctx_len[slots_cuda] = torch.tensor(ends, dtype=torch.long, device="cuda")
-        if captured is None or max_keep == 0:
+        # Locally prefilled slots carry an absolute decode position from here on;
+        # the gen path must not bootstrap them from the target's position_ids.
+        self._position_initialized[slots_cuda] = True
+        if captured is None:
+            return
+        self._valid_len[slots_cuda] = torch.clamp(
+            self._valid_len[slots_cuda] + torch.tensor(chunk_lens, dtype=torch.long, device="cuda"),
+            max=win,
+        )
+        if max_keep == 0:
             return
 
         j = torch.arange(max_keep)
@@ -430,6 +451,22 @@ class DSparkWorker(SpecWorkerBase):
             captured[idx], pos, slots_cuda, valid, self._kv_windows
         )
 
+    def _advance_generation_state(
+        self,
+        slots: torch.Tensor,
+        num_accepted_tokens: torch.Tensor,
+        input_positions: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Bootstrap and advance per-slot decode state without host synchronization."""
+        old = torch.where(self._position_initialized[slots], self._ctx_len[slots], input_positions)
+        start_pos = old + num_accepted_tokens
+        self._ctx_len[slots] = start_pos
+        self._valid_len[slots] = torch.clamp(
+            self._valid_len[slots] + num_accepted_tokens, max=self._win
+        )
+        self._position_initialized[slots] = torch.ones_like(slots, dtype=torch.bool)
+        return old, start_pos
+
     def _draft_gen_block_batched(
         self,
         draft_model,
@@ -440,6 +477,7 @@ class DSparkWorker(SpecWorkerBase):
         num_contexts: int,
         batch_size: int,
         total_target_tokens: int,
+        position_ids: torch.Tensor,
         all_rank_num_tokens: Optional[List[int]] = None,
     ) -> torch.Tensor:
         """CUDA-graph-safe batched gen draft (all gen requests in one forward).
@@ -455,7 +493,6 @@ class DSparkWorker(SpecWorkerBase):
         """
         num_gens = batch_size - num_contexts
         K = self.max_draft_len
-        Kp1 = K + 1
         device = accepted_tokens.device
 
         if num_gens == 0:
@@ -476,19 +513,26 @@ class DSparkWorker(SpecWorkerBase):
             accepted_tokens[num_contexts:batch_size].gather(1, gidx.unsqueeze(1)).squeeze(1).long()
         )  # [G]
 
-        # Captured target hidden at the bonus position within each request's Kp1
-        # processed tokens.
+        # Bootstrap iterations can process one target token per request, while
+        # normal speculative verification processes K+1. Use the actual accepted
+        # row width to index both captured hidden states and position IDs.
+        target_width = accepted_tokens.shape[1]
         arange_g = torch.arange(num_gens, device=device)
-        base = gen_start + arange_g * Kp1  # [G]
+        base = gen_start + arange_g * target_width  # [G]
+        # A disaggregated generation worker never sees prompt prefill, so a new
+        # slot has no absolute decode position. Bootstrap it once from the first
+        # target input position (see _advance_generation_state); locally
+        # prefilled and existing slots keep their monotonically advanced position.
+        input_positions = position_ids.reshape(-1)[base].long()  # [G]
 
         if self._can_use_draft_graph(spec_metadata, all_rank_num_tokens):
             block_logits = self._run_draft_block_graphed(
-                draft_model, spec_metadata, slots, nacc, bonus, base, num_gens
+                draft_model, spec_metadata, slots, nacc, bonus, base, input_positions, num_gens
             )
             if block_logits is not None:
                 return block_logits
         return self._draft_block_core(
-            draft_model, captured, slots, nacc, bonus, base, all_rank_num_tokens
+            draft_model, captured, slots, nacc, bonus, base, input_positions, all_rank_num_tokens
         )
 
     def _draft_block_core(
@@ -499,14 +543,15 @@ class DSparkWorker(SpecWorkerBase):
         nacc: torch.Tensor,
         bonus: torch.Tensor,
         base: torch.Tensor,
+        input_positions: torch.Tensor,
         all_rank_num_tokens: Optional[List[int]] = None,
     ) -> torch.Tensor:
         """Window back-fill + one-shot block draft, on fixed-size [G] inputs.
 
         Pure tensor ops: correct eagerly and under CUDA graph capture (either the
         engine's gen-only decode graph, or the worker-owned draft graph, whose
-        capture passes the staging buffers as ``slots``/``nacc``/``bonus``/``base``
-        and the full-length capture buffer as ``captured``).
+        capture passes the staging buffers as ``slots``/``nacc``/``bonus``/``base``/
+        ``input_positions`` and the full-length capture buffer as ``captured``).
         """
         K = self.max_draft_len
         device = nacc.device
@@ -516,7 +561,9 @@ class DSparkWorker(SpecWorkerBase):
         # Fixed-size ([G, K]) masked back-fill of the intermediate accepted tokens
         # (everything but the bonus) into the rolling window — same frames as the
         # eager path (old+1 .. old+nacc-1), with j >= nacc-1 masked out.
-        old = self._ctx_len[slots]  # [G] pre-increment decode position
+        # ``old`` is bootstrapped from ``input_positions`` for slots that never
+        # saw a local prefill (disaggregated generation workers).
+        old, start_pos = self._advance_generation_state(slots, nacc, input_positions)
         j = torch.arange(K, device=device)  # [K]
         interim_valid = j.unsqueeze(0) < (nacc.unsqueeze(1) - 1)  # [G, K]
         interim_pos = old.unsqueeze(1) + 1 + j.unsqueeze(0)  # [G, K]
@@ -528,11 +575,6 @@ class DSparkWorker(SpecWorkerBase):
             interim_hidden, interim_pos, slots, interim_valid, self._kv_windows
         )
 
-        # Advance the decode position by the accepted count; start_pos (= post-
-        # increment ctx_len) matches the eager path's frame value.
-        start_pos = old + nacc  # [G]
-        self._ctx_len[slots] = start_pos
-
         # Surface the per-position corrected block logits ([num_gens, K, vocab])
         # and let SpecWorkerBase.sample_draft_tokens do the (greedy or rejection)
         # sampling + TP gather + draft_probs scatter, rather than argmaxing here.
@@ -542,6 +584,7 @@ class DSparkWorker(SpecWorkerBase):
             start_pos,
             kv_windows=self._kv_windows,
             slots=slots,
+            valid_len=self._valid_len[slots],
             temperature=0.0,
             confidence_threshold=0.0,
             return_logits=True,
@@ -571,6 +614,7 @@ class DSparkWorker(SpecWorkerBase):
         nacc: torch.Tensor,
         bonus: torch.Tensor,
         base: torch.Tensor,
+        input_positions: torch.Tensor,
         num_gens: int,
     ) -> Optional[torch.Tensor]:
         """Replay the block draft as its own CUDA graph (capture on first need).
@@ -593,10 +637,16 @@ class DSparkWorker(SpecWorkerBase):
         self._g_bonus[num_gens:bucket].fill_(0)
         self._g_base[:num_gens].copy_(base)
         self._g_base[num_gens:bucket].fill_(0)
-        # The core advances ctx_len for every row it draws, including the padded
-        # rows; pin the pad slot back to 0 so its RoPE position cannot creep past
-        # the frequency table over long-running serving.
+        self._g_inpos[:num_gens].copy_(input_positions)
+        self._g_inpos[num_gens:bucket].fill_(0)
+        # The core advances ctx_len/valid_len for every row it draws, including
+        # the padded rows; pin the pad slot back to 0 so its RoPE position cannot
+        # creep past the frequency table over long-running serving. It is marked
+        # position-initialized so the bootstrap never reads its (zero) input
+        # position either.
         self._ctx_len[self._pad_slot] = 0
+        self._valid_len[self._pad_slot] = 0
+        self._position_initialized[self._pad_slot] = True
 
         entry = self._draft_graphs.get(bucket)
         if entry is None:
@@ -611,6 +661,7 @@ class DSparkWorker(SpecWorkerBase):
                 self._g_nacc[:bucket],
                 self._g_bonus[:bucket],
                 self._g_base[:bucket],
+                self._g_inpos[:bucket],
             )
             if not self._draft_graph_warmed.get(bucket, False):
                 self._draft_graph_warmed[bucket] = True
@@ -684,6 +735,8 @@ class DSparkWorker(SpecWorkerBase):
         )
         if is_warmup:
             saved_ctx_len = self._ctx_len.clone()
+            saved_valid_len = self._valid_len.clone()
+            saved_position_initialized = self._position_initialized.clone()
             saved_windows = self._kv_windows.clone()
 
         # Assign / reset window slots for context (prefill) requests and seed each
@@ -737,6 +790,7 @@ class DSparkWorker(SpecWorkerBase):
                 num_contexts,
                 batch_size,
                 total_target_tokens,
+                position_ids,
                 all_rank_num_tokens=all_rank_draft_tokens,
             )
             if gen_logits is not None:
@@ -785,6 +839,8 @@ class DSparkWorker(SpecWorkerBase):
 
         if is_warmup:
             self._ctx_len.copy_(saved_ctx_len)
+            self._valid_len.copy_(saved_valid_len)
+            self._position_initialized.copy_(saved_position_initialized)
             self._kv_windows.copy_(saved_windows)
 
         return {
