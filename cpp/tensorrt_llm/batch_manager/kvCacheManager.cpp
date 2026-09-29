@@ -1295,6 +1295,7 @@ void WindowBlockManager::zeroBlockMemory(BlockPtr const& block)
     // block's CURRENT pool position.
     auto const slotIdx = static_cast<size_t>(block->getMemoryPoolBlockIndex());
     auto stream = mBufferManager.getStream().get();
+    mTransferManager->waitForTransfersBeforeBufferWrite(block);
     // Skip pools where pointer arithmetic wouldn't address the right region —
     // block-scale and indexer-K-cache pools have different element semantics
     // (FP4 packed as INT8, etc.). Zeroing the main KV pools is what breaks
@@ -1376,6 +1377,7 @@ void WindowBlockManager::zeroBlockMemory(BlockPtr const& block)
             }
         }
     }
+    mTransferManager->recordBufferWrite(block);
 }
 
 

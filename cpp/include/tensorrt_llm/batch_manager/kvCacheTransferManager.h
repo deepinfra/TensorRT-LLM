@@ -82,6 +82,12 @@ public:
     //! KVCacheManager::addSequenceBatch in every step.
     void syncWithBufferManager();
 
+    //! \brief Make the bufferManager stream wait for pending transfers of block before it writes to block.
+    void waitForTransfersBeforeBufferWrite(BlockPtr const& block);
+
+    //! \brief Record a bufferManager-stream write to block, so later transfers of block wait for it.
+    void recordBufferWrite(BlockPtr const& block);
+
     //! \brief Synchronize bufferManager stream with internal streams. This method ensures that prefill and decode
     //! kernels for next step will wait for offloading and onboarding work that has already been scheduled. This method
     //! must be called after the last call to KVCacheManager::addSequenceBatch in every step.

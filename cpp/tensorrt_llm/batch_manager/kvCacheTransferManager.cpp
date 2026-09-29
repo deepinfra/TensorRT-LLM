@@ -349,6 +349,11 @@ void KVCacheTransferManager::onboard(BlockPtr const& offloadedBlock, BlockPtr co
     auto const offloadedBlockIndex = getPendingTransferIndex(offloadedBlock);
     auto const blockIndex = getPendingTransferIndex(block);
 
+    // Wait for bufferManager-stream writes queued since the last sync, e.g. zeroBlockMemory() on block
+    tr::CudaEvent bufferWritesQueued;
+    mBufferManager.getStream().record(bufferWritesQueued);
+    mOnboardManager.getStream().wait(bufferWritesQueued);
+
     // Wait for any pending writes before reading from offloadedBlock
     auto offloadedBlockPendingWriteItr = mPendingWrites.find(offloadedBlockIndex);
     if (offloadedBlockPendingWriteItr != mPendingWrites.end())
@@ -906,6 +911,32 @@ void KVCacheTransferManager::loadFromFile(BlockPtr const& dstPrimaryBlock, SizeT
         auto ptr = computeBlockPointer(dstPrimaryBlock, pools, poolIdx);
         fileToGpuPosix(ptr, diskSlotFilename(directory, diskSlot, poolIdx));
     }
+}
+
+void KVCacheTransferManager::waitForTransfersBeforeBufferWrite(BlockPtr const& block)
+{
+    auto const blockIndex = getPendingTransferIndex(block);
+    // Wait for any pending reads before overwriting block
+    auto blockPendingReadItr = mPendingReads.find(blockIndex);
+    if (blockPendingReadItr != mPendingReads.end())
+    {
+        mBufferManager.getStream().wait(blockPendingReadItr->second);
+        mPendingReads.erase(blockPendingReadItr);
+    }
+    // Wait for any pending writes before overwriting block
+    auto blockPendingWriteItr = mPendingWrites.find(blockIndex);
+    if (blockPendingWriteItr != mPendingWrites.end())
+    {
+        mBufferManager.getStream().wait(blockPendingWriteItr->second);
+        mPendingWrites.erase(blockPendingWriteItr);
+    }
+}
+
+void KVCacheTransferManager::recordBufferWrite(BlockPtr const& block)
+{
+    auto const blockIndex = getPendingTransferIndex(block);
+    mPendingWrites[blockIndex] = tr::CudaEvent();
+    mBufferManager.getStream().record(mPendingWrites[blockIndex]);
 }
 
 void KVCacheTransferManager::syncWithBufferManager()
