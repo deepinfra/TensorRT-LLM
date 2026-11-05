@@ -3357,7 +3357,7 @@ class OpenAIServer(_VideoRoutesMixin):
                 pp_result.prompt_token_ids = response.prompt_token_ids
             if request.return_token_ids:
                 pp_result.prompt_token_ids = response.prompt_token_ids
-            raw_request.state.server_first_token_time = get_steady_clock_now_in_seconds()
+            raw_request.state.server_first_token_time = self._adjusted_steady_clock.now()
             await self._extract_metrics(response, raw_request)
 
             for choice in pp_result.choices:
